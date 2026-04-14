@@ -7,6 +7,9 @@ function extractMessageBody(payload) {
   if (payload?.message?.body && typeof payload.message.body === 'string') {
     return payload.message.body.trim();
   }
+  if (typeof payload?.message === 'string') {
+    return payload.message.trim();
+  }
   const bodyMessage = payload?.body?.message;
   if (typeof bodyMessage === 'string') {
     const parsed = safeJsonParse(bodyMessage);
@@ -49,7 +52,7 @@ function determineIsCa(state) {
 }
 
 function parseInboundPayload(raw) {
-  const body = raw?.body || {};
+  const body = (raw?.body && typeof raw.body === 'object') ? raw.body : (raw || {});
   const messageBody = extractMessageBody(raw);
   const tagList = parseTags(body.tags);
 
