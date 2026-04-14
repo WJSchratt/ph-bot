@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PH Insurance SMS Bot Dashboard</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+    header { background: #1e293b; padding: 16px 24px; border-bottom: 1px solid #334155; }
+    header h1 { margin: 0; font-size: 20px; }
+    main { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .controls { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
+    .controls input, .controls select, .controls button {
+      background: #1e293b; color: #e2e8f0; border: 1px solid #334155; padding: 8px 12px; border-radius: 6px; font-size: 14px;
+    }
+    .controls button { background: #2563eb; border-color: #2563eb; cursor: pointer; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
+    .card { background: #1e293b; padding: 16px; border-radius: 8px; border: 1px solid #334155; }
+    .card .label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }
+    .card .value { font-size: 28px; font-weight: 600; margin-top: 4px; }
+    .section { margin-bottom: 32px; }
+    .section h2 { font-size: 16px; margin: 0 0 12px; color: #cbd5e1; }
+    table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 8px; overflow: hidden; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #334155; font-size: 13px; }
+    th { background: #0f172a; color: #94a3b8; font-weight: 500; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; }
+    tr:last-child td { border-bottom: none; }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover { background: #273449; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid #334155; }
+    .tab { padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent; color: #94a3b8; }
+    .tab.active { color: #e2e8f0; border-bottom-color: #2563eb; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; text-transform: uppercase; }
+    .badge.success { background: #166534; color: #bbf7d0; }
+    .badge.warn { background: #854d0e; color: #fef3c7; }
+    .badge.danger { background: #991b1b; color: #fecaca; }
+    .badge.neutral { background: #334155; color: #cbd5e1; }
+    .messages-panel { background: #1e293b; padding: 16px; border-radius: 8px; max-height: 500px; overflow-y: auto; }
+    .msg { padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; max-width: 75%; font-size: 13px; }
+    .msg.inbound { background: #334155; margin-right: auto; }
+    .msg.outbound { background: #1d4ed8; color: white; margin-left: auto; }
+    .msg .meta { font-size: 10px; opacity: 0.7; margin-top: 4px; }
+    .close-btn { background: #334155; color: #e2e8f0; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header><h1>PH Insurance SMS Bot — Dashboard</h1></header>
+  <main id="root"></main>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function fmt(v, digits = 0) {
+      if (v === null || v === undefined || isNaN(v)) return '—';
+      return Number(v).toFixed(digits);
+    }
+    function pct(v) {
+      if (v === null || v === undefined || isNaN(v)) return '—';
+      return (Number(v) * 100).toFixed(1) + '%';
+    }
+
+    function App() {
+      const [tab, setTab] = useState('overview');
+      const [locationId, setLocationId] = useState('');
+      const [startDate, setStartDate] = useState('');
+      const [endDate, setEndDate] = useState('');
+      const [analytics, setAnalytics] = useState(null);
+      const [conversations, setConversations] = useState([]);
+      const [performance, setPerformance] = useState([]);
+      const [syncStatus, setSyncStatus] = useState(null);
+      const [selectedConv, setSelectedConv] = useState(null);
+
+      const queryString = () => {
+        const p = new URLSearchParams();
+        if (locationId) p.set('location_id', locationId);
+        if (startDate) p.set('start_date', startDate);
+        if (endDate) p.set('end_date', endDate);
+        return p.toString();
+      };
+
+      const load = async () => {
+        const qs = queryString();
+        const [a, c, p, s] = await Promise.all([
+          fetch(`/api/analytics?${qs}`).then(r => r.json()),
+          fetch(`/api/conversations?${qs}`).then(r => r.json()),
+          fetch(`/api/message-performance?${qs}`).then(r => r.json()),
+          fetch(`/api/sync-status`).then(r => r.json())
+        ]);
+        setAnalytics(a); setConversations(c.conversations || []); setPerformance(p.performance || []); setSyncStatus(s);
+      };
+
+      useEffect(() => { load(); }, []);
+
+      const openConv = async (contactId, locId) => {
+        const res = await fetch(`/api/conversations/${contactId}/${locId}`).then(r => r.json());
+        setSelectedConv(res);
+      };
+
+      const outcomeBadge = (outcome) => {
+        if (!outcome) return <span className="badge neutral">active</span>;
+        const map = {
+          appointment_booked: 'success',
+          fex_immediate: 'success',
+          mp_immediate: 'success',
+          human_handoff: 'warn',
+          dnc: 'danger'
+        };
+        return <span className={`badge ${map[outcome] || 'neutral'}`}>{outcome}</span>;
+      };
+
+      return (
+        <div>
+          <div className="controls">
+            <input placeholder="location_id (blank = all)" value={locationId} onChange={e => setLocationId(e.target.value)} />
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+            <button onClick={load}>Refresh</button>
+          </div>
+
+          <div className="tabs">
+            {['overview', 'conversations', 'performance', 'sync'].map(t => (
+              <div key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
+                {t.charAt(0).toUpperCase() + t.slice(1)}
+              </div>
+            ))}
+          </div>
+
+          {tab === 'overview' && analytics && (
+            <>
+              <div className="cards">
+                <div className="card"><div className="label">Total Conversations</div><div className="value">{analytics.summary.total_conversations}</div></div>
+                <div className="card"><div className="label">Appointments</div><div className="value">{analytics.summary.appointments_booked}</div></div>
+                <div className="card"><div className="label">Appointment Rate</div><div className="value">{pct(analytics.summary.appointment_rate)}</div></div>
+                <div className="card"><div className="label">Handoffs</div><div className="value">{analytics.summary.human_handoffs}</div></div>
+                <div className="card"><div className="label">DNC</div><div className="value">{analytics.summary.dnc_count}</div></div>
+                <div className="card"><div className="label">Opt-out Rate</div><div className="value">{pct(analytics.summary.opt_out_rate)}</div></div>
+                <div className="card"><div className="label">Avg Msgs / Conv</div><div className="value">{fmt(analytics.summary.avg_messages_per_conversation, 1)}</div></div>
+                <div className="card"><div className="label">Avg Reply Time (s)</div><div className="value">{fmt(analytics.summary.avg_response_time_seconds, 0)}</div></div>
+              </div>
+
+              {analytics.per_location && analytics.per_location.length > 0 && (
+                <div className="section">
+                  <h2>Per-Location Breakdown</h2>
+                  <table>
+                    <thead><tr><th>Location</th><th>Total</th><th>Appointments</th><th>DNC</th></tr></thead>
+                    <tbody>
+                      {analytics.per_location.map(l => (
+                        <tr key={l.location_id}><td>{l.location_id}</td><td>{l.total}</td><td>{l.appointments}</td><td>{l.dnc}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          {tab === 'conversations' && (
+            <>
+              <table>
+                <thead><tr><th>Name</th><th>Phone</th><th>Location</th><th>Product</th><th>Stage</th><th>Outcome</th><th>Msgs</th><th>Last Msg</th></tr></thead>
+                <tbody>
+                  {conversations.map(c => (
+                    <tr key={c.id} className="clickable" onClick={() => openConv(c.contact_id, c.location_id)}>
+                      <td>{c.first_name} {c.last_name}</td>
+                      <td>{c.phone}</td>
+                      <td>{c.location_id}</td>
+                      <td>{c.product_type}</td>
+                      <td>{c.contact_stage}</td>
+                      <td>{outcomeBadge(c.terminal_outcome)}</td>
+                      <td>{c.message_count}</td>
+                      <td>{c.last_message_at ? new Date(c.last_message_at).toLocaleString() : ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {selectedConv && (
+                <div className="section" style={{marginTop: 24}}>
+                  <h2>
+                    Conversation: {selectedConv.conversation.first_name} {selectedConv.conversation.last_name}
+                    <button className="close-btn" style={{marginLeft: 12}} onClick={() => setSelectedConv(null)}>Close</button>
+                  </h2>
+                  <div className="messages-panel">
+                    {selectedConv.messages.map(m => (
+                      <div key={m.id} className={`msg ${m.direction}`}>
+                        {m.content}
+                        <div className="meta">{m.message_type || ''} · {new Date(m.created_at).toLocaleString()}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {tab === 'performance' && (
+            <table>
+              <thead><tr><th>Message Type</th><th>Total Sent</th><th>Replies</th><th>Reply Rate</th><th>Avg Reply Time (s)</th></tr></thead>
+              <tbody>
+                {performance.map(p => (
+                  <tr key={p.message_type}>
+                    <td>{p.message_type}</td>
+                    <td>{p.total_sent}</td>
+                    <td>{p.replies}</td>
+                    <td>{pct(p.reply_rate)}</td>
+                    <td>{fmt(p.avg_reply_time_seconds, 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {tab === 'sync' && syncStatus && (
+            <div className="cards">
+              <div className="card"><div className="label">Pending Syncs</div><div className="value">{syncStatus.pending_syncs}</div></div>
+              <div className="card"><div className="label">Last Sync</div><div className="value" style={{fontSize: 16}}>{syncStatus.last_synced_at ? new Date(syncStatus.last_synced_at).toLocaleString() : 'never'}</div></div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
