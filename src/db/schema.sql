@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   terminal_outcome VARCHAR(50),
   is_active BOOLEAN DEFAULT TRUE,
 
+  is_sandbox BOOLEAN DEFAULT FALSE,
   fields_dirty BOOLEAN DEFAULT FALSE,
   last_synced_at TIMESTAMPTZ,
   last_message_at TIMESTAMPTZ,

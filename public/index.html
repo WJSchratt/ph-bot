@@ -44,6 +44,28 @@
     .msg.outbound { background: #1d4ed8; color: white; margin-left: auto; }
     .msg .meta { font-size: 10px; opacity: 0.7; margin-top: 4px; }
     .close-btn { background: #334155; color: #e2e8f0; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+    .sandbox-layout { display: flex; gap: 20px; height: calc(100vh - 200px); min-height: 500px; }
+    .sandbox-vars { width: 30%; min-width: 260px; background: #1e293b; border-radius: 8px; border: 1px solid #334155; padding: 16px; overflow-y: auto; }
+    .sandbox-vars h3 { margin: 0 0 12px; font-size: 14px; color: #cbd5e1; }
+    .sandbox-vars label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px; margin-top: 10px; }
+    .sandbox-vars input, .sandbox-vars select {
+      width: 100%; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; padding: 6px 10px; border-radius: 4px; font-size: 13px;
+    }
+    .sandbox-vars button { margin-top: 16px; width: 100%; background: #334155; color: #e2e8f0; border: 1px solid #475569; padding: 8px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+    .sandbox-vars button:hover { background: #475569; }
+    .sandbox-chat { flex: 1; display: flex; flex-direction: column; background: #1e293b; border-radius: 8px; border: 1px solid #334155; overflow: hidden; }
+    .sandbox-chat-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #334155; }
+    .sandbox-chat-header h3 { margin: 0; font-size: 14px; color: #cbd5e1; }
+    .sandbox-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+    .sb-msg { padding: 10px 12px; border-radius: 8px; max-width: 75%; font-size: 13px; word-wrap: break-word; }
+    .sb-msg.user { background: #1d4ed8; color: white; margin-left: auto; }
+    .sb-msg.bot { background: #334155; margin-right: auto; }
+    .sb-msg .sb-meta { font-size: 10px; color: #94a3b8; margin-top: 4px; }
+    .sb-typing { padding: 10px 12px; font-size: 13px; color: #94a3b8; font-style: italic; }
+    .sandbox-input-row { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #334155; }
+    .sandbox-input-row input { flex: 1; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+    .sandbox-input-row button { background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .sandbox-input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -72,6 +94,13 @@
       const [performance, setPerformance] = useState([]);
       const [syncStatus, setSyncStatus] = useState(null);
       const [selectedConv, setSelectedConv] = useState(null);
+
+      // Sandbox state
+      const sbDefaults = { first_name: 'Walt', state: 'FL', offer: 'Final Expense', tags: 'fex-lead', bot_name: 'Sarah', agent_name: 'Jeremiah', contact_stage: 'lead', existing_age: '', existing_smoker: '', existing_health: '' };
+      const [sbVars, setSbVars] = useState({ ...sbDefaults });
+      const [sbMessages, setSbMessages] = useState([]);
+      const [sbInput, setSbInput] = useState('');
+      const [sbLoading, setSbLoading] = useState(false);
 
       const queryString = () => {
         const p = new URLSearchParams();
@@ -111,6 +140,44 @@
         return <span className={`badge ${map[outcome] || 'neutral'}`}>{outcome}</span>;
       };
 
+      const sbSend = async () => {
+        const text = sbInput.trim();
+        if (!text || sbLoading) return;
+        setSbInput('');
+        setSbMessages(prev => [...prev, { role: 'user', text }]);
+        setSbLoading(true);
+        try {
+          const resp = await fetch('/sandbox/message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ variables: sbVars, message: text })
+          });
+          const data = await resp.json();
+          if (data.error) throw new Error(data.error);
+          const botMsgs = (data.messages || []).map(m => ({
+            role: 'bot', text: m,
+            collected_data: data.collected_data,
+            message_type: data.message_type,
+            terminal_outcome: data.terminal_outcome,
+            elapsed_ms: data.elapsed_ms
+          }));
+          setSbMessages(prev => [...prev, ...botMsgs]);
+        } catch (err) {
+          setSbMessages(prev => [...prev, { role: 'bot', text: '[Error: ' + err.message + ']' }]);
+        }
+        setSbLoading(false);
+      };
+
+      const sbReset = async () => {
+        await fetch('/sandbox/reset', { method: 'POST' });
+        setSbMessages([]);
+      };
+
+      const sbMessagesEndRef = React.useRef(null);
+      React.useEffect(() => {
+        if (sbMessagesEndRef.current) sbMessagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      }, [sbMessages, sbLoading]);
+
       return (
         <div>
           <div className="controls">
@@ -121,7 +188,7 @@
           </div>
 
           <div className="tabs">
-            {['overview', 'conversations', 'performance', 'sync'].map(t => (
+            {['overview', 'conversations', 'performance', 'sync', 'sandbox'].map(t => (
               <div key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
                 {t.charAt(0).toUpperCase() + t.slice(1)}
               </div>
@@ -216,6 +283,78 @@
             <div className="cards">
               <div className="card"><div className="label">Pending Syncs</div><div className="value">{syncStatus.pending_syncs}</div></div>
               <div className="card"><div className="label">Last Sync</div><div className="value" style={{fontSize: 16}}>{syncStatus.last_synced_at ? new Date(syncStatus.last_synced_at).toLocaleString() : 'never'}</div></div>
+            </div>
+          )}
+
+          {tab === 'sandbox' && (
+            <div className="sandbox-layout">
+              <div className="sandbox-vars">
+                <h3>Test Variables</h3>
+                <label>First Name</label>
+                <input value={sbVars.first_name} onChange={e => setSbVars(v => ({...v, first_name: e.target.value}))} />
+                <label>State</label>
+                <input value={sbVars.state} onChange={e => setSbVars(v => ({...v, state: e.target.value}))} />
+                <label>Offer</label>
+                <select value={sbVars.offer} onChange={e => setSbVars(v => ({...v, offer: e.target.value}))}>
+                  <option>Final Expense</option>
+                  <option>Mortgage Protection</option>
+                  <option>Other</option>
+                </select>
+                <label>Tags (comma-separated)</label>
+                <input value={sbVars.tags} onChange={e => setSbVars(v => ({...v, tags: e.target.value}))} />
+                <label>Bot Name</label>
+                <input value={sbVars.bot_name} onChange={e => setSbVars(v => ({...v, bot_name: e.target.value}))} />
+                <label>Agent Name</label>
+                <input value={sbVars.agent_name} onChange={e => setSbVars(v => ({...v, agent_name: e.target.value}))} />
+                <label>Contact Stage</label>
+                <select value={sbVars.contact_stage} onChange={e => setSbVars(v => ({...v, contact_stage: e.target.value}))}>
+                  <option value="lead">lead</option>
+                  <option value="client">client</option>
+                  <option value="application">application</option>
+                </select>
+                <label>Existing Age (optional)</label>
+                <input value={sbVars.existing_age} onChange={e => setSbVars(v => ({...v, existing_age: e.target.value}))} />
+                <label>Existing Smoker (optional)</label>
+                <input value={sbVars.existing_smoker} onChange={e => setSbVars(v => ({...v, existing_smoker: e.target.value}))} />
+                <label>Existing Health (optional)</label>
+                <input value={sbVars.existing_health} onChange={e => setSbVars(v => ({...v, existing_health: e.target.value}))} />
+                <button onClick={() => setSbVars({...sbDefaults})}>Reset Variables to Defaults</button>
+              </div>
+              <div className="sandbox-chat">
+                <div className="sandbox-chat-header">
+                  <h3>Sandbox Chat</h3>
+                  <button className="close-btn" onClick={sbReset}>Clear Conversation</button>
+                </div>
+                <div className="sandbox-messages">
+                  {sbMessages.map((m, i) => (
+                    <div key={i} className={`sb-msg ${m.role}`}>
+                      {m.text}
+                      {m.role === 'bot' && (
+                        <div className="sb-meta">
+                          {m.message_type && <span>{m.message_type}</span>}
+                          {m.terminal_outcome && <span> · outcome: {m.terminal_outcome}</span>}
+                          {m.collected_data && Object.keys(m.collected_data).filter(k => m.collected_data[k]).length > 0 && (
+                            <span> · collected: {JSON.stringify(Object.fromEntries(Object.entries(m.collected_data).filter(([,v]) => v)))}</span>
+                          )}
+                          {m.elapsed_ms && <span> · {m.elapsed_ms}ms</span>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {sbLoading && <div className="sb-typing">...</div>}
+                  <div ref={sbMessagesEndRef} />
+                </div>
+                <div className="sandbox-input-row">
+                  <input
+                    value={sbInput}
+                    onChange={e => setSbInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') sbSend(); }}
+                    placeholder="Type a message..."
+                    disabled={sbLoading}
+                  />
+                  <button onClick={sbSend} disabled={sbLoading || !sbInput.trim()}>Send</button>
+                </div>
+              </div>
             </div>
           )}
         </div>

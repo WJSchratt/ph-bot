@@ -103,6 +103,7 @@ router.get('/conversations', async (req, res) => {
     const { location_id, status, outcome, page = 1, limit = 50 } = req.query;
     const params = [];
     const filters = [];
+    filters.push('is_sandbox = FALSE');
     if (location_id) { params.push(location_id); filters.push(`location_id = $${params.length}`); }
     if (status === 'active') { filters.push('is_active = TRUE'); }
     else if (status === 'completed') { filters.push('is_active = FALSE'); }

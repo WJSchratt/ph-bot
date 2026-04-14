@@ -97,4 +97,4 @@ function parseInboundPayload(raw) {
   };
 }
 
-module.exports = { parseInboundPayload, parseTags, safeJsonParse };
+module.exports = { parseInboundPayload, parseTags, safeJsonParse, determineContactStage, determineProductType, determineIsCa };

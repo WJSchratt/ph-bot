@@ -21,7 +21,7 @@ const COLLECTED_FIELD_MAP = {
   call_summary: 'call_summary'
 };
 
-async function upsertConversation(parsed) {
+async function upsertConversation(parsed, { is_sandbox = false } = {}) {
   const res = await db.query(
     `INSERT INTO conversations (
       contact_id, location_id, phone, first_name, last_name, state, product_type, contact_stage, is_ca,
@@ -30,7 +30,7 @@ async function upsertConversation(parsed) {
       bot_name, agent_name, agent_phone, agent_business_card_url,
       calendar_link_fx, calendar_link_mp, loom_video_fx, loom_video_mp, meeting_type,
       ghl_token, ghl_message_history, offer, offer_short, language, marketplace_type, consent_status,
-      last_message_at
+      is_sandbox, last_message_at
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,
       $10,$11,$12,$13,$14,
@@ -38,7 +38,7 @@ async function upsertConversation(parsed) {
       $17,$18,$19,$20,
       $21,$22,$23,$24,$25,
       $26,$27,$28,$29,$30,$31,$32,
-      NOW()
+      $33, NOW()
     )
     ON CONFLICT (contact_id, location_id) DO UPDATE SET
       phone = EXCLUDED.phone,
@@ -71,6 +71,7 @@ async function upsertConversation(parsed) {
       language = EXCLUDED.language,
       marketplace_type = EXCLUDED.marketplace_type,
       consent_status = EXCLUDED.consent_status,
+      is_sandbox = EXCLUDED.is_sandbox,
       last_message_at = NOW(),
       updated_at = NOW()
     RETURNING *`,
@@ -80,7 +81,8 @@ async function upsertConversation(parsed) {
       parsed.existing_mortgage_balance, parsed.existing_coverage_subject,
       parsed.bot_name, parsed.agent_name, parsed.agent_phone, parsed.agent_business_card_url,
       parsed.calendar_link_fx, parsed.calendar_link_mp, parsed.loom_video_fx, parsed.loom_video_mp, parsed.meeting_type,
-      parsed.ghl_token, parsed.ghl_message_history, parsed.offer, parsed.offer_short, parsed.language, parsed.marketplace_type, parsed.consent_status
+      parsed.ghl_token, parsed.ghl_message_history, parsed.offer, parsed.offer_short, parsed.language, parsed.marketplace_type, parsed.consent_status,
+      is_sandbox
     ]
   );
   return res.rows[0];
@@ -159,6 +161,13 @@ async function reactivateConversation(conversationId) {
   );
 }
 
+async function deleteSandboxConversation() {
+  const res = await db.query(
+    `DELETE FROM conversations WHERE contact_id = 'sandbox_user' AND location_id = 'sandbox_location' RETURNING id`
+  );
+  return res.rowCount > 0;
+}
+
 module.exports = {
   upsertConversation,
   appendMessageHistory,
@@ -166,5 +175,6 @@ module.exports = {
   markReplyToPreviousOutbound,
   applyCollectedData,
   setTerminalOutcome,
-  reactivateConversation
+  reactivateConversation,
+  deleteSandboxConversation
 };
