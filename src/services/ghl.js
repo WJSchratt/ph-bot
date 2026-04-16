@@ -54,44 +54,150 @@ async function sendMessagesSequentially(token, contactId, messages, contact_id_f
   return results;
 }
 
+const SENTIMENT_OPTIONS = new Set(['positive', 'neutral', 'skeptical', 'hostile']);
+const OBJECTION_OPTIONS = new Set([
+  'not interested', 'too expensive', 'already covered',
+  'need to think', 'talk to spouse', 'bad timing', 'other'
+]);
+const DEACTIVATING_OUTCOMES = new Set(['dnc', 'opted_out', 'opt_out', 'stop_requested']);
+
+const TERMINAL_TO_APPT_OUTCOME = {
+  appointment_booked: 'set',
+  dnc: 'DNC',
+  opted_out: 'DNC',
+  opt_out: 'DNC',
+  stop_requested: 'DNC',
+  human_handoff: 'callback',
+  handoff_requested: 'callback',
+  fex_immediate: 'callback',
+  mp_immediate: 'callback'
+};
+
+function toBooleanString(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  const s = String(value).toLowerCase().trim();
+  if (['true', 'yes', 'y', '1'].includes(s)) return 'true';
+  if (['false', 'no', 'n', '0'].includes(s)) return 'false';
+  return null;
+}
+
+function normalizeSmoker(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const s = String(value).toLowerCase().trim();
+  if (['no', 'n', 'false', 'non-smoker', 'nonsmoker', 'non smoker', 'never'].includes(s)) return 'no';
+  if (['yes', 'y', 'true', 'smoker', 'occasionally', 'socially'].includes(s)) return 'yes';
+  return null;
+}
+
+function normalizeSentiment(value) {
+  if (!value) return null;
+  const s = String(value).toLowerCase().trim();
+  return SENTIMENT_OPTIONS.has(s) ? s : null;
+}
+
+function normalizeObjection(value) {
+  if (!value) return null;
+  const s = String(value).toLowerCase().trim();
+  if (OBJECTION_OPTIONS.has(s)) return s;
+  if (s.includes('interest')) return 'not interested';
+  if (s.includes('expensive') || s.includes('price') || s.includes('cost')) return 'too expensive';
+  if (s.includes('covered') || s.includes('already have')) return 'already covered';
+  if (s.includes('think')) return 'need to think';
+  if (s.includes('spouse') || s.includes('partner') || s.includes('wife') || s.includes('husband')) return 'talk to spouse';
+  if (s.includes('timing') || s.includes('busy')) return 'bad timing';
+  return 'other';
+}
+
+function normalizeLanguage(value) {
+  if (!value) return null;
+  const s = String(value).toLowerCase().trim();
+  if (['english', 'en', 'eng'].includes(s)) return 'English';
+  if (['spanish', 'es', 'esp', 'español', 'espanol'].includes(s)) return 'Spanish';
+  return null;
+}
+
 function buildCustomFieldsFromConversation(conv) {
   const fields = [];
   const push = (key, value) => {
     if (value === null || value === undefined) return;
-    const str = typeof value === 'boolean' ? String(value) : String(value).trim();
+    const str = typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value).trim();
     if (str === '') return;
-    fields.push({ key, value: str });
+    fields.push({ key, field_value: str });
   };
-  push('age_range', conv.collected_age);
-  push('tobacco_use', conv.collected_smoker);
-  push('health_notes', conv.collected_health);
-  push('coverage_subject', conv.collected_coverage_for);
-  push('spouse_name', conv.collected_spouse_name);
-  push('health_flag', conv.health_flag);
-  push('ai_voice_consent', conv.ai_voice_consent);
-  push('call_sentiment', conv.call_sentiment);
-  push('objection_type', conv.objection_type);
-  push('call_summary', conv.call_summary);
-  push('appointment_time', conv.collected_appointment_time);
-  push('decision_maker_confirmed', conv.decision_maker_confirmed);
-  push('conversation_language', conv.conversation_language);
-  push('motivation_level_1', conv.motivation_level_1);
+
+  // TEXT
+  push('contact.age_range', conv.collected_age);
+  push('contact.health_notes', conv.collected_health);
+  push('contact.coverage_subject', conv.collected_coverage_for);
+  push('contact.mortgage_balance', conv.collected_coverage_amount);
+  push('contact.spouse_name', conv.collected_spouse_name);
+  push('contact.appointment_time', conv.collected_appointment_time);
+  push('contact.call_summary', conv.call_summary);
+  push('contact.motivation_level_1', conv.motivation_level_1);
+
+  // SINGLE_OPTIONS — yes/no
+  const smoker = normalizeSmoker(conv.collected_smoker);
+  if (smoker) push('contact.tobacco_use', smoker);
+
+  // SINGLE_OPTIONS — true/false
+  const healthFlag = toBooleanString(conv.health_flag);
+  if (healthFlag !== null) push('contact.health_flag', healthFlag);
+  const aiConsent = toBooleanString(conv.ai_voice_consent);
+  if (aiConsent !== null) push('contact.ai_voice_consent', aiConsent);
+  const dmConfirmed = toBooleanString(conv.decision_maker_confirmed);
+  if (dmConfirmed !== null) push('contact.decision_maker_confirmed', dmConfirmed);
+
+  // SINGLE_OPTIONS — picklist values
+  const sentiment = normalizeSentiment(conv.call_sentiment);
+  if (sentiment) push('contact.call_sentiment', sentiment);
+  const objection = normalizeObjection(conv.objection_type);
+  if (objection) push('contact.objection_type', objection);
+
+  // MULTIPLE_OPTIONS
+  const lang = normalizeLanguage(conv.conversation_language);
+  if (lang) push('contact.language', lang);
+
+  // Derived: dnc_requested from terminal_outcome
+  if (DEACTIVATING_OUTCOMES.has(conv.terminal_outcome)) {
+    push('contact.dnc_requested', 'true');
+  }
+
+  // Derived: appointment_outcome from terminal_outcome
+  const apptOutcome = conv.terminal_outcome ? TERMINAL_TO_APPT_OUTCOME[conv.terminal_outcome] : null;
+  if (apptOutcome) push('contact.appointment_outcome', apptOutcome);
+
   return fields;
 }
 
-async function updateContactFields(token, contactId, conv) {
+async function updateContactFields(token, contactId, conv, contactIdForLog) {
   const customFields = buildCustomFieldsFromConversation(conv);
-  if (!customFields.length) return { ok: true, skipped: true };
+  const cid = contactIdForLog || contactId;
+  if (!customFields.length) {
+    logger.log('field_sync', 'info', cid, 'No fields to sync (all empty)', {});
+    return { ok: true, skipped: true, fields_count: 0 };
+  }
+
+  logger.log('field_sync', 'info', cid, 'Sending fields to GHL', { fields: customFields });
+
   try {
     const res = await axios.put(
       `${GHL_BASE}/contacts/${contactId}`,
       { customFields },
       { headers: authHeaders(token), timeout: 15000 }
     );
-    return { ok: true, status: res.status };
+    logger.log('field_sync', 'info', cid, 'Contact fields synced to GHL', {
+      fields_count: customFields.length,
+      status: res.status
+    });
+    return { ok: true, status: res.status, fields_count: customFields.length, fields: customFields };
   } catch (err) {
-    console.error('[ghl] updateContactFields failed', err.response?.status, err.response?.data || err.message);
-    return { ok: false, error: err.response?.data || err.message };
+    logger.log('field_sync', 'error', cid, 'Field sync failed', {
+      status: err.response?.status,
+      error: err.response?.data || err.message,
+      fields_count: customFields.length
+    });
+    return { ok: false, error: err.response?.data || err.message, status: err.response?.status };
   }
 }
 
@@ -118,6 +224,7 @@ async function setContactDnd(token, contactId) {
 module.exports = {
   sendMessagesSequentially,
   updateContactFields,
+  buildCustomFieldsFromConversation,
   setContactDnd,
   calculateSegments,
   sleep

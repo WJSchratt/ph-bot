@@ -228,6 +228,41 @@ async function saveAppointmentId(conversationId, appointmentId) {
   );
 }
 
+async function markSynced(conversationId) {
+  await db.query(
+    `UPDATE conversations SET fields_dirty = FALSE, last_synced_at = NOW() WHERE id = $1`,
+    [conversationId]
+  );
+}
+
+async function getDirtyConversations(hoursThreshold = 72) {
+  const hours = Number.isFinite(Number(hoursThreshold)) ? Number(hoursThreshold) : 72;
+  const res = await db.query(
+    `SELECT * FROM conversations
+     WHERE fields_dirty = TRUE
+       AND (last_synced_at IS NULL OR last_synced_at < NOW() - ($1 || ' hours')::interval)
+       AND ghl_token IS NOT NULL AND ghl_token <> ''
+       AND is_sandbox = FALSE
+     ORDER BY last_synced_at NULLS FIRST, updated_at ASC
+     LIMIT 500`,
+    [String(hours)]
+  );
+  return res.rows;
+}
+
+async function getConversationById(conversationId) {
+  const res = await db.query(`SELECT * FROM conversations WHERE id = $1`, [conversationId]);
+  return res.rows[0] || null;
+}
+
+async function getByContactAndLocation(contactId, locationId) {
+  const res = await db.query(
+    `SELECT * FROM conversations WHERE contact_id = $1 AND location_id = $2`,
+    [contactId, locationId]
+  );
+  return res.rows[0] || null;
+}
+
 async function saveLastOutboundMessageType(conversationId, messageType) {
   if (!messageType) return;
   await db.query(
@@ -259,6 +294,10 @@ module.exports = {
   saveCachedSlots,
   saveAppointmentId,
   saveLastOutboundMessageType,
+  markSynced,
+  getDirtyConversations,
+  getConversationById,
+  getByContactAndLocation,
   DEACTIVATING_OUTCOMES,
   shouldDeactivateForOutcome
 };

@@ -14,7 +14,11 @@ const reviewQueueRouter = require('./routes/reviewQueue');
 const subaccountsRouter = require('./routes/subaccounts');
 const settingsRouter = require('./routes/settings');
 const analyzerRouter = require('./routes/analyzer');
+const testSyncRouter = require('./routes/testSync');
 const cronRoutes = require('./routes/cron');
+const conversationStore = require('./services/conversationStore');
+const ghl = require('./services/ghl');
+const logger = require('./services/logger');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -33,6 +37,7 @@ app.use('/api', reviewQueueRouter);
 app.use('/api', subaccountsRouter);
 app.use('/api', settingsRouter);
 app.use('/api/analyzer', analyzerRouter);
+app.use('/api', testSyncRouter);
 app.use('/sandbox', sandboxRouter);
 app.use('/cron', cronRoutes.router);
 
@@ -47,3 +52,30 @@ const port = parseInt(process.env.PORT, 10) || 3000;
 app.listen(port, () => {
   console.log(`[server] listening on :${port}`);
 });
+
+// Background GHL field sync — catches stale dirty rows that never hit a terminal outcome.
+// Runs hourly, pulls up to 100 conversations dirty for >72h, paces 200ms between PUTs.
+const FIELD_SYNC_INTERVAL_MS = 60 * 60 * 1000;
+const FIELD_SYNC_BATCH_LIMIT = 100;
+const FIELD_SYNC_STALE_HOURS = 72;
+const FIELD_SYNC_PER_CALL_DELAY_MS = 200;
+
+setInterval(async () => {
+  try {
+    const dirty = await conversationStore.getDirtyConversations(FIELD_SYNC_STALE_HOURS);
+    const batch = dirty.slice(0, FIELD_SYNC_BATCH_LIMIT);
+    if (!batch.length) return;
+    for (const conv of batch) {
+      try {
+        const res = await ghl.updateContactFields(conv.ghl_token, conv.contact_id, conv, conv.contact_id);
+        if (res.ok) await conversationStore.markSynced(conv.id);
+      } catch (err) {
+        logger.log('field_sync', 'error', conv.contact_id, 'Background sync threw', { error: err.message });
+      }
+      await new Promise((r) => setTimeout(r, FIELD_SYNC_PER_CALL_DELAY_MS));
+    }
+    logger.log('field_sync', 'info', null, `Background sync batch complete: ${batch.length} contacts`, { batch_size: batch.length });
+  } catch (err) {
+    logger.log('field_sync', 'error', null, 'Background sync job failed', { error: err.message, stack: err.stack });
+  }
+}, FIELD_SYNC_INTERVAL_MS);

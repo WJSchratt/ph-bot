@@ -116,6 +116,18 @@ function extractAssignedUserName(slotInfo, conv) {
   return conv.agent_name || 'Agent';
 }
 
+async function syncContactFieldsNow(conv, ghlToken, contactId) {
+  if (!ghlToken || !conv) return;
+  try {
+    const fresh = await store.getConversationById(conv.id);
+    if (!fresh) return;
+    const res = await ghl.updateContactFields(ghlToken, fresh.contact_id, fresh, contactId);
+    if (res.ok) await store.markSynced(conv.id);
+  } catch (err) {
+    logger.log('field_sync', 'error', contactId, 'Immediate field sync threw', { error: err.message, stack: err.stack });
+  }
+}
+
 router.post('/inbound', async (req, res) => {
   const startedAt = Date.now();
   let contactId = null;
@@ -269,6 +281,7 @@ router.post('/inbound', async (req, res) => {
       }
       await store.clearAppointmentId(conv.id);
       await store.clearTerminalOutcome(conv.id);
+      await syncContactFieldsNow(conv, parsed.ghl_token, contactId);
     }
 
     // === Terminal outcome handling ===
@@ -348,6 +361,9 @@ router.post('/inbound', async (req, res) => {
         await firePostCallRouter(mergedConv, newOutcome);
         logger.log('webhook_fire', 'info', contactId, 'Post-call router fired', { outcome: newOutcome, url: process.env.GHL_POST_CALL_ROUTER_URL });
       }
+
+      // Immediate custom-field sync to GHL (covers booked, reschedule, handoff, dnc, fex/mp_immediate, etc.)
+      await syncContactFieldsNow(conv, parsed.ghl_token, contactId);
     }
 
     // Post-booking conversational / question turn (no terminal outcome, not a cancel)
