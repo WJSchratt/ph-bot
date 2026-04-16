@@ -98,6 +98,27 @@ async function getFreeSlots(ghlToken, calendarId, startDate, endDate, timezone, 
   }
 }
 
+async function cancelAppointment(ghlToken, appointmentId, contactIdForLog) {
+  try {
+    const res = await axios.delete(`${GHL_BASE}/calendars/events/appointments/${appointmentId}`, {
+      headers: authHeaders(ghlToken),
+      timeout: 15000
+    });
+    logger.log('calendar', 'info', contactIdForLog || null, 'Appointment cancelled', {
+      appointment_id: appointmentId,
+      status: res.status
+    });
+    return { ok: true, status: res.status };
+  } catch (err) {
+    logger.log('calendar', 'error', contactIdForLog || null, 'cancelAppointment failed', {
+      appointment_id: appointmentId,
+      status: err.response?.status,
+      error: err.response?.data || err.message
+    });
+    return { ok: false, error: err.response?.data || err.message };
+  }
+}
+
 async function bookAppointment(ghlToken, { calendarId, locationId, contactId, startTime, endTime, title, assignedUserId }, contactIdForLog) {
   const body = {
     calendarId,
@@ -289,6 +310,7 @@ module.exports = {
   findCalendarByProduct,
   getFreeSlots,
   bookAppointment,
+  cancelAppointment,
   timezoneForState,
   formatSlotsForPrompt,
   formatSlotLabel,

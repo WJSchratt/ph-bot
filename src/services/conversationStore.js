@@ -158,10 +158,36 @@ async function applyCollectedData(conversationId, collected) {
   );
 }
 
+const DEACTIVATING_OUTCOMES = new Set([
+  'dnc',
+  'opted_out',
+  'opt_out',
+  'stop_requested'
+]);
+
+function shouldDeactivateForOutcome(outcome) {
+  return DEACTIVATING_OUTCOMES.has(String(outcome || '').toLowerCase());
+}
+
 async function setTerminalOutcome(conversationId, outcome) {
+  const deactivate = shouldDeactivateForOutcome(outcome);
   await db.query(
-    `UPDATE conversations SET terminal_outcome = $1, is_active = FALSE, updated_at = NOW() WHERE id = $2`,
-    [outcome, conversationId]
+    `UPDATE conversations SET terminal_outcome = $1, is_active = $2, updated_at = NOW() WHERE id = $3`,
+    [outcome, !deactivate, conversationId]
+  );
+}
+
+async function clearTerminalOutcome(conversationId) {
+  await db.query(
+    `UPDATE conversations SET terminal_outcome = NULL, is_active = TRUE, updated_at = NOW() WHERE id = $1`,
+    [conversationId]
+  );
+}
+
+async function clearAppointmentId(conversationId) {
+  await db.query(
+    `UPDATE conversations SET appointment_id = NULL, updated_at = NOW() WHERE id = $1`,
+    [conversationId]
   );
 }
 
@@ -224,11 +250,15 @@ module.exports = {
   markReplyToPreviousOutbound,
   applyCollectedData,
   setTerminalOutcome,
+  clearTerminalOutcome,
+  clearAppointmentId,
   reactivateConversation,
   deleteSandboxConversation,
   updateTokenCounts,
   saveCalendarInfo,
   saveCachedSlots,
   saveAppointmentId,
-  saveLastOutboundMessageType
+  saveLastOutboundMessageType,
+  DEACTIVATING_OUTCOMES,
+  shouldDeactivateForOutcome
 };

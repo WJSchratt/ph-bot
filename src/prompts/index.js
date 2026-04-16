@@ -31,7 +31,7 @@ You must respond with a JSON object and NOTHING else. No markdown, no backticks,
     "call_summary": "value or null"
   },
   "terminal_outcome": null or "appointment_booked" or "fex_immediate" or "mp_immediate" or "human_handoff" or "dnc",
-  "message_type": "greeting|qualification|objection_handling|scheduling|confirmation|dnc|handoff|general"
+  "message_type": "greeting|qualification|objection_handling|scheduling|confirmation|dnc|handoff|general|reschedule|cancel_appointment|post_booking_question|post_booking_chat"
 }
 
 RULES FOR THE JSON:

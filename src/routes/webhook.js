@@ -20,6 +20,29 @@ function isSchedulingPhase(conv) {
   return false;
 }
 
+function isPostBooking(conv) {
+  return !!conv && conv.is_active && conv.terminal_outcome === 'appointment_booked';
+}
+
+function buildPostBookingContext(conv) {
+  const apptTime = conv.collected_appointment_time || '(time on file)';
+  const agent = conv.agent_name || 'the agent';
+  const meeting = conv.meeting_type || 'Phone';
+  return `---
+POST-BOOKING STATE — CRITICAL OVERRIDE:
+This lead's appointment is ALREADY BOOKED for ${apptTime} with ${agent} (${meeting}). Do NOT re-qualify. Do NOT restart the qualification flow. Do NOT ask DOB/health/coverage amount again. Do NOT re-send the opt-in or AI-disclosure message.
+
+Your ONLY job here is to handle their follow-up message in ONE short reply (ideally <160 chars, never more than 2 messages).
+
+Valid message_type values in this state:
+- "reschedule" — user wants a DIFFERENT time. If the real-time calendar availability block is present above, offer 2 real options, wait for confirmation, then (on their confirmation) return terminal_outcome="appointment_booked" AND collected_data.appointment_time set to the NEW time. The system will automatically cancel the old slot and book the new one.
+- "cancel_appointment" — use ONLY after the user has EXPLICITLY confirmed they want to cancel (e.g. they said "yes cancel it" after you asked). First mention they want to cancel → ask to confirm with message_type="post_booking_question". After confirm → message_type="cancel_appointment", terminal_outcome=null, short friendly ack. The system will cancel the appointment automatically.
+- "post_booking_question" — any question about the appointment (what time, what to expect, can spouse join, etc.) or clarification of their request.
+- "post_booking_chat" — "thanks", "cool", "sounds good" and other conversational replies. Give a brief friendly acknowledgment. No re-pitch, no follow-up question unless genuinely helpful.
+
+Keep the booking itself intact. Never re-introduce yourself. Tone: concise, friendly, done-deal.`;
+}
+
 async function ensureSlotsForScheduling(conv, parsed, contactId) {
   if (!parsed.ghl_token || !parsed.location_id) return null;
 
@@ -158,10 +181,11 @@ router.post('/inbound', async (req, res) => {
     // Build history for Claude from stored messages jsonb (exclude the brand new inbound)
     const history = Array.isArray(conv.messages) ? conv.messages : [];
 
-    // If scheduling phase, fetch real calendar slots to inject as context
+    // If scheduling phase OR post-booking (may need to reschedule), fetch real calendar slots
     let slotInfo = null;
     let schedulingContext = '';
-    if (isSchedulingPhase(conv)) {
+    const postBooking = isPostBooking(conv);
+    if (isSchedulingPhase(conv) || postBooking) {
       try {
         slotInfo = await ensureSlotsForScheduling(conv, parsed, contactId);
         schedulingContext = buildSchedulingContext(slotInfo);
@@ -170,9 +194,13 @@ router.post('/inbound', async (req, res) => {
       }
     }
 
+    // If post-booking, prepend the post-booking override so Claude doesn't re-qualify
+    const postBookingContext = postBooking ? buildPostBookingContext(conv) : '';
+    const extraContext = [postBookingContext, schedulingContext].filter(Boolean).join('\n\n');
+
     // Call Claude
     const claudeStarted = Date.now();
-    const claudeResult = await claude.generateResponse(conv, history, parsed.messageBody, contactId, schedulingContext);
+    const claudeResult = await claude.generateResponse(conv, history, parsed.messageBody, contactId, extraContext);
     const claudeElapsed = Date.now() - claudeStarted;
 
     logger.log('claude', 'info', contactId, 'Claude responded', {
@@ -224,14 +252,41 @@ router.post('/inbound', async (req, res) => {
       await store.saveLastOutboundMessageType(conv.id, claudeResult.message_type);
     }
 
-    // Terminal outcome handling
-    if (claudeResult.terminal_outcome) {
-      await store.setTerminalOutcome(conv.id, claudeResult.terminal_outcome);
-      const mergedConv = { ...conv, ...claudeResult.collected_data, terminal_outcome: claudeResult.terminal_outcome };
-
-      // Book real appointment when a slot was confirmed
-      if (claudeResult.terminal_outcome === 'appointment_booked' && parsed.ghl_token) {
+    // === Post-booking cancellation (can arrive with terminal_outcome=null) ===
+    if (postBooking && claudeResult.message_type === 'cancel_appointment') {
+      logger.log('post_booking', 'info', contactId, 'Post-booking interaction', { action: 'cancel' });
+      if (conv.appointment_id && parsed.ghl_token) {
         try {
+          await calendar.cancelAppointment(parsed.ghl_token, conv.appointment_id, contactId);
+        } catch (cancelErr) {
+          logger.log('calendar', 'error', contactId, 'Cancel threw', { error: cancelErr.message, stack: cancelErr.stack });
+        }
+      }
+      await store.clearAppointmentId(conv.id);
+      await store.clearTerminalOutcome(conv.id);
+    }
+
+    // === Terminal outcome handling ===
+    if (claudeResult.terminal_outcome) {
+      const newOutcome = claudeResult.terminal_outcome;
+      const isReschedule = newOutcome === 'appointment_booked' && postBooking && !!conv.appointment_id;
+
+      await store.setTerminalOutcome(conv.id, newOutcome);
+      const mergedConv = { ...conv, ...claudeResult.collected_data, terminal_outcome: newOutcome };
+
+      // Book real appointment (or reschedule: cancel old first, then book new)
+      if (newOutcome === 'appointment_booked' && parsed.ghl_token) {
+        try {
+          if (isReschedule) {
+            logger.log('post_booking', 'info', contactId, 'Post-booking interaction', { action: 'reschedule', old_appointment_id: conv.appointment_id });
+            try {
+              await calendar.cancelAppointment(parsed.ghl_token, conv.appointment_id, contactId);
+            } catch (cancelErr) {
+              logger.log('calendar', 'error', contactId, 'Reschedule cancel-old threw', { error: cancelErr.message });
+            }
+            await store.clearAppointmentId(conv.id);
+          }
+
           const appointmentText = claudeResult.collected_data?.appointment_time || conv.collected_appointment_time;
           let info = slotInfo;
           if (!info) {
@@ -278,12 +333,24 @@ router.post('/inbound', async (req, res) => {
         }
       }
 
-      // Handle DNC immediately
-      if (claudeResult.terminal_outcome === 'dnc' && parsed.ghl_token) {
+      // Handle DNC immediately (deactivates conversation via setTerminalOutcome already)
+      if (newOutcome === 'dnc' && parsed.ghl_token) {
         await ghl.setContactDnd(parsed.ghl_token, conv.contact_id);
       }
-      await firePostCallRouter(mergedConv, claudeResult.terminal_outcome);
-      logger.log('webhook_fire', 'info', contactId, 'Post-call router fired', { outcome: claudeResult.terminal_outcome, url: process.env.GHL_POST_CALL_ROUTER_URL });
+
+      // Skip firing PCR again on a reschedule (the first booking already fired it)
+      if (!isReschedule) {
+        await firePostCallRouter(mergedConv, newOutcome);
+        logger.log('webhook_fire', 'info', contactId, 'Post-call router fired', { outcome: newOutcome, url: process.env.GHL_POST_CALL_ROUTER_URL });
+      }
+    }
+
+    // Post-booking conversational / question turn (no terminal outcome, not a cancel)
+    if (postBooking && !claudeResult.terminal_outcome && claudeResult.message_type !== 'cancel_appointment') {
+      const mt = claudeResult.message_type || 'post_booking_chat';
+      if (mt === 'post_booking_question' || mt === 'post_booking_chat' || mt === 'reschedule') {
+        logger.log('post_booking', 'info', contactId, 'Post-booking interaction', { action: mt });
+      }
     }
 
     return res.status(200).json({
