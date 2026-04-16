@@ -19,13 +19,15 @@ async function loadCostConfig() {
     const m = {};
     for (const r of q.rows) m[r.key] = r.value;
     return {
-      carrier_out: parseFloat(m.carrier_cost_per_segment_outbound) || 0.0079,
-      carrier_in: parseFloat(m.carrier_cost_per_segment_inbound) || 0.0079,
+      sms_out: parseFloat(m.carrier_cost_per_segment_outbound) || 0.01,
+      sms_in: parseFloat(m.carrier_cost_per_segment_inbound) || 0.01,
+      mms_out: parseFloat(m.carrier_cost_mms_outbound) || 0.04,
+      mms_in: parseFloat(m.carrier_cost_mms_inbound) || 0.04,
       input_cost_per_m: parseFloat(m.input_token_cost_per_million) || 3,
       output_cost_per_m: parseFloat(m.output_token_cost_per_million) || 15
     };
   } catch {
-    return { carrier_out: 0.0079, carrier_in: 0.0079, input_cost_per_m: 3, output_cost_per_m: 15 };
+    return { sms_out: 0.01, sms_in: 0.01, mms_out: 0.04, mms_in: 0.04, input_cost_per_m: 3, output_cost_per_m: 15 };
   }
 }
 
@@ -60,16 +62,34 @@ async function computeSummaryForLocation(locationId, weekStart, weekEnd, costCon
 
   const msgQ = await db.query(
     `SELECT
-       COALESCE(SUM(segments) FILTER (WHERE direction = 'outbound'), 0)::int AS out_seg,
-       COALESCE(SUM(segments) FILTER (WHERE direction = 'inbound'), 0)::int AS in_seg
+       COALESCE(SUM(segments) FILTER (WHERE direction = 'outbound' AND COALESCE(message_type, '') NOT ILIKE '%mms%'), 0)::int AS sms_out,
+       COALESCE(SUM(segments) FILTER (WHERE direction = 'inbound'  AND COALESCE(message_type, '') NOT ILIKE '%mms%'), 0)::int AS sms_in,
+       COALESCE(SUM(segments) FILTER (WHERE direction = 'outbound' AND COALESCE(message_type, '') ILIKE '%mms%'), 0)::int AS mms_out,
+       COALESCE(SUM(segments) FILTER (WHERE direction = 'inbound'  AND COALESCE(message_type, '') ILIKE '%mms%'), 0)::int AS mms_in
      FROM messages
      WHERE location_id = $1 AND created_at >= $2 AND created_at < $3`,
     [locationId, weekStart, weekEnd]
   );
   const m = msgQ.rows[0] || {};
 
+  const ghlMmsQ = await db.query(
+    `SELECT
+       COUNT(*) FILTER (WHERE direction = 'outbound' AND message_type ILIKE '%MMS%')::int AS mms_out,
+       COUNT(*) FILTER (WHERE direction = 'inbound'  AND message_type ILIKE '%MMS%')::int AS mms_in
+     FROM ghl_messages
+     WHERE location_id = $1 AND created_at >= $2 AND created_at < $3`,
+    [locationId, weekStart, weekEnd]
+  );
+  const gm = ghlMmsQ.rows[0] || {};
+
   const aiCost = (Number(b.input_tokens) * cost.input_cost_per_m + Number(b.output_tokens) * cost.output_cost_per_m) / 1000000;
-  const carrierCost = (m.out_seg || 0) * cost.carrier_out + (m.in_seg || 0) * cost.carrier_in;
+  const smsSegOut = m.sms_out || 0;
+  const smsSegIn = m.sms_in || 0;
+  const mmsSegOut = (m.mms_out || 0) + (gm.mms_out || 0);
+  const mmsSegIn = (m.mms_in || 0) + (gm.mms_in || 0);
+  const smsCost = smsSegOut * cost.sms_out + smsSegIn * cost.sms_in;
+  const mmsCost = mmsSegOut * cost.mms_out + mmsSegIn * cost.mms_in;
+  const carrierCost = smsCost + mmsCost;
 
   const apptsQ = await db.query(
     `SELECT contact_name, ghl_conversation_id, last_message_at
@@ -90,6 +110,8 @@ async function computeSummaryForLocation(locationId, weekStart, weekEnd, costCon
     appointments_booked: g.booked || 0,
     dnc_count: g.dnc || 0,
     ai_cost: Math.round(aiCost * 100) / 100,
+    sms_cost: Math.round(smsCost * 100) / 100,
+    mms_cost: Math.round(mmsCost * 100) / 100,
     carrier_cost: Math.round(carrierCost * 100) / 100,
     total_cost: Math.round((aiCost + carrierCost) * 100) / 100,
     appointments: apptsQ.rows.map((r) => ({

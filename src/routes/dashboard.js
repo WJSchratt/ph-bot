@@ -12,15 +12,17 @@ async function loadCostConfig() {
     const map = {};
     for (const r of q.rows) map[r.key] = r.value;
     return {
-      carrier_out: parseFloat(map.carrier_cost_per_segment_outbound) || 0.0079,
-      carrier_in: parseFloat(map.carrier_cost_per_segment_inbound) || 0.0079,
+      sms_out: parseFloat(map.carrier_cost_per_segment_outbound) || 0.01,
+      sms_in: parseFloat(map.carrier_cost_per_segment_inbound) || 0.01,
+      mms_out: parseFloat(map.carrier_cost_mms_outbound) || 0.04,
+      mms_in: parseFloat(map.carrier_cost_mms_inbound) || 0.04,
       webhook_free: parseInt(map.webhook_free_tier_per_month, 10) || 100,
       webhook_cost: parseFloat(map.webhook_cost_per_event) || 0.02,
       input_cost_per_m: parseFloat(map.input_token_cost_per_million) || 3,
       output_cost_per_m: parseFloat(map.output_token_cost_per_million) || 15
     };
   } catch {
-    return { carrier_out: 0.0079, carrier_in: 0.0079, webhook_free: 100, webhook_cost: 0.02, input_cost_per_m: 3, output_cost_per_m: 15 };
+    return { sms_out: 0.01, sms_in: 0.01, mms_out: 0.04, mms_in: 0.04, webhook_free: 100, webhook_cost: 0.02, input_cost_per_m: 3, output_cost_per_m: 15 };
   }
 }
 
@@ -66,12 +68,27 @@ router.get('/dashboard', async (req, res) => {
          COUNT(*) FILTER (WHERE direction = 'inbound')::int AS inbound,
          COUNT(*) FILTER (WHERE direction = 'outbound')::int AS outbound,
          AVG(reply_time_seconds) FILTER (WHERE direction = 'outbound' AND got_reply)::float AS avg_response_time,
-         COALESCE(SUM(segments) FILTER (WHERE direction = 'outbound'), 0)::int AS out_segments,
-         COALESCE(SUM(segments) FILTER (WHERE direction = 'inbound'), 0)::int AS in_segments
+         COALESCE(SUM(segments) FILTER (WHERE direction = 'outbound' AND COALESCE(message_type, '') NOT ILIKE '%mms%'), 0)::int AS sms_out_segments,
+         COALESCE(SUM(segments) FILTER (WHERE direction = 'inbound'  AND COALESCE(message_type, '') NOT ILIKE '%mms%'), 0)::int AS sms_in_segments,
+         COALESCE(SUM(segments) FILTER (WHERE direction = 'outbound' AND COALESCE(message_type, '') ILIKE '%mms%'), 0)::int AS mms_out_segments,
+         COALESCE(SUM(segments) FILTER (WHERE direction = 'inbound'  AND COALESCE(message_type, '') ILIKE '%mms%'), 0)::int AS mms_in_segments
        FROM messages ${msgWhere}`,
       msgParams
     );
     const mg = msgRes.rows[0];
+
+    // Additional MMS detection from pulled GHL data (ghl_messages stores
+    // GHL's own messageType like TYPE_MMS). Only count rows whose location/
+    // contact would NOT double-count local bot-handled conversations.
+    const mmsGhlQ = await db.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE direction = 'outbound' AND message_type ILIKE '%MMS%')::int AS mms_out,
+         COUNT(*) FILTER (WHERE direction = 'inbound'  AND message_type ILIKE '%MMS%')::int AS mms_in
+       FROM ghl_messages gm
+       ${locIds.length ? 'WHERE location_id = ANY($1) AND created_at >= NOW() - ($2 || \' days\')::interval' : 'WHERE created_at >= NOW() - ($1 || \' days\')::interval'}`,
+      locIds.length ? [locIds, daysInt] : [daysInt]
+    );
+    const ghlMms = mmsGhlQ.rows[0] || { mms_out: 0, mms_in: 0 };
 
     const avgMsgRes = await db.query(
       `SELECT AVG(cnt)::float AS avg_msgs FROM (
@@ -136,9 +153,16 @@ router.get('/dashboard', async (req, res) => {
     const outputCost = (Number(botKpi.output_tokens) * costConfig.output_cost_per_m) / 1000000;
     const aiCost = inputCost + outputCost;
 
-    const outSegments = mg.out_segments || 0;
-    const inSegments = mg.in_segments || 0;
-    const carrierCost = outSegments * costConfig.carrier_out + inSegments * costConfig.carrier_in;
+    const smsOutSeg = mg.sms_out_segments || 0;
+    const smsInSeg = mg.sms_in_segments || 0;
+    const mmsOutSeg = (mg.mms_out_segments || 0) + (ghlMms.mms_out || 0);
+    const mmsInSeg = (mg.mms_in_segments || 0) + (ghlMms.mms_in || 0);
+
+    const smsCost = smsOutSeg * costConfig.sms_out + smsInSeg * costConfig.sms_in;
+    const mmsCost = mmsOutSeg * costConfig.mms_out + mmsInSeg * costConfig.mms_in;
+    const carrierCost = smsCost + mmsCost;
+    const outSegments = smsOutSeg + mmsOutSeg;
+    const inSegments = smsInSeg + mmsInSeg;
 
     // Webhook billing: terminal outcomes fire a webhook. Estimate count.
     const webhookFiredQ = await db.query(
@@ -219,7 +243,9 @@ router.get('/dashboard', async (req, res) => {
       const inTok = Number(r.input_tokens) || 0;
       const outTok = Number(r.output_tokens) || 0;
       const ai = (inTok * costConfig.input_cost_per_m + outTok * costConfig.output_cost_per_m) / 1000000;
-      const carrier = outSeg * costConfig.carrier_out + inSeg * costConfig.carrier_in;
+      // Per-subaccount row doesn't have the SMS/MMS split (messages table doesn't
+      // distinguish here); treat as SMS since that's what the bot sends.
+      const carrier = outSeg * costConfig.sms_out + inSeg * costConfig.sms_in;
       return {
         location_id: r.location_id,
         subaccount_name: r.subaccount_name || null,
@@ -304,6 +330,8 @@ router.get('/dashboard', async (req, res) => {
         total_input_tokens: Number(botKpi.input_tokens) || 0,
         total_output_tokens: Number(botKpi.output_tokens) || 0,
         ai_cost: Math.round(aiCost * 100) / 100,
+        sms_cost: Math.round(smsCost * 100) / 100,
+        mms_cost: Math.round(mmsCost * 100) / 100,
         carrier_cost: Math.round(carrierCost * 100) / 100,
         webhook_cost: Math.round(webhookCost * 100) / 100,
         total_cost: Math.round((aiCost + carrierCost + webhookCost) * 100) / 100,
@@ -311,6 +339,8 @@ router.get('/dashboard', async (req, res) => {
         total_segments: outSegments + inSegments,
         total_segments_outbound: outSegments,
         total_segments_inbound: inSegments,
+        sms_segments: { outbound: smsOutSeg, inbound: smsInSeg, total: smsOutSeg + smsInSeg },
+        mms_segments: { outbound: mmsOutSeg, inbound: mmsInSeg, total: mmsOutSeg + mmsInSeg },
         hours_saved: hoursSaved,
         time_saved_breakdown: {
           sms_responded_hours: Math.round((smsSavedSec / 3600) * 10) / 10,

@@ -11,8 +11,12 @@ const SECTION_DEFAULTS = {
     temperature: '1.0'
   },
   cost_config: {
-    carrier_cost_per_segment_outbound: '0.0079',
-    carrier_cost_per_segment_inbound: '0.0079',
+    // Signal House rates via GHL's LC Phone integration. GHL bills clients
+    // separately; these are the underlying carrier costs only.
+    carrier_cost_per_segment_outbound: '0.01',
+    carrier_cost_per_segment_inbound: '0.01',
+    carrier_cost_mms_outbound: '0.04',
+    carrier_cost_mms_inbound: '0.04',
     webhook_free_tier_per_month: '100',
     webhook_cost_per_event: '0.02',
     input_token_cost_per_million: '3',
