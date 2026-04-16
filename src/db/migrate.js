@@ -145,6 +145,43 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS idx_sub_kb_location ON subaccount_knowledge_base(location_id);
     `);
     console.log('[migrate] users + health + wordtracks + pending_changes + weekly_summaries + sub_kb ensured');
+
+    // Pipeline stages: cached GHL pipelines + opportunities
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ghl_pipelines (
+        id SERIAL PRIMARY KEY,
+        ghl_pipeline_id TEXT NOT NULL,
+        name TEXT,
+        location_id TEXT NOT NULL,
+        stages JSONB,
+        pulled_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(ghl_pipeline_id, location_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_pipelines_location ON ghl_pipelines(location_id);
+
+      CREATE TABLE IF NOT EXISTS ghl_opportunities (
+        id SERIAL PRIMARY KEY,
+        ghl_opportunity_id TEXT NOT NULL,
+        contact_id TEXT,
+        contact_name TEXT,
+        pipeline_id TEXT,
+        pipeline_name TEXT,
+        pipeline_stage_id TEXT,
+        pipeline_stage_name TEXT,
+        status TEXT,
+        monetary_value REAL DEFAULT 0,
+        location_id TEXT NOT NULL,
+        ghl_created_at TIMESTAMPTZ,
+        ghl_updated_at TIMESTAMPTZ,
+        pulled_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(ghl_opportunity_id, location_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_opps_location ON ghl_opportunities(location_id);
+      CREATE INDEX IF NOT EXISTS idx_opps_pipeline ON ghl_opportunities(location_id, pipeline_id);
+      CREATE INDEX IF NOT EXISTS idx_opps_stage ON ghl_opportunities(location_id, pipeline_stage_id);
+      CREATE INDEX IF NOT EXISTS idx_opps_updated ON ghl_opportunities(location_id, ghl_updated_at DESC);
+    `);
+    console.log('[migrate] ghl_pipelines + ghl_opportunities ensured');
   } catch (err) {
     console.error('[migrate] failed', err);
     process.exit(1);

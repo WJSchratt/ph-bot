@@ -1,6 +1,35 @@
 const express = require('express');
+const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../db');
+const store = require('../services/conversationStore');
+const claude = require('../services/claude');
+const logger = require('../services/logger');
+const { parseTags, determineContactStage, determineProductType, determineIsCa } = require('../utils/parser');
 const router = express.Router();
+
+const qcClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const SAMPLE_PROFILES = [
+  { first_name: 'Linda', state: 'FL', offer: 'Final Expense', existing_age: '68', existing_smoker: 'no', existing_health: 'high blood pressure', persona: 'easy_close' },
+  { first_name: 'Robert', state: 'TX', offer: 'Mortgage Protection', existing_age: '45', existing_smoker: 'no', existing_health: 'good', persona: 'price_objector' },
+  { first_name: 'Maria', state: 'CA', offer: 'Final Expense', existing_age: '72', existing_smoker: 'no', existing_health: 'diabetes', persona: 'confused_elderly' },
+  { first_name: 'James', state: 'OH', offer: 'Mortgage Protection', existing_age: '52', existing_smoker: 'yes', existing_health: 'good', persona: 'already_covered' },
+  { first_name: 'Patricia', state: 'GA', offer: 'Final Expense', existing_age: '63', existing_smoker: 'no', existing_health: 'good', persona: 'spouse_decision' },
+  { first_name: 'Michael', state: 'PA', offer: 'Final Expense', existing_age: '70', existing_smoker: 'no', existing_health: 'heart issues', persona: 'hostile_dnc' },
+  { first_name: 'Jennifer', state: 'NC', offer: 'Mortgage Protection', existing_age: '41', existing_smoker: 'no', existing_health: 'good', persona: 'reschedule_cancel' },
+  { first_name: 'David', state: 'AZ', offer: 'Final Expense', existing_age: '65', existing_smoker: 'no', existing_health: 'good', persona: 'wrong_number' },
+  { first_name: 'Susan', state: 'MI', offer: 'Final Expense', existing_age: '69', existing_smoker: 'no', existing_health: 'fair', persona: 'easy_close' },
+  { first_name: 'Thomas', state: 'NY', offer: 'Mortgage Protection', existing_age: '48', existing_smoker: 'no', existing_health: 'good', persona: 'price_objector' }
+];
+
+function scenarioFilter(scenario) {
+  if (!scenario || scenario === 'all') return SAMPLE_PROFILES;
+  if (scenario === 'greeting') return SAMPLE_PROFILES.slice(0, 3).map((p) => ({ ...p, persona: 'wrong_number' }));
+  if (scenario === 'qualification') return SAMPLE_PROFILES.slice(0, 5).map((p) => ({ ...p, persona: p.persona === 'hostile_dnc' ? 'easy_close' : p.persona }));
+  if (scenario === 'scheduling') return SAMPLE_PROFILES.slice(0, 4).map((p) => ({ ...p, persona: 'easy_close' }));
+  if (scenario === 'objection_handling') return SAMPLE_PROFILES.slice(0, 5).map((p) => ({ ...p, persona: p.persona === 'easy_close' ? 'price_objector' : p.persona }));
+  return SAMPLE_PROFILES;
+}
 
 // Get pending QC conversations
 router.get('/qc/pending', async (req, res) => {
@@ -141,6 +170,164 @@ router.get('/conversations/:id/full', async (req, res) => {
     res.json({ conversation: convRes.rows[0], messages: msgsRes.rows });
   } catch (err) {
     console.error('[conversation/full] error', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Generate Sample Wordtracks: simulate N conversations, score them with Claude,
+// and return a batch grid for human review.
+const sandboxRoutes = require('./sandbox');
+async function runSimConversation(profile) {
+  // Reuse the /sandbox/simulate logic by importing the route's axios call would be hacky;
+  // call its exposed helpers via the module directly.
+  // We fall back to a local inline loop that mirrors /sandbox/simulate.
+  const Anthropic = require('@anthropic-ai/sdk');
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+  const variables = {
+    first_name: profile.first_name,
+    state: profile.state,
+    offer: profile.offer,
+    bot_name: 'Sarah',
+    agent_name: 'Jeremiah',
+    contact_stage: 'lead',
+    existing_age: profile.existing_age,
+    existing_smoker: profile.existing_smoker,
+    existing_health: profile.existing_health,
+    tags: ''
+  };
+
+  // Reset & create sandbox conversation for this profile
+  await store.deleteSandboxConversation();
+  const parsed = {
+    contact_id: 'sandbox_user',
+    location_id: 'sandbox_location',
+    phone: '',
+    first_name: variables.first_name || 'Test',
+    last_name: '',
+    state: variables.state || 'FL',
+    product_type: determineProductType(variables.offer),
+    contact_stage: variables.contact_stage || 'lead',
+    is_ca: determineIsCa(variables.state),
+    existing_dob: '',
+    existing_age: variables.existing_age || '',
+    existing_smoker: variables.existing_smoker || '',
+    existing_health: variables.existing_health || '',
+    existing_spouse_name: '',
+    existing_mortgage_balance: '',
+    existing_coverage_subject: '',
+    bot_name: variables.bot_name || 'Sarah',
+    agent_name: variables.agent_name || 'Jeremiah',
+    agent_phone: '',
+    agent_business_card_url: '',
+    calendar_link_fx: '', calendar_link_mp: '', loom_video_fx: '', loom_video_mp: '',
+    meeting_type: 'Phone',
+    ghl_token: '',
+    ghl_message_history: '',
+    offer: variables.offer || '',
+    offer_short: '', language: '', marketplace_type: '', consent_status: '',
+    tags: []
+  };
+
+  const conv0 = await store.upsertConversation(parsed, { is_sandbox: true });
+
+  const thread = [];
+  const personaSystem = `You are a ${profile.persona.replace(/_/g, ' ')} insurance lead named ${profile.first_name} from ${profile.state}. Reply short, casual, lowercase, real-human texting. No quotes, no json, just the SMS text. If you'd abandon the conversation, reply exactly <<<END_SIM>>>.`;
+
+  let terminal = null;
+  for (let turn = 0; turn < 16; turn++) {
+    // Lead reply
+    const msgs = thread.map((m) => m.role === 'bot' ? { role: 'user', content: m.text } : { role: 'assistant', content: m.text });
+    if (!msgs.length) msgs.push({ role: 'user', content: '(the agent has not replied yet — send your first short message as the lead)' });
+    const leadResp = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 300,
+      system: personaSystem,
+      messages: msgs
+    });
+    const leadText = (leadResp.content.find((b) => b.type === 'text')?.text || '').trim();
+    if (!leadText || /^<<<END_SIM>>>$/.test(leadText)) { terminal = terminal || 'lead_abandoned'; break; }
+    thread.push({ role: 'lead', text: leadText });
+
+    const conv = await store.upsertConversation(parsed, { is_sandbox: true });
+    const history = Array.isArray(conv.messages) ? conv.messages : [];
+    const bot = await claude.generateResponse(conv, history, leadText);
+    await store.appendMessageHistory(conv.id, 'user', leadText);
+    await store.appendMessageHistory(conv.id, 'assistant', bot.rawAssistantContent);
+    for (const m of (bot.messages || [])) thread.push({ role: 'bot', text: m, message_type: bot.message_type });
+    if (bot.terminal_outcome) { terminal = bot.terminal_outcome; break; }
+  }
+
+  // Auto-score with Claude
+  const transcript = thread.map((m, i) => `${i + 1}. ${m.role === 'bot' ? 'BOT' : 'LEAD'}: ${m.text}`).join('\n');
+  const scoreResp = await client.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 400,
+    system: `You are grading a SMS qualification bot conversation. Respond ONLY with JSON: { "score": 0-100, "grade": "Good|OK|Wrong", "reason": "one sentence" }. Good ≥80, OK 50-79, Wrong <50.`,
+    messages: [{ role: 'user', content: `Persona: ${profile.persona}\nOutcome: ${terminal || 'incomplete'}\n\nTranscript:\n${transcript}` }]
+  });
+  let score = { score: null, grade: 'OK', reason: '' };
+  try {
+    const t = (scoreResp.content.find((b) => b.type === 'text')?.text || '').trim();
+    const m = t.match(/\{[\s\S]*\}/);
+    if (m) score = { ...score, ...JSON.parse(m[0]) };
+  } catch {}
+
+  return {
+    profile,
+    thread,
+    terminal_outcome: terminal,
+    turns: thread.length,
+    score
+  };
+}
+
+router.post('/qc/generate-sample-wordtracks', async (req, res) => {
+  try {
+    const { scenario = 'all' } = req.body || {};
+    const profiles = scenarioFilter(scenario);
+    const results = [];
+    for (const profile of profiles) {
+      try {
+        const result = await runSimConversation(profile);
+        results.push(result);
+      } catch (err) {
+        logger.log('qc', 'error', null, 'Sample sim failed', { profile: profile.first_name, error: err.message });
+        results.push({ profile, error: err.message });
+      }
+    }
+
+    // Create pending_prompt_changes entries for any "Wrong" grades
+    for (const r of results) {
+      if (r.score && r.score.grade === 'Wrong') {
+        try {
+          await db.query(
+            `INSERT INTO pending_prompt_changes (source, change_type, description, proposed_by)
+             VALUES ('qc', 'correction', $1, 'qc_auto_generator')`,
+            [`Simulated sample with "${r.profile.persona}" persona graded Wrong: ${r.score.reason || 'no reason'}`]
+          );
+        } catch {}
+      }
+    }
+
+    res.json({ scenario, count: results.length, results });
+  } catch (err) {
+    logger.log('qc', 'error', null, 'generate-sample-wordtracks failed', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
+router.post('/qc/flag-wrong', async (req, res) => {
+  try {
+    const { description, conversation_id } = req.body || {};
+    if (!description) return res.status(400).json({ error: 'description required' });
+    await db.query(
+      `INSERT INTO pending_prompt_changes (source, change_type, description, example_conversation_id, proposed_by)
+       VALUES ('qc', 'correction', $1, $2, $3)`,
+      [description, conversation_id || null, req.session?.username || null]
+    );
+    res.json({ ok: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

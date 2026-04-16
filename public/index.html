@@ -391,8 +391,9 @@ textarea.form-input{resize:vertical;min-height:80px;}
 <nav>
   <div class="nav-section">Analytics</div>
   <div class="nav-item active" data-tab="tab-dashboard" onclick="goTab('tab-dashboard')"><span class="nav-icon">&#9638;</span> Overview Dashboard</div>
-  <div class="nav-item" data-tab="tab-wordtracks" onclick="goTab('tab-wordtracks')"><span class="nav-icon">&#9993;</span> Wordtracks</div>
+  <div class="nav-item" data-tab="tab-wordtracks" onclick="goTab('tab-wordtracks')"><span class="nav-icon">&#9993;</span> Workflow Wordtracks</div>
   <div class="nav-item" data-tab="tab-pipeline" onclick="goTab('tab-pipeline')"><span class="nav-icon">&#9672;</span> Pipeline Stages</div>
+  <div class="nav-item" data-tab="tab-weekly" onclick="goTab('tab-weekly')"><span class="nav-icon">&#9112;</span> Weekly Summary</div>
   <div class="nav-section">AI Management</div>
   <div class="nav-item" data-tab="tab-qc" onclick="goTab('tab-qc')"><span class="nav-icon">&#9678;</span> QC Portal <span class="nav-badge nb-amber" id="nav-qc-badge"></span></div>
   <div class="nav-item" data-tab="tab-review" onclick="goTab('tab-review')"><span class="nav-icon">&#8635;</span> AI Review Queue <span class="nav-badge nb-red" id="nav-review-badge"></span></div>
@@ -445,42 +446,43 @@ textarea.form-input{resize:vertical;min-height:80px;}
 
 <!-- ====== WORDTRACKS ====== -->
 <div class="tab-content" id="tab-wordtracks">
-  <div class="frow">
-    <select class="fsel" id="wt-sort" onchange="loadWordtracks()">
-      <option value="total_sent">Sort: Total Sent</option>
-      <option value="reply_rate">Sort: Reply Rate</option>
-      <option value="opt_out_rate">Sort: Opt-Out Rate</option>
-      <option value="booking_rate">Sort: Booking Rate</option>
-      <option value="transfer_rate">Sort: Transfer Rate</option>
-    </select>
-    <select class="fsel" id="wt-dir" onchange="loadWordtracks()">
-      <option value="desc">Descending</option>
-      <option value="asc">Ascending</option>
-    </select>
-    <button class="btn pri" onclick="loadWordtracks()">Refresh</button>
+  <div class="sh"><span class="sh-title">Workflow Wordtracks</span><div class="sh-line"></div></div>
+  <div class="itabs" style="margin-bottom:12px;">
+    <div class="itab active" data-wbt="combined" onclick="setWtBotType('combined', this)">Combined</div>
+    <div class="itab" data-wbt="claude" onclick="setWtBotType('claude', this)">Claude Bot</div>
+    <div class="itab" data-wbt="botpress" onclick="setWtBotType('botpress', this)">BotPress</div>
   </div>
-  <div id="wt-list"></div>
+  <div class="card">
+    <table id="wt-stages-table">
+      <thead><tr><th>Stage</th><th>Sent</th><th>Reply %</th><th>Avg Reply</th><th>Booking Conv</th><th>Opt-Out %</th><th>Drop-Off %</th><th>Convs</th></tr></thead>
+      <tbody id="wt-stages-tbody"></tbody>
+    </table>
+  </div>
+  <div id="wt-stage-detail" style="margin-top:14px;"></div>
 </div>
 
 <!-- ====== PIPELINE ====== -->
 <div class="tab-content" id="tab-pipeline">
-  <div class="grid c2">
-    <div class="card">
-      <div class="card-title">Lead Pipeline -- Stage Counts</div>
-      <div id="pipe-stages-el"></div>
-    </div>
-    <div class="card">
-      <div class="card-title">Pipeline Funnel</div>
-      <div class="chart-wrap" style="height:420px;"><canvas id="ch-pipeline"></canvas></div>
-    </div>
+  <div class="sh"><span class="sh-title">Pipeline Stages</span><div class="sh-line"></div>
+    <select class="fsel" id="pipe-subaccount" onchange="onPipeSubaccountChange()" style="min-width:260px;"><option value="">-- Select subaccount --</option></select>
+    <button class="btn pri" id="pipe-refresh-btn" onclick="refreshPipelineData()">Refresh Pipeline Data</button>
   </div>
+  <div id="pipe-disclaimer" class="confirm-banner" style="display:none;"></div>
+  <div id="pipe-meta" style="font-size:12px;color:var(--muted);margin-bottom:14px;"></div>
+  <div id="pipe-pipelines"></div>
   <div class="card" style="margin-top:14px;">
-    <div class="card-title">Stage Breakdown</div>
-    <table id="pipe-table">
-      <thead><tr><th>Stage</th><th>Total</th><th>Active</th><th>Booked</th><th>Handoff</th><th>DNC</th></tr></thead>
-      <tbody id="pipe-tbody"></tbody>
-    </table>
+    <div class="card-title">Local Contact Stage Funnel (Claude bot conversations)</div>
+    <div id="pipe-stages-el" style="margin-top:10px;"></div>
   </div>
+</div>
+
+<!-- ====== WEEKLY SUMMARY ====== -->
+<div class="tab-content" id="tab-weekly">
+  <div class="sh"><span class="sh-title">Weekly Summary</span><div class="sh-line"></div>
+    <button class="btn pri" onclick="generateAllWeekly()">Generate All Summaries</button>
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:14px;">Client-ready 7-day report per subaccount. Auto-generates every Monday at 8am UTC.</div>
+  <div id="weekly-grid" class="grid c2"></div>
 </div>
 
 <!-- ====== QC PORTAL ====== -->
@@ -489,6 +491,14 @@ textarea.form-input{resize:vertical;min-height:80px;}
     <div><div style="font-size:17px;font-weight:700;color:#fff;">Bot Accuracy QC Portal</div><div class="dim-text">Weekly spot-check -- Authorized reviewers only</div></div>
     <div style="display:flex;gap:9px;align-items:center;">
       <div class="card" style="padding:9px 15px;display:flex;gap:18px;border-color:var(--amber);" id="qc-stats-card"></div>
+      <select class="fsel" id="qc-scenario">
+        <option value="all">All scenarios</option>
+        <option value="greeting">Greeting</option>
+        <option value="qualification">Qualification</option>
+        <option value="scheduling">Scheduling</option>
+        <option value="objection_handling">Objection handling</option>
+      </select>
+      <button class="btn amb" id="qc-gen-btn" onclick="qcGenerateSamples()">Generate Sample Wordtracks</button>
       <button class="btn pri" onclick="pullRandomConv()">Pull Random Conversation</button>
     </div>
   </div>
@@ -520,6 +530,9 @@ textarea.form-input{resize:vertical;min-height:80px;}
 
 <!-- ====== AI REVIEW ====== -->
 <div class="tab-content" id="tab-review">
+  <div class="sh"><span class="sh-title">AI Review Queue</span><div class="sh-line"></div>
+    <button class="btn amb" id="rv-populate-btn" onclick="reviewAutoPopulate()">Generate Responses for Review</button>
+  </div>
   <div class="confirm-banner" id="review-banner">
     <p id="review-banner-text">Loading review items...</p>
   </div>
@@ -528,6 +541,32 @@ textarea.form-input{resize:vertical;min-height:80px;}
 
 <!-- ====== SANDBOX ====== -->
 <div class="tab-content" id="tab-sandbox">
+  <div class="itabs" style="margin-bottom:12px;">
+    <div class="itab active" data-sbmode="manual" onclick="setSandboxMode('manual', this)">Manual Chat</div>
+    <div class="itab" data-sbmode="simulated" onclick="setSandboxMode('simulated', this)">AI Simulated Chat</div>
+  </div>
+  <div id="sb-sim-controls" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;">
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+      <div class="form-group" style="min-width:240px;"><label class="form-label">Persona</label>
+        <select class="form-input" id="sb-persona">
+          <option value="easy_close">Easy Close</option>
+          <option value="price_objector">Price Objector</option>
+          <option value="spouse_decision">Spouse Decision</option>
+          <option value="already_covered">Already Covered</option>
+          <option value="hostile_dnc">Hostile / DNC</option>
+          <option value="confused_elderly">Confused / Elderly</option>
+          <option value="reschedule_cancel">Reschedule / Cancel</option>
+          <option value="wrong_number">Wrong Number</option>
+          <option value="random">Random</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1;min-width:260px;"><label class="form-label">Conversation Context (optional)</label>
+        <input class="form-input" id="sb-context" placeholder="e.g. lead called asking about coverage for elderly mother, seemed price sensitive">
+      </div>
+      <button class="btn pri" id="sb-sim-btn" onclick="startSandboxSimulation()">Start Simulation</button>
+    </div>
+    <div id="sb-sim-summary" style="font-size:12px;color:var(--muted);margin-top:8px;"></div>
+  </div>
   <div class="sb-grid">
     <div class="sb-panel">
       <div class="card-title" style="margin-bottom:12px;">Sandbox Configuration</div>
@@ -1168,6 +1207,7 @@ function loadCurrentTab() {
     case 'tab-settings': loadSettingsData(); break;
     case 'tab-analyzer': loadAnalyzerAll(); break;
     case 'tab-devconsole': loadDevConsole(); break;
+    case 'tab-weekly': loadWeeklyTab(); break;
   }
 }
 
@@ -1310,79 +1350,159 @@ function chartOpts() {
 }
 
 // ========== WORDTRACKS ==========
+let wtBotType = 'combined';
+function setWtBotType(bt, el) {
+  wtBotType = bt;
+  document.querySelectorAll('#tab-wordtracks .itab').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  loadWordtracks();
+}
 async function loadWordtracks() {
-  const sortBy = document.getElementById('wt-sort').value;
-  const sortDir = document.getElementById('wt-dir').value;
-  const params = new URLSearchParams({ days: getDays(), sort_by: sortBy, sort_dir: sortDir });
+  const params = new URLSearchParams({ days: getDays(), bot_type: wtBotType });
   const locParam = getLocationParam();
-  const data = await api('/api/wordtracks?' + params + (locParam ? '&' + locParam : ''));
+  const data = await api('/api/wordtracks/stages?' + params + (locParam ? '&' + locParam : ''));
   if (!data) return;
-
-  const el = document.getElementById('wt-list');
-  el.innerHTML = '';
-  (data.wordtracks || []).forEach(w => {
-    const rr = parseFloat(w.reply_rate) || 0;
-    const oor = parseFloat(w.opt_out_rate) || 0;
-    const br = parseFloat(w.booking_rate) || 0;
-    const tr = parseFloat(w.transfer_rate) || 0;
-    el.innerHTML += '<div class="wt-row">' +
-      '<div class="wt-meta"><span class="pill c">' + esc(w.message_type) + '</span><span style="font-size:11px;color:var(--muted);">' + fmtNum(w.total_sent) + ' sent</span></div>' +
-      '<div class="wt-stats">' +
-        '<div class="wt-stat"><div class="v" style="color:var(--cyan)">' + fmtPct2(rr) + '</div><div class="l">Reply Rate</div></div>' +
-        '<div class="wt-stat"><div class="v" style="color:' + (oor > 3.5 ? 'var(--red)' : oor > 2.5 ? 'var(--amber)' : 'var(--green)') + '">' + fmtPct2(oor) + '</div><div class="l">Opt-Out</div></div>' +
-        '<div class="wt-stat"><div class="v" style="color:var(--green)">' + fmtPct2(br) + '</div><div class="l">Booking</div></div>' +
-        '<div class="wt-stat"><div class="v" style="color:var(--amber)">' + fmtPct2(tr) + '</div><div class="l">Transfer</div></div>' +
-        '<div class="wt-stat"><div class="v" style="color:var(--muted)">' + (w.avg_reply_time || '---') + '</div><div class="l">Avg Reply</div></div>' +
-      '</div></div>';
+  const tbody = document.getElementById('wt-stages-tbody');
+  tbody.innerHTML = '';
+  (data.stages || []).forEach(s => {
+    const rate = parseFloat(s.reply_rate) || 0;
+    const optOut = parseFloat(s.opt_out_rate) || 0;
+    const booking = parseFloat(s.booking_conversion) || 0;
+    const drop = parseFloat(s.drop_off_rate) || 0;
+    const avg = s.avg_reply_time_seconds ? (Math.round(s.avg_reply_time_seconds) + 's') : '---';
+    tbody.innerHTML += '<tr style="cursor:pointer;" onclick="expandStage(\'' + esc(s.stage) + '\')">' +
+      '<td><span class="pill c">' + esc(s.stage) + '</span></td>' +
+      '<td>' + fmtNum(s.total_sent) + '</td>' +
+      '<td style="color:var(--cyan);">' + fmtPct(rate) + '</td>' +
+      '<td>' + avg + '</td>' +
+      '<td style="color:var(--green);">' + fmtPct(booking) + '</td>' +
+      '<td style="color:' + (optOut > 0.035 ? 'var(--red)' : 'var(--muted)') + ';">' + fmtPct(optOut) + '</td>' +
+      '<td style="color:var(--amber);">' + fmtPct(drop) + '</td>' +
+      '<td>' + fmtNum(s.unique_conversations) + '</td>' +
+    '</tr>';
   });
-  if (!el.innerHTML) el.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;">No wordtrack data available.</div>';
+  if (!tbody.innerHTML) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--muted);">No stage data yet.</td></tr>';
+  document.getElementById('wt-stage-detail').innerHTML = '';
+}
+async function expandStage(stage) {
+  const el = document.getElementById('wt-stage-detail');
+  el.innerHTML = '<div class="card"><div class="card-title">Loading samples for ' + esc(stage) + '…</div></div>';
+  const params = new URLSearchParams({ days: getDays(), bot_type: wtBotType, limit: 25 });
+  const locParam = getLocationParam();
+  const data = await api('/api/wordtracks/stage/' + encodeURIComponent(stage) + '?' + params + (locParam ? '&' + locParam : ''));
+  if (!data) return;
+  el.innerHTML = '<div class="card"><div class="card-title">Samples — ' + esc(stage) + ' (' + (data.samples || []).length + ')</div>' +
+    (data.samples || []).map(s => {
+      const negFlag = s.negative_flag ? '<span class="pill r" style="margin-left:6px;">NEG</span>' : '';
+      return '<div style="padding:10px 0;border-bottom:1px solid var(--border);">' +
+        '<div style="font-size:11px;color:var(--muted);margin-bottom:4px;">' + esc(s.contact_name || 'unknown') + ' · ' + esc(s.terminal_outcome || 'open') + ' · ' + fmtDate(s.created_at) + ' · ' + esc(s.bot_type) + negFlag + '</div>' +
+        '<div class="bubble bot" style="max-width:100%;">' + esc(s.content) + '</div>' +
+        (s.reply_content ? '<div class="bubble lead" style="max-width:100%;margin-top:6px;">' + esc(s.reply_content) + '</div>' : '<div style="color:var(--muted);font-size:11px;margin-top:4px;">(no reply)</div>') +
+      '</div>';
+    }).join('') + '</div>';
 }
 
 // ========== PIPELINE ==========
+let pipeLocationId = '';
+let pipePollTimer = null;
+
 async function loadPipeline() {
+  const sel = document.getElementById('pipe-subaccount');
+  if (sel && !sel.dataset.filled) {
+    sel.innerHTML = '<option value="">-- Select subaccount --</option>';
+    (subaccounts || []).forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a.ghl_location_id;
+      opt.textContent = a.name + ' (' + a.ghl_location_id + ')';
+      sel.appendChild(opt);
+    });
+    sel.dataset.filled = '1';
+    if (pipeLocationId) sel.value = pipeLocationId;
+  }
+  await loadPipelineLocalFunnel();
+  if (pipeLocationId) await loadPipelineData();
+}
+
+async function loadPipelineLocalFunnel() {
   const params = new URLSearchParams({ days: getDays() });
   const locParam = getLocationParam();
   const data = await api('/api/pipeline?' + params + (locParam ? '&' + locParam : ''));
   if (!data) return;
-
   const stages = data.stages || [];
   const stagesEl = document.getElementById('pipe-stages-el');
   const max = Math.max(...stages.map(s => s.total || 0), 1);
-  const colorMap = { lead: 'var(--cyan)', engaged: 'var(--green)', qualified: 'var(--green)', booked: 'var(--green)', nurture: 'var(--amber)', dnc: 'var(--red)', default: 'var(--cyan)' };
-
   stagesEl.innerHTML = stages.map(s => {
     const pct = ((s.total / max) * 100).toFixed(1);
-    return '<div class="pipe-stage"><div class="pipe-name" style="font-size:12px;">' + esc(s.contact_stage) + '</div>' +
+    return '<div class="pipe-stage"><div class="pipe-name" style="font-size:12px;">' + esc(s.contact_stage || '(none)') + '</div>' +
       '<div class="pipe-bar"><div class="pb-wrap"><div class="pb" style="width:' + pct + '%;"></div></div></div>' +
       '<div class="pipe-count">' + fmtNum(s.total) + '</div>' +
       '<div class="pipe-pct">' + Math.round((s.total / max) * 100) + '%</div></div>';
-  }).join('');
+  }).join('') || '<div style="color:var(--muted);text-align:center;padding:20px;">No local conversation data.</div>';
+}
 
-  // Pipeline table
-  const tbody = document.getElementById('pipe-tbody');
-  tbody.innerHTML = stages.map(s =>
-    '<tr><td>' + esc(s.contact_stage) + '</td><td>' + fmtNum(s.total) + '</td><td>' + fmtNum(s.active) + '</td><td>' + fmtNum(s.booked) + '</td><td>' + fmtNum(s.handoff) + '</td><td>' + fmtNum(s.dnc) + '</td></tr>'
-  ).join('');
+function onPipeSubaccountChange() {
+  pipeLocationId = document.getElementById('pipe-subaccount').value;
+  if (!pipeLocationId) return;
+  loadPipelineData();
+}
 
-  // Pipeline chart
-  if (stages.length) {
-    if (chartInstances.pipeline) chartInstances.pipeline.destroy();
-    chartInstances.pipeline = new Chart(document.getElementById('ch-pipeline'), {
-      type: 'bar',
-      data: {
-        labels: stages.map(s => s.contact_stage.length > 22 ? s.contact_stage.substring(0, 22) + '...' : s.contact_stage),
-        datasets: [{ data: stages.map(s => s.total), backgroundColor: 'rgba(0,212,255,.6)', borderWidth: 0, borderRadius: 3 }]
-      },
-      options: {
-        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { color: '#1c2a3a' }, ticks: { color: '#4a6580', font: { family: 'JetBrains Mono', size: 8 } } },
-          y: { grid: { display: false }, ticks: { color: '#c8d8e8', font: { family: 'Rajdhani', size: 10 } } }
-        }
-      }
-    });
+async function loadPipelineData() {
+  if (!pipeLocationId) return;
+  const status = await api('/api/pipeline/pull-status?locationId=' + encodeURIComponent(pipeLocationId));
+  const meta = document.getElementById('pipe-meta');
+  const banner = document.getElementById('pipe-disclaimer');
+  if (status?.progress?.status === 'pulling') {
+    banner.style.display = 'flex';
+    banner.innerHTML = '<p>&#128202; Gathering pipeline data from CRM... ' + fmtNum(status.progress.fetched || 0) + ' opportunities fetched. Data shown may be incomplete.</p>';
+    if (!pipePollTimer) pipePollTimer = setInterval(loadPipelineData, 2500);
+  } else {
+    banner.style.display = 'none';
+    if (pipePollTimer) { clearInterval(pipePollTimer); pipePollTimer = null; }
   }
+  if (status?.last_pulled) {
+    meta.textContent = 'Stored: ' + fmtNum(status.counts?.opportunities || 0) + ' opportunities across ' + fmtNum(status.counts?.pipelines || 0) + ' pipelines — Last pulled ' + fmtDate(status.last_pulled);
+  } else {
+    meta.textContent = 'No pull yet. Click "Refresh Pipeline Data".';
+  }
+
+  const data = await api('/api/pipelines/list?locationId=' + encodeURIComponent(pipeLocationId));
+  if (!data) return;
+  const el = document.getElementById('pipe-pipelines');
+  const pipelines = (data.pipelines || []).slice().sort((a, b) => (b.total_opportunities || 0) - (a.total_opportunities || 0));
+  el.innerHTML = pipelines.map((p, idx) => renderPipelineFunnel(p, idx === 0)).join('') ||
+    '<div class="card" style="color:var(--muted);text-align:center;padding:30px;">No pipeline data yet. Click "Refresh Pipeline Data".</div>';
+}
+
+function renderPipelineFunnel(p, primary) {
+  const max = Math.max(...(p.stages || []).map(s => s.count || 0), 1);
+  const bars = (p.stages || []).map(s => {
+    const pct = ((s.count / max) * 100).toFixed(1);
+    return '<div class="pipe-stage"><div class="pipe-name" style="font-size:12px;">' + esc(s.name) + '</div>' +
+      '<div class="pipe-bar"><div class="pb-wrap"><div class="pb" style="width:' + pct + '%;background:var(--cyan);"></div></div></div>' +
+      '<div class="pipe-count">' + fmtNum(s.count) + '</div>' +
+      '<div class="pipe-pct">' + Math.round((s.count / max) * 100) + '%</div></div>';
+  }).join('');
+  return '<div class="card" style="margin-bottom:14px;' + (primary ? 'border-color:var(--cyan);' : '') + '">' +
+    '<div class="card-title" style="' + (primary ? 'color:var(--cyan);' : '') + '">' + esc(p.name) + ' · ' + fmtNum(p.total_opportunities) + ' opportunities</div>' +
+    (bars || '<div style="color:var(--muted);padding:14px;">No opportunities in this pipeline.</div>') +
+  '</div>';
+}
+
+async function refreshPipelineData() {
+  if (!pipeLocationId) { toast('Select a subaccount first.'); return; }
+  const btn = document.getElementById('pipe-refresh-btn');
+  btn.disabled = true;
+  btn.textContent = 'Starting…';
+  const res = await fetch('/api/pipeline/pull', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ locationId: pipeLocationId })
+  });
+  const data = await res.json().catch(() => null);
+  btn.disabled = false;
+  btn.textContent = 'Refresh Pipeline Data';
+  if (!res.ok) { toast('Pull failed: ' + (data?.error || res.status)); return; }
+  loadPipelineData();
 }
 
 // ========== QC PORTAL ==========
@@ -1872,6 +1992,189 @@ document.addEventListener('change', e => {
     else stopLogRefresh();
   }
 });
+
+// ========== WEEKLY SUMMARY ==========
+async function loadWeeklyTab() {
+  const grid = document.getElementById('weekly-grid');
+  grid.innerHTML = '<div class="card" style="padding:20px;color:var(--muted);">Loading per-subaccount summaries…</div>';
+  const subs = subaccounts || [];
+  if (!subs.length) { grid.innerHTML = '<div class="card" style="padding:20px;color:var(--muted);">Add subaccounts in Settings to generate summaries.</div>'; return; }
+  const results = await Promise.all(subs.map(async (s) => {
+    const data = await api('/api/weekly-summary/' + encodeURIComponent(s.ghl_location_id));
+    return { sub: s, data: data?.summary };
+  }));
+  grid.innerHTML = '';
+  results.forEach(({ sub, data }) => {
+    if (!data) {
+      grid.innerHTML += '<div class="card"><div class="card-title">' + esc(sub.name) + '</div><div style="color:var(--muted);padding:12px;">No data.</div></div>';
+      return;
+    }
+    grid.innerHTML += renderWeeklyCard(sub, data);
+  });
+}
+
+function renderWeeklyCard(sub, d) {
+  const arrow = (v) => {
+    if (v === null || v === undefined || isNaN(v)) return '';
+    if (v > 0.001) return '<span style="color:var(--green);">&#9650; ' + fmtPct(v) + '</span>';
+    if (v < -0.001) return '<span style="color:var(--red);">&#9660; ' + fmtPct(Math.abs(v)) + '</span>';
+    return '<span style="color:var(--muted);">— flat</span>';
+  };
+  const c = d.comparison || {};
+  const appts = (d.appointments || []).slice(0, 8).map(a => '<li style="margin-bottom:3px;">' + esc(a.contact_name || '(unknown)') + ' — ' + fmtDate(a.when) + '</li>').join('');
+  const id = 'ws-' + Math.random().toString(36).slice(2);
+  return '<div class="card" id="' + id + '" style="padding:20px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:10px;">' +
+      '<div><div style="font-size:16px;font-weight:700;color:#fff;">' + esc(sub.name) + '</div>' +
+      '<div style="font-family:\'JetBrains Mono\';font-size:10px;color:var(--muted);">' + esc(sub.ghl_location_id) + '</div>' +
+      '<div style="font-size:11px;color:var(--muted);margin-top:2px;">' + fmtDateShort(d.week_start) + ' — ' + fmtDateShort(d.week_end) + '</div></div>' +
+      '<button class="btn-sm" onclick="copyWeeklySummary(this, \'' + esc(sub.ghl_location_id) + '\', \'' + esc(sub.name) + '\')">Copy</button>' +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">' +
+      '<div><div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);">CONVERSATIONS</div><div style="font-size:22px;font-weight:700;color:var(--cyan);">' + fmtNum(d.total_conversations) + '</div><div style="font-size:11px;">' + arrow(c.total_conversations_pct) + '</div></div>' +
+      '<div><div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);">RESPONSE RATE</div><div style="font-size:22px;font-weight:700;color:var(--green);">' + fmtPct(d.response_rate) + '</div><div style="font-size:11px;">' + arrow(c.response_rate_pct) + '</div></div>' +
+      '<div><div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);">APPOINTMENTS BOOKED</div><div style="font-size:22px;font-weight:700;color:var(--green);">' + fmtNum(d.appointments_booked) + '</div><div style="font-size:11px;">' + arrow(c.appointments_booked_pct) + '</div></div>' +
+      '<div><div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);">DNC / OPT-OUTS</div><div style="font-size:22px;font-weight:700;color:var(--red);">' + fmtNum(d.dnc_count) + '</div><div style="font-size:11px;">' + arrow(c.dnc_count_pct) + '</div></div>' +
+    '</div>' +
+    '<div class="divider"></div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);"><span>Cost this week</span><span style="color:#fff;">' + fmtDollar(d.total_cost) + '</span></div>' +
+    '<div style="font-size:10px;color:var(--muted);">AI ' + fmtDollar(d.ai_cost) + ' · Carrier ' + fmtDollar(d.carrier_cost) + '</div>' +
+    (appts ? '<div style="margin-top:10px;"><div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);">BOOKED APPOINTMENTS</div><ul style="margin-top:5px;padding-left:20px;font-size:12px;">' + appts + '</ul></div>' : '') +
+  '</div>';
+}
+
+async function copyWeeklySummary(btn, locationId, name) {
+  const data = await api('/api/weekly-summary/' + encodeURIComponent(locationId));
+  if (!data || !data.summary) { toast('No data.'); return; }
+  const d = data.summary;
+  const lines = [
+    '*' + name + ' — Weekly Summary*',
+    '(' + fmtDateShort(d.week_start) + ' to ' + fmtDateShort(d.week_end) + ')',
+    '',
+    'Conversations: ' + fmtNum(d.total_conversations),
+    'Response rate: ' + fmtPct(d.response_rate),
+    'Appointments booked: ' + fmtNum(d.appointments_booked),
+    'DNC / opt-outs: ' + fmtNum(d.dnc_count),
+    'Cost: ' + fmtDollar(d.total_cost)
+  ];
+  if ((d.appointments || []).length) {
+    lines.push('');
+    lines.push('*Booked this week:*');
+    d.appointments.forEach(a => lines.push('• ' + (a.contact_name || 'unknown') + ' — ' + fmtDate(a.when)));
+  }
+  try {
+    await navigator.clipboard.writeText(lines.join('\n'));
+    toast('Copied to clipboard.');
+  } catch (e) {
+    toast('Copy failed: ' + e.message);
+  }
+}
+
+async function generateAllWeekly() {
+  const res = await fetch('/api/weekly-summary/generate-all', { method: 'POST' });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) { toast('Failed: ' + (data?.error || res.status)); return; }
+  toast('Generated ' + (data.results?.length || 0) + ' summaries.');
+  loadWeeklyTab();
+}
+
+// ========== SANDBOX SIMULATED ==========
+let sandboxMode = 'manual';
+function setSandboxMode(mode, el) {
+  sandboxMode = mode;
+  document.querySelectorAll('#tab-sandbox .itab').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('sb-sim-controls').style.display = mode === 'simulated' ? 'block' : 'none';
+}
+
+async function startSandboxSimulation() {
+  const btn = document.getElementById('sb-sim-btn');
+  const out = document.getElementById('sb-output');
+  const summary = document.getElementById('sb-sim-summary');
+  const variables = getSbVars();
+  variables.context = document.getElementById('sb-context').value.trim();
+  const persona = document.getElementById('sb-persona').value;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spinner"></span> Simulating…';
+  summary.textContent = 'Running conversation — this takes 30-90 seconds depending on persona.';
+  out.innerHTML = '';
+  try {
+    const res = await fetch('/sandbox/simulate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ variables, persona })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast('Simulation failed: ' + (data.error || res.status)); btn.disabled = false; btn.textContent = 'Start Simulation'; return; }
+    (data.thread || []).forEach(m => {
+      addBubble(out, m.role === 'bot' ? 'bot' : 'lead', m.role === 'bot' ? 'AI Bot' + (m.message_type ? ' — ' + m.message_type : '') : 'Lead (' + esc(data.persona_name) + ')', m.text);
+    });
+    summary.innerHTML = 'Persona: <strong>' + esc(data.persona_name) + '</strong> · Outcome: <strong>' + esc(data.terminal_outcome || 'incomplete') + '</strong> · Turns: ' + data.turns + ' · Tokens: ' + fmtNum(data.tokens?.input || 0) + ' in / ' + fmtNum(data.tokens?.output || 0) + ' out';
+  } catch (e) {
+    toast('Simulation error: ' + e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = 'Start Simulation';
+}
+
+// ========== QC GENERATE SAMPLES ==========
+async function qcGenerateSamples() {
+  const scenario = document.getElementById('qc-scenario').value;
+  const btn = document.getElementById('qc-gen-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spinner"></span> Running…';
+  toast('Running ' + (scenario === 'all' ? 'all scenarios' : scenario) + ' — this will take a few minutes.');
+  try {
+    const res = await fetch('/api/qc/generate-sample-wordtracks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast('Failed: ' + (data.error || res.status)); return; }
+    const rows = (data.results || []).map((r, i) => {
+      const grade = r.score?.grade || '—';
+      const gradeColor = grade === 'Good' ? 'var(--green)' : grade === 'Wrong' ? 'var(--red)' : 'var(--amber)';
+      return '<tr><td>#' + (i + 1) + '</td><td>' + esc(r.profile.first_name) + ' · ' + esc(r.profile.persona) + '</td>' +
+        '<td style="color:' + gradeColor + ';font-weight:700;">' + esc(grade) + '</td>' +
+        '<td>' + fmtNum(r.score?.score) + '</td>' +
+        '<td>' + esc(r.terminal_outcome || 'incomplete') + '</td>' +
+        '<td>' + fmtNum(r.turns) + '</td>' +
+        '<td style="font-size:11px;color:var(--muted);">' + esc(r.score?.reason || '') + '</td></tr>';
+    }).join('');
+    const inner = '<div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:10px;">Sample Wordtracks — ' + esc(scenario) + '</div>' +
+      '<table><thead><tr><th>#</th><th>Profile</th><th>Grade</th><th>Score</th><th>Outcome</th><th>Turns</th><th>Notes</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+      '<div style="font-size:11px;color:var(--muted);margin-top:10px;">Any "Wrong" graded samples are auto-added to Pending Changes.</div>';
+    const back = document.createElement('div');
+    back.className = 'dc-modal-backdrop';
+    back.innerHTML = '<div class="dc-modal" style="min-width:800px;">' + inner + '<div style="margin-top:12px;text-align:right;"><button class="btn pri" onclick="this.closest(\'.dc-modal-backdrop\').remove()">Close</button></div></div>';
+    back.addEventListener('click', (ev) => { if (ev.target === back) back.remove(); });
+    document.body.appendChild(back);
+    refreshPendingChangesBadge();
+  } catch (e) {
+    toast('Error: ' + e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = 'Generate Sample Wordtracks';
+}
+
+// ========== AI REVIEW AUTO POPULATE ==========
+async function reviewAutoPopulate() {
+  const btn = document.getElementById('rv-populate-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spinner"></span> Scanning…';
+  try {
+    const res = await fetch('/api/review-queue/auto-populate', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast('Failed: ' + (data.error || res.status)); return; }
+    toast(data.flagged + ' new items queued for review.');
+    loadReviewQueue();
+  } catch (e) {
+    toast('Error: ' + e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = 'Generate Responses for Review';
+}
 
 // ========== COST CONFIG ==========
 async function saveCostConfig() {

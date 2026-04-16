@@ -20,6 +20,8 @@ const devConsoleRouter = require('./routes/devConsole');
 const healthRouter = require('./routes/health');
 const pendingChangesRouter = require('./routes/pendingChanges');
 const kbRouter = require('./routes/kb');
+const weeklySummaryModule = require('./routes/weeklySummary');
+const weeklySummaryRouter = weeklySummaryModule.router;
 const cronRoutes = require('./routes/cron');
 const conversationStore = require('./services/conversationStore');
 const ghl = require('./services/ghl');
@@ -89,6 +91,7 @@ app.use('/api/dev', devConsoleRouter);
 app.use('/api', healthRouter);
 app.use('/api', pendingChangesRouter);
 app.use('/api', kbRouter);
+app.use('/api', weeklySummaryRouter);
 app.use('/api', testSyncRouter);
 app.use('/sandbox', sandboxRouter);
 app.use('/cron', cronRoutes.router);
@@ -118,6 +121,32 @@ const FIELD_SYNC_INTERVAL_MS = 60 * 60 * 1000;
 const FIELD_SYNC_BATCH_LIMIT = 100;
 const FIELD_SYNC_STALE_HOURS = 72;
 const FIELD_SYNC_PER_CALL_DELAY_MS = 200;
+
+// Monday 8am auto-generate weekly summaries for all active subaccounts.
+// Runs every hour and fires when Monday UTC 8:00-8:59 is hit.
+let lastWeeklyRunKey = null;
+setInterval(async () => {
+  try {
+    const now = new Date();
+    if (now.getUTCDay() !== 1 || now.getUTCHours() !== 8) return;
+    const key = now.toISOString().slice(0, 10);
+    if (lastWeeklyRunKey === key) return;
+    lastWeeklyRunKey = key;
+    const subs = await db.query(`SELECT ghl_location_id FROM subaccounts WHERE status = 'active' OR status IS NULL`);
+    const weekStart = weeklySummaryModule.startOfWeek(new Date(now.getTime() - 7 * 86400000));
+    const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
+    for (const s of subs.rows) {
+      try {
+        await weeklySummaryModule.generateAndStore(s.ghl_location_id, weekStart, weekEnd);
+      } catch (err) {
+        logger.log('weekly', 'error', null, 'Auto weekly failed', { location_id: s.ghl_location_id, error: err.message });
+      }
+    }
+    logger.log('weekly', 'info', null, 'Monday auto-generation completed', { count: subs.rows.length });
+  } catch (err) {
+    logger.log('weekly', 'error', null, 'Weekly cron failed', { error: err.message });
+  }
+}, 60 * 60 * 1000);
 
 // Daily cleanup of expired GHL data (pulled conversations older than 90 days)
 const GHL_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
