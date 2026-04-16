@@ -379,6 +379,8 @@ textarea.form-input{resize:vertical;min-height:80px;}
     <span style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono';"><span class="status-dot"></span>Live</span>
   </div>
   <div class="header-right">
+    <span id="pending-badge" class="sandbox-badge" style="display:none;background:var(--amber);" onclick="showPendingChangesModal()" title="Pending prompt changes"></span>
+    <span id="health-badge" title="System health" onclick="showHealthModal()" style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);cursor:pointer;padding:4px 10px;border:1px solid var(--border2);border-radius:16px;background:var(--surface2);"><span id="health-dot" style="width:7px;height:7px;border-radius:50%;background:var(--muted);display:inline-block;"></span><span id="health-label">Checking…</span></span>
     <span class="sandbox-badge" onclick="goTab('tab-sandbox')">SANDBOX</span>
     <button class="btn-sm" id="logout-btn" onclick="logout()" title="Sign out">Logout</button>
     <div class="avatar" id="header-avatar">JR</div>
@@ -421,11 +423,21 @@ textarea.form-input{resize:vertical;min-height:80px;}
       <div class="chart-wrap" style="height:190px;"><canvas id="ch-resp-outcome"></canvas></div>
     </div>
   </div>
-  <div class="grid c3" style="margin-bottom:13px;" id="cost-cards"></div>
+  <div class="grid c5" style="margin-bottom:13px;" id="cost-cards"></div>
+  <div class="grid c2" style="margin-bottom:13px;">
+    <div class="card">
+      <div class="card-title">Appointments by Type</div>
+      <div id="kpi-appts-by-type" style="margin-top:6px;"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Time Saved Breakdown</div>
+      <div id="kpi-time-breakdown" style="margin-top:6px;"></div>
+    </div>
+  </div>
   <div class="card" style="margin-bottom:13px;">
     <div class="card-title">Per-Subaccount Breakdown</div>
     <table id="subaccount-table">
-      <thead><tr><th>Subaccount</th><th>Conversations</th><th>Booked</th><th>Handoffs</th><th>DNC</th><th>Opt-Out Rate</th><th>Avg Msgs</th></tr></thead>
+      <thead><tr><th>Subaccount</th><th>Conversations</th><th>Booked</th><th>Booking %</th><th>Response %</th><th>Handoffs</th><th>DNC</th><th>Opt-Out %</th><th>Avg Msgs</th><th>Cost</th><th>Time Saved</th></tr></thead>
       <tbody id="subaccount-tbody"></tbody>
     </table>
   </div>
@@ -676,6 +688,9 @@ textarea.form-input{resize:vertical;min-height:80px;}
       <div class="sn-section">System</div>
       <div class="sn-item" onclick="switchSettings(this,'st-webhooks')">Webhooks</div>
       <div class="sn-item" onclick="switchSettings(this,'st-notifications')">Notifications</div>
+      <div class="sn-item" onclick="switchSettings(this,'st-cost')">Cost Configuration</div>
+      <div class="sn-item" onclick="switchSettings(this,'st-users')">User Management</div>
+      <div class="sn-item" onclick="switchSettings(this,'st-kb-subs')">Subaccount KB</div>
     </div>
     <div class="settings-content">
       <!-- Subaccounts -->
@@ -729,6 +744,52 @@ textarea.form-input{resize:vertical;min-height:80px;}
         <div class="sh"><span class="sh-title">Notification Settings</span><div class="sh-line"></div></div>
         <div id="notifications-fields"></div>
         <button class="btn pri" onclick="saveNotifications()" style="margin-top:12px;">Save Notifications</button>
+      </div>
+      <!-- Cost Configuration -->
+      <div class="settings-panel" id="st-cost">
+        <div class="sh"><span class="sh-title">Cost Configuration</span><div class="sh-line"></div></div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:14px;">Used to calculate Overview cost cards and per-subaccount cost column.</div>
+        <div class="grid c2">
+          <div class="form-group"><label class="form-label">Carrier Cost / Segment (Outbound)</label><input class="form-input" id="cost-out-seg" type="number" step="0.0001"></div>
+          <div class="form-group"><label class="form-label">Carrier Cost / Segment (Inbound)</label><input class="form-input" id="cost-in-seg" type="number" step="0.0001"></div>
+          <div class="form-group"><label class="form-label">Input Token Cost / 1M</label><input class="form-input" id="cost-in-tok" type="number" step="0.01"></div>
+          <div class="form-group"><label class="form-label">Output Token Cost / 1M</label><input class="form-input" id="cost-out-tok" type="number" step="0.01"></div>
+          <div class="form-group"><label class="form-label">GHL Webhook Free Tier / Month</label><input class="form-input" id="cost-wh-free" type="number"></div>
+          <div class="form-group"><label class="form-label">Webhook Cost / Event (after free tier)</label><input class="form-input" id="cost-wh-cost" type="number" step="0.001"></div>
+        </div>
+        <button class="btn pri" onclick="saveCostConfig()" style="margin-top:12px;">Save Cost Config</button>
+      </div>
+      <!-- User Management -->
+      <div class="settings-panel" id="st-users">
+        <div class="sh"><span class="sh-title">User Management</span><div class="sh-line"></div>
+          <button class="btn pri" onclick="document.getElementById('new-user-form').style.display='block'">+ Add User</button>
+        </div>
+        <div id="new-user-form" style="display:none;margin-bottom:14px;" class="sub-cfg-row">
+          <div class="sub-cfg-fields">
+            <div class="form-group"><label class="form-label">Username</label><input class="form-input" id="nu-username"></div>
+            <div class="form-group"><label class="form-label">Password</label><input class="form-input" id="nu-password" type="password"></div>
+            <div class="form-group"><label class="form-label">Email (optional)</label><input class="form-input" id="nu-email"></div>
+            <div class="form-group"><label class="form-label">Role</label><select class="form-input" id="nu-role"><option value="viewer">Viewer (read-only)</option><option value="admin">Admin (full access)</option></select></div>
+          </div>
+          <div style="display:flex;gap:7px;margin-top:9px;"><button class="btn pri" onclick="createUser()">Create</button><button class="btn" onclick="document.getElementById('new-user-form').style.display='none'">Cancel</button></div>
+        </div>
+        <div id="users-list"></div>
+      </div>
+      <!-- Subaccount KB -->
+      <div class="settings-panel" id="st-kb-subs">
+        <div class="sh"><span class="sh-title">Subaccount Knowledge Base</span><div class="sh-line"></div></div>
+        <div class="form-group" style="max-width:420px;"><label class="form-label">Subaccount</label>
+          <select class="form-input" id="kb-subaccount-sel" onchange="loadSubKb()"></select>
+        </div>
+        <div id="kb-entries-list" style="margin-top:12px;"></div>
+        <div id="kb-new-form" style="margin-top:14px;" class="sub-cfg-row">
+          <div class="sub-cfg-fields">
+            <div class="form-group"><label class="form-label">Title</label><input class="form-input" id="kb-new-title"></div>
+            <div class="form-group"><label class="form-label">Tag (e.g. fex, mp)</label><input class="form-input" id="kb-new-tag"></div>
+          </div>
+          <div class="form-group"><label class="form-label">Content</label><textarea class="kb-textarea" id="kb-new-content" rows="6"></textarea></div>
+          <button class="btn pri" onclick="createSubKb()">Add Entry</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1121,10 +1182,10 @@ async function loadDashboard() {
   // KPI Row 1
   const row1 = document.getElementById('kpi-row1');
   row1.innerHTML = kpiCard('Response Rate', fmtPct(k.response_rate), '', '') +
-    kpiCard('SMS Response Rate', fmtPct(k.response_rate), '', 'g') +
-    kpiCard('Bookings / 100', fmtNum(k.appointment_rate ? (k.appointment_rate * 100).toFixed(1) : 0), '', 'a') +
+    kpiCard('SMS Response Rate', fmtPct(k.sms_response_rate || k.response_rate), '', 'g') +
+    kpiCard('Booking Rate', fmtPct(k.booking_rate || k.appointment_rate), (k.appointments_booked || 0) + ' of ' + (k.total_conversations || 0), 'a') +
     kpiCard('Opt-Out Rate', fmtPct(k.opt_out_rate), '', 'r') +
-    kpiCard('DNC Rate', fmtNum(k.dnc_count), 'Total DNC contacts', 'p');
+    kpiCard('DNC Rate', fmtPct(k.dnc_rate || k.opt_out_rate), fmtNum(k.dnc_count) + ' contacts', 'p');
 
   // KPI Row 2
   const row2 = document.getElementById('kpi-row2');
@@ -1137,9 +1198,11 @@ async function loadDashboard() {
   // Cost cards
   const costEl = document.getElementById('cost-cards');
   costEl.innerHTML =
-    '<div class="card"><div class="card-title">AI Token Cost</div><div class="card-value">$' + fmtNum(k.ai_cost, 2) + '</div><div class="card-sub">Input: ' + fmtNum(k.total_input_tokens) + ' / Output: ' + fmtNum(k.total_output_tokens) + ' tokens</div></div>' +
-    '<div class="card"><div class="card-title">Carrier Cost</div><div class="card-value">$' + fmtNum(k.carrier_cost, 2) + '</div><div class="card-sub">' + fmtNum(k.total_segments) + ' segments</div></div>' +
-    '<div class="card"><div class="card-title">Cost Per Message</div><div class="card-value">' + fmtNum(k.cost_per_message, 4) + 'c</div><div class="card-sub">Blended AI + carrier</div></div>';
+    '<div class="card"><div class="card-title">AI Token Cost</div><div class="card-value">' + fmtDollar(k.ai_cost, 2) + '</div><div class="card-sub">In ' + fmtNum(k.total_input_tokens) + ' / Out ' + fmtNum(k.total_output_tokens) + '</div></div>' +
+    '<div class="card"><div class="card-title">Carrier Cost</div><div class="card-value">' + fmtDollar(k.carrier_cost, 2) + '</div><div class="card-sub">' + fmtNum(k.total_segments) + ' segments</div></div>' +
+    '<div class="card"><div class="card-title">Webhook Cost</div><div class="card-value">' + fmtDollar(k.webhook_cost || 0, 2) + '</div><div class="card-sub">' + fmtNum(k.webhook_billable_events || 0) + ' billable of ' + fmtNum(k.webhook_events || 0) + '</div></div>' +
+    '<div class="card"><div class="card-title">Total Cost</div><div class="card-value">' + fmtDollar(k.total_cost || ((k.ai_cost || 0) + (k.carrier_cost || 0) + (k.webhook_cost || 0)), 2) + '</div><div class="card-sub">AI + Carrier + Webhook</div></div>' +
+    '<div class="card"><div class="card-title">Cost / Message</div><div class="card-value">' + fmtDollar(k.cost_per_message, 4) + '</div><div class="card-sub">Blended</div></div>';
 
   // Trends chart
   if (data.trends && data.trends.length) {
@@ -1155,14 +1218,46 @@ async function loadDashboard() {
   const tbody = document.getElementById('subaccount-tbody');
   tbody.innerHTML = '';
   (data.per_subaccount || []).forEach(s => {
-    tbody.innerHTML += '<tr><td><span class="hl">' + esc(s.subaccount_name || s.location_id || 'Unknown') + '</span></td>' +
+    const name = s.subaccount_name || '(unnamed)';
+    const locId = s.location_id || '';
+    tbody.innerHTML += '<tr>' +
+      '<td><div class="hl" style="font-weight:600;">' + esc(name) + '</div>' +
+      '<div style="font-family:\'JetBrains Mono\';font-size:10px;color:var(--muted);">' + esc(locId) + '</div></td>' +
       '<td>' + fmtNum(s.total_conversations) + '</td>' +
       '<td>' + fmtNum(s.appointments_booked) + '</td>' +
+      '<td>' + fmtPct(s.booking_rate) + '</td>' +
+      '<td>' + fmtPct(s.response_rate) + '</td>' +
       '<td>' + fmtNum(s.human_handoffs) + '</td>' +
       '<td>' + fmtNum(s.dnc_count) + '</td>' +
       '<td>' + fmtPct(s.opt_out_rate) + '</td>' +
-      '<td>' + fmtNum(s.avg_messages_per_conversation, 1) + '</td></tr>';
+      '<td>' + fmtNum(s.avg_messages_per_conversation, 1) + '</td>' +
+      '<td>' + fmtDollar(s.total_cost, 2) + '</td>' +
+      '<td>' + fmtNum(s.time_saved_hours) + 'h</td>' +
+    '</tr>';
   });
+
+  // Appointments by Type + Time Saved breakdown
+  renderAppointmentsByType(data.appointments_by_type || [], data.kpis);
+}
+
+function renderAppointmentsByType(list, kpis) {
+  const el = document.getElementById('kpi-appts-by-type');
+  if (!el) return;
+  const total = list.reduce((a, b) => a + (b.count || 0), 0);
+  const rows = list.map((r) => {
+    const pct = total ? (r.count / total) * 100 : 0;
+    return '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span>' + esc(r.type) + '</span><span class="hl">' + fmtNum(r.count) + ' · ' + pct.toFixed(0) + '%</span></div>';
+  }).join('');
+  el.innerHTML = rows || '<div style="color:var(--muted);font-size:12px;">No appointments yet.</div>';
+
+  const bEl = document.getElementById('kpi-time-breakdown');
+  if (bEl && kpis && kpis.time_saved_breakdown) {
+    const b = kpis.time_saved_breakdown;
+    bEl.innerHTML =
+      '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span>SMS responded to</span><span class="hl">' + fmtNum(b.sms_responded_hours, 1) + 'h</span></div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span>Phone calls avoided</span><span class="hl">' + fmtNum(b.phone_calls_avoided_hours, 1) + 'h</span></div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span>Admin per contact</span><span class="hl">' + fmtNum(b.admin_per_contact_hours, 1) + 'h</span></div>';
+  }
 }
 
 function kpiCard(title, value, sub, color, small) {
@@ -1584,6 +1679,33 @@ async function loadSettingsPanel(panelId) {
     }
     if (!el.innerHTML) el.innerHTML = '<div class="form-group"><label class="form-label">Webhook URL</label><input class="form-input webhook-field" data-key="webhook_url" value=""></div>';
   }
+  if (panelId === 'st-cost' && !settingsLoaded.cost) {
+    settingsLoaded.cost = true;
+    const data = await api('/api/settings/cost_config');
+    if (data && data.settings) {
+      document.getElementById('cost-out-seg').value = data.settings.carrier_cost_per_segment_outbound || '0.0079';
+      document.getElementById('cost-in-seg').value = data.settings.carrier_cost_per_segment_inbound || '0.0079';
+      document.getElementById('cost-in-tok').value = data.settings.input_token_cost_per_million || '3';
+      document.getElementById('cost-out-tok').value = data.settings.output_token_cost_per_million || '15';
+      document.getElementById('cost-wh-free').value = data.settings.webhook_free_tier_per_month || '100';
+      document.getElementById('cost-wh-cost').value = data.settings.webhook_cost_per_event || '0.02';
+    }
+  }
+  if (panelId === 'st-users' && !settingsLoaded.users) {
+    settingsLoaded.users = true;
+    renderUsers();
+  }
+  if (panelId === 'st-kb-subs' && !settingsLoaded.kbsubs) {
+    settingsLoaded.kbsubs = true;
+    const sel = document.getElementById('kb-subaccount-sel');
+    sel.innerHTML = '<option value="">-- Select --</option>';
+    (subaccounts || []).forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a.ghl_location_id;
+      opt.textContent = a.name;
+      sel.appendChild(opt);
+    });
+  }
   if (panelId === 'st-notifications' && !settingsLoaded.notifications) {
     settingsLoaded.notifications = true;
     const data = await api('/api/settings/notifications');
@@ -1750,6 +1872,143 @@ document.addEventListener('change', e => {
     else stopLogRefresh();
   }
 });
+
+// ========== COST CONFIG ==========
+async function saveCostConfig() {
+  const body = {
+    carrier_cost_per_segment_outbound: document.getElementById('cost-out-seg').value,
+    carrier_cost_per_segment_inbound: document.getElementById('cost-in-seg').value,
+    input_token_cost_per_million: document.getElementById('cost-in-tok').value,
+    output_token_cost_per_million: document.getElementById('cost-out-tok').value,
+    webhook_free_tier_per_month: document.getElementById('cost-wh-free').value,
+    webhook_cost_per_event: document.getElementById('cost-wh-cost').value
+  };
+  const res = await api('/api/settings/cost_config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  toast(res ? 'Cost config saved.' : 'Failed to save cost config.');
+}
+
+// ========== USER MANAGEMENT ==========
+async function renderUsers() {
+  const data = await api('/api/auth/users');
+  if (!data) return;
+  const el = document.getElementById('users-list');
+  el.innerHTML = (data.users || []).map(u =>
+    '<div class="sub-cfg-row"><div class="sub-cfg-header">' +
+    '<div><div class="sub-cfg-name">' + esc(u.username) + '</div>' +
+    '<div class="sub-cfg-id">' + esc(u.email || 'no email') + ' · ' + esc(u.role) + ' · last login ' + (u.last_login_at ? fmtDate(u.last_login_at) : 'never') + '</div></div>' +
+    '<div style="display:flex;gap:6px;">' +
+    '<select class="fsel" onchange="updateUserRole(' + u.id + ', this.value)"><option value="admin"' + (u.role === 'admin' ? ' selected' : '') + '>Admin</option><option value="viewer"' + (u.role === 'viewer' ? ' selected' : '') + '>Viewer</option></select>' +
+    '<button class="btn-sm" onclick="resetUserPassword(' + u.id + ')">Reset PW</button>' +
+    '<button class="btn-sm dan" onclick="deleteUser(' + u.id + ',\'' + esc(u.username) + '\')">Delete</button>' +
+    '</div></div></div>'
+  ).join('');
+  if (!(data.users || []).length) el.innerHTML = '<div style="color:var(--muted);padding:20px;text-align:center;">No users yet.</div>';
+}
+
+async function createUser() {
+  const body = {
+    username: document.getElementById('nu-username').value.trim(),
+    password: document.getElementById('nu-password').value,
+    email: document.getElementById('nu-email').value.trim(),
+    role: document.getElementById('nu-role').value
+  };
+  if (!body.username || !body.password) { toast('Username and password required.'); return; }
+  const res = await fetch('/api/auth/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    toast('User created.');
+    document.getElementById('new-user-form').style.display = 'none';
+    document.getElementById('nu-username').value = '';
+    document.getElementById('nu-password').value = '';
+    document.getElementById('nu-email').value = '';
+    renderUsers();
+  } else {
+    toast('Failed: ' + (data.error || res.status));
+  }
+}
+
+async function updateUserRole(id, role) {
+  const res = await fetch('/api/auth/users/' + id, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role })
+  });
+  toast(res.ok ? 'Role updated.' : 'Failed to update role.');
+}
+
+async function resetUserPassword(id) {
+  const pw = prompt('New password:');
+  if (!pw) return;
+  const res = await fetch('/api/auth/users/' + id, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: pw })
+  });
+  toast(res.ok ? 'Password reset.' : 'Failed to reset password.');
+}
+
+async function deleteUser(id, username) {
+  if (!confirm('Delete user ' + username + '?')) return;
+  const res = await fetch('/api/auth/users/' + id, { method: 'DELETE' });
+  toast(res.ok ? 'User deleted.' : 'Failed to delete user.');
+  renderUsers();
+}
+
+// ========== SUBACCOUNT KB ==========
+async function loadSubKb() {
+  const locId = document.getElementById('kb-subaccount-sel').value;
+  const el = document.getElementById('kb-entries-list');
+  if (!locId) { el.innerHTML = ''; return; }
+  const data = await api('/api/kb/' + encodeURIComponent(locId));
+  if (!data) return;
+  el.innerHTML = (data.entries || []).map(e =>
+    '<div class="sub-cfg-row"><div class="sub-cfg-header"><div><div class="sub-cfg-name">' + esc(e.title || '(untitled)') + '</div>' +
+    '<div class="sub-cfg-id">' + (e.tag ? esc(e.tag) + ' · ' : '') + 'Updated ' + fmtDate(e.updated_at) + '</div></div>' +
+    '<button class="btn-sm dan" onclick="deleteSubKb(' + e.id + ',\'' + esc(locId) + '\')">Delete</button></div>' +
+    '<textarea class="kb-textarea" readonly rows="4">' + esc(e.content) + '</textarea></div>'
+  ).join('') || '<div style="color:var(--muted);padding:12px;text-align:center;">No entries yet for this subaccount.</div>';
+}
+
+async function createSubKb() {
+  const locId = document.getElementById('kb-subaccount-sel').value;
+  if (!locId) { toast('Pick a subaccount first.'); return; }
+  const content = document.getElementById('kb-new-content').value.trim();
+  if (!content) { toast('Content required.'); return; }
+  const body = {
+    title: document.getElementById('kb-new-title').value.trim(),
+    content,
+    tag: document.getElementById('kb-new-tag').value.trim()
+  };
+  const res = await fetch('/api/kb/' + encodeURIComponent(locId), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (res.ok) {
+    toast('KB entry added.');
+    document.getElementById('kb-new-title').value = '';
+    document.getElementById('kb-new-tag').value = '';
+    document.getElementById('kb-new-content').value = '';
+    loadSubKb();
+  } else {
+    toast('Failed to add.');
+  }
+}
+
+async function deleteSubKb(id, locId) {
+  if (!confirm('Delete KB entry?')) return;
+  const res = await fetch('/api/kb/' + encodeURIComponent(locId) + '/' + id, { method: 'DELETE' });
+  toast(res.ok ? 'Deleted.' : 'Failed.');
+  loadSubKb();
+}
 
 // ========== ANALYZER ==========
 let analyzerLocationId = '';
@@ -2370,11 +2629,148 @@ function fmtPct2(v) {
   return Number(v).toFixed(1) + '%';
 }
 
+function fmtDollar(v, digits) {
+  if (v === null || v === undefined || v === '' || isNaN(v)) return '---';
+  const d = digits === undefined ? 2 : digits;
+  return '$' + Number(v).toFixed(d);
+}
+
+function fmtDate(v, opts) {
+  if (!v) return '';
+  try {
+    const d = typeof v === 'number' ? new Date(v) : new Date(String(v));
+    if (isNaN(d.getTime())) return String(v);
+    const o = opts || { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' };
+    return d.toLocaleString('en-US', o);
+  } catch { return String(v); }
+}
+
+function fmtDateShort(v) {
+  return fmtDate(v, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 function esc(s) {
   if (s === null || s === undefined) return '';
   const d = document.createElement('div');
   d.textContent = String(s);
   return d.innerHTML;
+}
+
+// ========== HEALTH + PENDING CHANGES ==========
+let currentUserRole = 'admin';
+let currentUserName = '';
+
+async function refreshHealthBadge() {
+  try {
+    const data = await api('/api/health/status');
+    if (!data) return;
+    const dot = document.getElementById('health-dot');
+    const label = document.getElementById('health-label');
+    const statusColors = { up: 'var(--green)', degraded: 'var(--amber)', down: 'var(--red)', unknown: 'var(--muted)' };
+    dot.style.background = statusColors[data.status] || 'var(--muted)';
+    dot.style.boxShadow = '0 0 6px ' + (statusColors[data.status] || 'transparent');
+    let text;
+    if (data.status === 'up') text = 'All Systems Operational';
+    else if (data.status === 'degraded') {
+      const down = Object.values(data.components || {}).filter(c => c.status !== 'up').map(c => c.name).join(', ');
+      text = 'Degraded — ' + (down || 'unknown');
+    } else if (data.status === 'down') {
+      const down = Object.values(data.components || {}).filter(c => c.status === 'down').map(c => c.name).join(', ');
+      text = 'System Down — ' + (down || 'unknown');
+    } else text = 'Checking…';
+    label.textContent = text;
+  } catch {}
+}
+
+async function showHealthModal() {
+  const data = await api('/api/health/status');
+  const hist = await api('/api/health/history?hours=168');
+  if (!data) return;
+  const comps = Object.values(data.components || {}).map(c =>
+    '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.status) + '</td><td>' + fmtNum(c.response_time_ms) + ' ms</td><td>' + esc(c.error || '—') + '</td></tr>'
+  ).join('');
+  const bars = (hist?.buckets || []).slice(-72).map(b => {
+    const total = (b.up || 0) + (b.down || 0) + (b.degraded || 0);
+    const upPct = total ? (b.up / total) * 100 : 0;
+    const color = upPct === 100 ? 'var(--green)' : upPct === 0 ? 'var(--red)' : 'var(--amber)';
+    return '<div title="' + esc(b.bucket) + ' — ' + Math.round(upPct) + '% up" style="flex:1;height:22px;background:' + color + ';margin:0 1px;border-radius:2px;"></div>';
+  }).join('');
+  const inner = '<div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:8px;">System Health</div>' +
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Last checked: ' + fmtDate(data.checked_at) + ' · 7-day uptime: ' + fmtNum(data.uptime_7d_pct, 2) + '%</div>' +
+    '<table style="margin-bottom:14px;"><thead><tr><th>Component</th><th>Status</th><th>Latency</th><th>Error</th></tr></thead><tbody>' + comps + '</tbody></table>' +
+    '<div class="card-title">Last 72 hours (per-hour)</div>' +
+    '<div style="display:flex;gap:0;margin-top:6px;">' + bars + '</div>';
+  const back = document.createElement('div');
+  back.className = 'dc-modal-backdrop';
+  back.innerHTML = '<div class="dc-modal">' + inner + '<div style="margin-top:12px;text-align:right;"><button class="btn pri" onclick="this.closest(\'.dc-modal-backdrop\').remove()">Close</button></div></div>';
+  back.addEventListener('click', (ev) => { if (ev.target === back) back.remove(); });
+  document.body.appendChild(back);
+}
+
+async function refreshPendingChangesBadge() {
+  try {
+    const data = await api('/api/pending-changes?status=pending');
+    if (!data) return;
+    const count = (data.changes || []).length;
+    const badge = document.getElementById('pending-badge');
+    if (!badge) return;
+    if (count > 0) {
+      badge.style.display = 'inline-block';
+      badge.textContent = count + ' PENDING CHANGE' + (count === 1 ? '' : 'S');
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch {}
+}
+
+async function showPendingChangesModal() {
+  const data = await api('/api/pending-changes?status=pending');
+  if (!data) return;
+  const groups = {};
+  (data.changes || []).forEach(c => {
+    const s = c.source || 'unknown';
+    if (!groups[s]) groups[s] = [];
+    groups[s].push(c);
+  });
+  const sections = Object.entries(groups).map(([src, items]) => {
+    const rows = items.map(c =>
+      '<div style="padding:8px 10px;border-bottom:1px solid var(--border);"><div style="color:var(--cyan);font-size:11px;text-transform:uppercase;">' + esc(c.change_type || 'change') + '</div>' +
+      '<div style="font-size:13px;color:var(--text);margin-top:2px;">' + esc(c.description) + '</div>' +
+      '<div style="font-size:10px;color:var(--muted);margin-top:3px;">By ' + esc(c.proposed_by || 'unknown') + ' on ' + fmtDate(c.created_at) + '</div>' +
+      (currentUserRole === 'admin' ? '<div style="margin-top:5px;display:flex;gap:5px;"><button class="btn-sm" onclick="resolvePendingChange(' + c.id + ',\'applied\')">Mark Applied</button><button class="btn-sm" onclick="resolvePendingChange(' + c.id + ',\'rejected\')">Reject</button></div>' : '') +
+      '</div>'
+    ).join('');
+    return '<div style="margin-bottom:14px;"><div style="font-size:11px;letter-spacing:2px;color:var(--amber);font-weight:700;text-transform:uppercase;margin-bottom:5px;">' + esc(src) + ' (' + items.length + ')</div>' + rows + '</div>';
+  }).join('');
+  const inner = '<div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:12px;">Pending Prompt Changes (' + (data.changes || []).length + ')</div>' +
+    (sections || '<div style="color:var(--muted);padding:20px;text-align:center;">No pending changes.</div>');
+  const back = document.createElement('div');
+  back.className = 'dc-modal-backdrop';
+  back.innerHTML = '<div class="dc-modal" style="min-width:560px;">' + inner + '<div style="margin-top:12px;text-align:right;"><button class="btn pri" onclick="this.closest(\'.dc-modal-backdrop\').remove()">Close</button></div></div>';
+  back.addEventListener('click', (ev) => { if (ev.target === back) back.remove(); });
+  document.body.appendChild(back);
+}
+
+async function resolvePendingChange(id, status) {
+  const res = await fetch('/api/pending-changes/' + id + '/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status })
+  });
+  if (res.ok) {
+    toast('Change ' + status + '.');
+    document.querySelector('.dc-modal-backdrop')?.remove();
+    refreshPendingChangesBadge();
+  } else {
+    toast('Failed to update change.');
+  }
+}
+
+function applyRoleVisibility(role) {
+  currentUserRole = role || 'admin';
+  if (role !== 'admin') {
+    document.querySelectorAll('[data-tab="tab-devconsole"]').forEach(el => el.style.display = 'none');
+  }
 }
 
 // ========== INIT ==========
@@ -2385,14 +2781,20 @@ function esc(s) {
     if (me.status === 401) { redirectToLogin(); return; }
     const meData = await me.json().catch(() => ({}));
     if (meData.username) {
+      currentUserName = meData.username;
       try {
         const avatar = document.getElementById('header-avatar');
         if (avatar) avatar.textContent = meData.username.slice(0, 2).toUpperCase();
       } catch {}
     }
+    applyRoleVisibility(meData.role);
   } catch {}
   await loadSubaccounts();
   loadDashboard();
+  refreshHealthBadge();
+  refreshPendingChangesBadge();
+  setInterval(refreshHealthBadge, 60000);
+  setInterval(refreshPendingChangesBadge, 30000);
 })();
 </script>
 </body>

@@ -17,12 +17,17 @@ const analyzerRouter = require('./routes/analyzer');
 const testSyncRouter = require('./routes/testSync');
 const authRouter = require('./routes/auth');
 const devConsoleRouter = require('./routes/devConsole');
+const healthRouter = require('./routes/health');
+const pendingChangesRouter = require('./routes/pendingChanges');
+const kbRouter = require('./routes/kb');
 const cronRoutes = require('./routes/cron');
 const conversationStore = require('./services/conversationStore');
 const ghl = require('./services/ghl');
 const logger = require('./services/logger');
 const db = require('./db');
 const { requireAuth } = require('./middleware/auth');
+const authService = require('./services/auth');
+const health = require('./services/health');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -30,7 +35,8 @@ app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// Webhook (GHL-facing) and auth routes stay unauthenticated.
+// Webhook (GHL-facing) stays unauthenticated. /api/auth has public endpoints
+// (login) and admin-only endpoints (users CRUD); those gate themselves inline.
 app.use('/webhook', webhookRouter);
 app.use('/api/auth', authRouter);
 
@@ -38,6 +44,36 @@ app.use('/api/auth', authRouter);
 app.use('/api', requireAuth);
 app.use('/sandbox', requireAuth);
 app.use('/cron', requireAuth);
+
+// Role guard: viewers are read-only on mutating admin endpoints.
+app.use((req, res, next) => {
+  if (!req.session) return next();
+  if (req.session.role === 'admin') return next();
+  const p = req.path || '';
+  const m = req.method || 'GET';
+  const isMut = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(m);
+  const blockedPrefixes = [
+    { prefix: '/api/dev', any: true },
+    { prefix: '/api/admin', any: true },
+    { prefix: '/api/test-sync', any: true },
+    { prefix: '/api/analyzer/prompt', mut: true },
+    { prefix: '/api/analyzer/generate-prompt', mut: true },
+    { prefix: '/api/analyzer/apply-changes', any: true },
+    { prefix: '/api/settings', mut: true },
+    { prefix: '/api/subaccounts', mut: true },
+    { prefix: '/api/kb', mut: true },
+    { prefix: '/api/pending-changes', mut: true },
+    { prefix: '/api/auth/users', mut: true }
+  ];
+  for (const b of blockedPrefixes) {
+    if (p.startsWith(b.prefix)) {
+      if (b.any || (b.mut && isMut)) {
+        return res.status(403).json({ error: 'admin role required' });
+      }
+    }
+  }
+  next();
+});
 
 app.use('/api', analyticsRouter);
 app.use('/api', logsRouter);
@@ -50,6 +86,9 @@ app.use('/api', subaccountsRouter);
 app.use('/api', settingsRouter);
 app.use('/api/analyzer', analyzerRouter);
 app.use('/api/dev', devConsoleRouter);
+app.use('/api', healthRouter);
+app.use('/api', pendingChangesRouter);
+app.use('/api', kbRouter);
 app.use('/api', testSyncRouter);
 app.use('/sandbox', sandboxRouter);
 app.use('/cron', cronRoutes.router);
@@ -65,6 +104,12 @@ app.use((err, req, res, next) => {
 const port = parseInt(process.env.PORT, 10) || 3000;
 app.listen(port, () => {
   console.log(`[server] listening on :${port}`);
+  // Seed default users if not already present (idempotent).
+  authService.seedUsersIfMissing().catch((err) => {
+    logger.log('auth', 'error', null, 'User seeding failed at startup', { error: err.message });
+  });
+  // Start system health check loop (runs every 60s).
+  health.startHealthLoop();
 });
 
 // Background GHL field sync — catches stale dirty rows that never hit a terminal outcome.
@@ -80,9 +125,11 @@ setInterval(async () => {
   try {
     const msgDel = await db.query(`DELETE FROM ghl_messages WHERE (ghl_conversation_id, location_id) IN (SELECT ghl_conversation_id, location_id FROM ghl_conversations WHERE expires_at < NOW())`);
     const convDel = await db.query(`DELETE FROM ghl_conversations WHERE expires_at < NOW()`);
-    logger.log('cleanup', 'info', null, 'Expired GHL data cleaned up', {
-      messages: msgDel.rowCount || 0,
-      conversations: convDel.rowCount || 0
+    const healthDel = await db.query(`DELETE FROM system_health_log WHERE checked_at < NOW() - INTERVAL '30 days'`);
+    logger.log('cleanup', 'info', null, 'Daily cleanup completed', {
+      ghl_messages: msgDel.rowCount || 0,
+      ghl_conversations: convDel.rowCount || 0,
+      health_log_rows: healthDel.rowCount || 0
     });
   } catch (err) {
     logger.log('cleanup', 'error', null, 'GHL cleanup failed', { error: err.message });

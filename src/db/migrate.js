@@ -66,6 +66,85 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS idx_ghl_messages_created ON ghl_messages(ghl_conversation_id, created_at ASC);
     `);
     console.log('[migrate] ghl_conversations + ghl_messages ensured');
+
+    // Production-ready dashboard: users, health, wordtracks, pending changes,
+    // weekly summaries, per-subaccount knowledge base.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        email TEXT,
+        role TEXT DEFAULT 'admin',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        last_login_at TIMESTAMPTZ
+      );
+
+      CREATE TABLE IF NOT EXISTS system_health_log (
+        id SERIAL PRIMARY KEY,
+        status TEXT NOT NULL,
+        component TEXT,
+        response_time_ms INTEGER,
+        error_message TEXT,
+        checked_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_health_checked ON system_health_log(checked_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_health_status ON system_health_log(status);
+
+      CREATE TABLE IF NOT EXISTS wordtracks (
+        id SERIAL PRIMARY KEY,
+        wordtrack_text TEXT NOT NULL,
+        wordtrack_hash TEXT NOT NULL UNIQUE,
+        source TEXT,
+        category TEXT,
+        times_sent INTEGER DEFAULT 0,
+        response_rate REAL DEFAULT 0,
+        positive_response_rate REAL DEFAULT 0,
+        booking_rate REAL DEFAULT 0,
+        opt_out_rate REAL DEFAULT 0,
+        avg_reply_time_seconds REAL,
+        last_used_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_wordtracks_source ON wordtracks(source);
+      CREATE INDEX IF NOT EXISTS idx_wordtracks_category ON wordtracks(category);
+
+      CREATE TABLE IF NOT EXISTS pending_prompt_changes (
+        id SERIAL PRIMARY KEY,
+        source TEXT,
+        change_type TEXT,
+        description TEXT,
+        example_conversation_id INTEGER,
+        proposed_by TEXT,
+        status TEXT DEFAULT 'pending',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        resolved_at TIMESTAMPTZ
+      );
+      CREATE INDEX IF NOT EXISTS idx_pending_changes_status ON pending_prompt_changes(status);
+
+      CREATE TABLE IF NOT EXISTS weekly_summaries (
+        id SERIAL PRIMARY KEY,
+        location_id TEXT NOT NULL,
+        week_start DATE NOT NULL,
+        week_end DATE NOT NULL,
+        summary_data JSONB,
+        generated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(location_id, week_start)
+      );
+      CREATE INDEX IF NOT EXISTS idx_weekly_location ON weekly_summaries(location_id, week_start DESC);
+
+      CREATE TABLE IF NOT EXISTS subaccount_knowledge_base (
+        id SERIAL PRIMARY KEY,
+        location_id TEXT NOT NULL,
+        title TEXT,
+        content TEXT NOT NULL,
+        tag TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_sub_kb_location ON subaccount_knowledge_base(location_id);
+    `);
+    console.log('[migrate] users + health + wordtracks + pending_changes + weekly_summaries + sub_kb ensured');
   } catch (err) {
     console.error('[migrate] failed', err);
     process.exit(1);

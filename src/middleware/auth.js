@@ -11,4 +11,14 @@ function requireAuth(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth };
+function requireRole(role) {
+  return (req, res, next) => {
+    if (!req.session) return res.status(401).json({ error: 'unauthorized' });
+    if (role === 'admin' && req.session.role !== 'admin') {
+      return res.status(403).json({ error: 'admin role required' });
+    }
+    next();
+  };
+}
+
+module.exports = { requireAuth, requireRole };

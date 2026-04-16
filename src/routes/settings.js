@@ -2,7 +2,23 @@ const express = require('express');
 const db = require('../db');
 const router = express.Router();
 
-const VALID_SECTIONS = ['claude_config', 'system_prompt', 'knowledge_base', 'bot_instructions', 'webhooks', 'notifications'];
+const VALID_SECTIONS = ['claude_config', 'system_prompt', 'knowledge_base', 'bot_instructions', 'webhooks', 'notifications', 'cost_config'];
+
+const SECTION_DEFAULTS = {
+  claude_config: {
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: '1024',
+    temperature: '1.0'
+  },
+  cost_config: {
+    carrier_cost_per_segment_outbound: '0.0079',
+    carrier_cost_per_segment_inbound: '0.0079',
+    webhook_free_tier_per_month: '100',
+    webhook_cost_per_event: '0.02',
+    input_token_cost_per_million: '3',
+    output_token_cost_per_million: '15'
+  }
+};
 
 // Get settings for a section
 router.get('/settings/:section', async (req, res) => {
@@ -15,7 +31,7 @@ router.get('/settings/:section', async (req, res) => {
       `SELECT key, value FROM app_settings WHERE section = $1 ORDER BY key`,
       [section]
     );
-    const settings = {};
+    const settings = { ...(SECTION_DEFAULTS[section] || {}) };
     for (const row of result.rows) {
       settings[row.key] = row.value;
     }
