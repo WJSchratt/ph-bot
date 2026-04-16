@@ -4,12 +4,13 @@ const router = express.Router();
 
 router.get('/wordtracks', async (req, res) => {
   try {
-    const { location_id, days = 30, sort_by = 'total_sent', sort_dir = 'desc' } = req.query;
+    const { location_id, location_ids, days = 30, sort_by = 'total_sent', sort_dir = 'desc' } = req.query;
     const params = [];
     const filters = [`m.direction = 'outbound'`];
     params.push(parseInt(days, 10) || 30);
     filters.push(`m.created_at >= NOW() - ($${params.length} || ' days')::interval`);
-    if (location_id) { params.push(location_id); filters.push(`m.location_id = $${params.length}`); }
+    const locIds = location_ids ? location_ids.split(',').map(s => s.trim()).filter(Boolean) : (location_id ? [location_id] : []);
+    if (locIds.length) { params.push(locIds); filters.push(`m.location_id = ANY($${params.length})`); }
     const where = `WHERE ${filters.join(' AND ')}`;
 
     const allowedSorts = ['total_sent', 'replies', 'reply_rate', 'opt_outs', 'opt_out_rate', 'bookings', 'booking_rate', 'avg_reply_time'];

@@ -4,12 +4,13 @@ const router = express.Router();
 
 router.get('/pipeline', async (req, res) => {
   try {
-    const { location_id, days = 30 } = req.query;
+    const { location_id, location_ids, days = 30 } = req.query;
     const params = [];
     const filters = ['is_sandbox = FALSE'];
     params.push(parseInt(days, 10) || 30);
     filters.push(`created_at >= NOW() - ($${params.length} || ' days')::interval`);
-    if (location_id) { params.push(location_id); filters.push(`location_id = $${params.length}`); }
+    const locIds = location_ids ? location_ids.split(',').map(s => s.trim()).filter(Boolean) : (location_id ? [location_id] : []);
+    if (locIds.length) { params.push(locIds); filters.push(`location_id = ANY($${params.length})`); }
     const where = `WHERE ${filters.join(' AND ')}`;
 
     // Funnel by contact_stage + terminal_outcome

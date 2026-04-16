@@ -4,10 +4,11 @@ const router = express.Router();
 
 router.get('/dashboard', async (req, res) => {
   try {
-    const { location_id, days = 30 } = req.query;
+    const { location_id, location_ids, days = 30 } = req.query;
     const params = [];
     const filters = ['is_sandbox = FALSE'];
-    if (location_id) { params.push(location_id); filters.push(`c.location_id = $${params.length}`); }
+    const locIds = location_ids ? location_ids.split(',').map(s => s.trim()).filter(Boolean) : (location_id ? [location_id] : []);
+    if (locIds.length) { params.push(locIds); filters.push(`c.location_id = ANY($${params.length})`); }
     const daysInt = parseInt(days, 10) || 30;
     params.push(daysInt);
     filters.push(`c.created_at >= NOW() - ($${params.length} || ' days')::interval`);
@@ -36,7 +37,7 @@ router.get('/dashboard', async (req, res) => {
     // Message stats
     const msgParams = [];
     const msgFilters = [];
-    if (location_id) { msgParams.push(location_id); msgFilters.push(`m.location_id = $${msgParams.length}`); }
+    if (locIds.length) { msgParams.push(locIds); msgFilters.push(`m.location_id = ANY($${msgParams.length})`); }
     msgParams.push(daysInt);
     msgFilters.push(`m.created_at >= NOW() - ($${msgParams.length} || ' days')::interval`);
     const msgWhere = `WHERE ${msgFilters.join(' AND ')}`;
@@ -117,7 +118,7 @@ router.get('/dashboard', async (req, res) => {
     const trendParams = [];
     trendParams.push(daysInt);
     const trendFilters = ['is_sandbox = FALSE'];
-    if (location_id) { trendParams.push(location_id); trendFilters.push(`location_id = $${trendParams.length}`); }
+    if (locIds.length) { trendParams.push(locIds); trendFilters.push(`location_id = ANY($${trendParams.length})`); }
     const trendWhere = `WHERE ${trendFilters.join(' AND ')}`;
 
     const trendRes = await db.query(

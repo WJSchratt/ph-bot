@@ -744,7 +744,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
 <script>
 // ========== STATE ==========
 let subaccounts = [];
-let selectedLocationId = '';
+let selectedLocationIds = []; // multi-select: empty = all
 let currentTab = 'tab-dashboard';
 let chartInstances = {};
 let logInterval = null;
@@ -774,24 +774,44 @@ async function api(url, opts) {
   }
 }
 
-// ========== ACCOUNT PICKER ==========
+// ========== ACCOUNT PICKER (MULTI-SELECT) ==========
 async function loadSubaccounts() {
   const data = await api('/api/subaccounts');
   if (!data) return;
   subaccounts = data.subaccounts || [];
+  // Restore saved selection from localStorage
+  try {
+    const saved = JSON.parse(localStorage.getItem('ph_selected_locations') || '[]');
+    if (Array.isArray(saved) && saved.length) {
+      selectedLocationIds = saved.filter(id => subaccounts.some(s => s.ghl_location_id === id));
+    }
+  } catch {}
   updateAcctDisplay();
+}
+
+function saveLocationSelection() {
+  try { localStorage.setItem('ph_selected_locations', JSON.stringify(selectedLocationIds)); } catch {}
+}
+
+function getLocationParam() {
+  if (!selectedLocationIds.length) return '';
+  return 'location_ids=' + encodeURIComponent(selectedLocationIds.join(','));
 }
 
 function updateAcctDisplay() {
   const nd = document.getElementById('acct-name-disp');
   const id = document.getElementById('acct-id-disp');
-  if (!selectedLocationId) {
+  const n = selectedLocationIds.length;
+  if (!n || n === subaccounts.length) {
     nd.textContent = 'All Subaccounts (' + subaccounts.length + ')';
-    id.textContent = 'Showing all data';
+    id.textContent = 'Multi-select active';
+  } else if (n === 1) {
+    const sa = subaccounts.find(s => s.ghl_location_id === selectedLocationIds[0]);
+    nd.textContent = sa ? sa.name : selectedLocationIds[0];
+    id.textContent = selectedLocationIds[0];
   } else {
-    const sa = subaccounts.find(s => s.ghl_location_id === selectedLocationId);
-    nd.textContent = sa ? sa.name : selectedLocationId;
-    id.textContent = selectedLocationId;
+    nd.textContent = n + ' Subaccounts Selected';
+    id.textContent = 'Multi-select active';
   }
 }
 
@@ -799,12 +819,16 @@ function renderAcctList(filter) {
   const el = document.getElementById('acct-list-el');
   el.innerHTML = '';
   const f = (filter || '').toLowerCase();
-  const items = [{ghl_location_id: '', name: 'All Subaccounts'}].concat(subaccounts);
-  items.filter(a => !f || a.name.toLowerCase().includes(f) || (a.ghl_location_id || '').includes(f)).forEach(a => {
+  subaccounts.filter(a => !f || a.name.toLowerCase().includes(f) || a.ghl_location_id.includes(f)).forEach(a => {
+    const sel = selectedLocationIds.includes(a.ghl_location_id);
     const d = document.createElement('div');
-    d.className = 'acct-item' + (selectedLocationId === a.ghl_location_id ? ' selected' : '');
-    d.innerHTML = '<div class="chk">' + (selectedLocationId === a.ghl_location_id ? '&#10003;' : '') + '</div><div><div class="acct-name" style="font-size:13px;">' + a.name + '</div>' + (a.ghl_location_id ? '<div class="acct-id">' + a.ghl_location_id + '</div>' : '') + '</div>';
-    d.onclick = () => { selectedLocationId = a.ghl_location_id; renderAcctList(filter); };
+    d.className = 'acct-item' + (sel ? ' selected' : '');
+    d.innerHTML = '<div class="chk">' + (sel ? '&#10003;' : '') + '</div><div><div class="acct-name" style="font-size:13px;">' + a.name + '</div><div class="acct-id">' + a.ghl_location_id + '</div></div>';
+    d.onclick = () => {
+      if (sel) selectedLocationIds = selectedLocationIds.filter(x => x !== a.ghl_location_id);
+      else selectedLocationIds.push(a.ghl_location_id);
+      renderAcctList(filter);
+    };
     el.appendChild(d);
   });
 }
@@ -818,12 +842,13 @@ function toggleDrop() {
 }
 
 function filterAccts(v) { renderAcctList(v); }
-function selAll() { selectedLocationId = ''; renderAcctList(); }
-function clrAll() { selectedLocationId = ''; renderAcctList(); }
+function selAll() { selectedLocationIds = subaccounts.map(s => s.ghl_location_id); renderAcctList(); }
+function clrAll() { selectedLocationIds = []; renderAcctList(); }
 
 function applyAccts() {
   document.getElementById('acct-drop').classList.remove('open');
   document.getElementById('acct-chev').style.transform = '';
+  saveLocationSelection();
   updateAcctDisplay();
   loadCurrentTab();
 }
@@ -865,8 +890,8 @@ function loadCurrentTab() {
 // ========== DASHBOARD ==========
 async function loadDashboard() {
   const params = new URLSearchParams({ days: getDays() });
-  if (selectedLocationId) params.set('location_id', selectedLocationId);
-  const data = await api('/api/dashboard?' + params);
+  const locParam = getLocationParam();
+  const data = await api('/api/dashboard?' + params + (locParam ? '&' + locParam : ''));
   if (!data) return;
   const k = data.kpis || {};
 
@@ -971,7 +996,8 @@ async function loadWordtracks() {
   const sortBy = document.getElementById('wt-sort').value;
   const sortDir = document.getElementById('wt-dir').value;
   const params = new URLSearchParams({ days: getDays(), sort_by: sortBy, sort_dir: sortDir });
-  const data = await api('/api/wordtracks?' + params);
+  const locParam = getLocationParam();
+  const data = await api('/api/wordtracks?' + params + (locParam ? '&' + locParam : ''));
   if (!data) return;
 
   const el = document.getElementById('wt-list');
@@ -997,7 +1023,8 @@ async function loadWordtracks() {
 // ========== PIPELINE ==========
 async function loadPipeline() {
   const params = new URLSearchParams({ days: getDays() });
-  const data = await api('/api/pipeline?' + params);
+  const locParam = getLocationParam();
+  const data = await api('/api/pipeline?' + params + (locParam ? '&' + locParam : ''));
   if (!data) return;
 
   const stages = data.stages || [];
