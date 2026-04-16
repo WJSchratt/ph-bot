@@ -357,6 +357,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
   <div class="nav-item" data-tab="tab-review" onclick="goTab('tab-review')"><span class="nav-icon">&#8635;</span> AI Review Queue <span class="nav-badge nb-red" id="nav-review-badge"></span></div>
   <div class="nav-section">Tools</div>
   <div class="nav-item" data-tab="tab-sandbox" onclick="goTab('tab-sandbox')"><span class="nav-icon">&#9879;</span> Sandbox</div>
+  <div class="nav-item" data-tab="tab-analyzer" onclick="goTab('tab-analyzer')"><span class="nav-icon">&#9881;</span> Analyzer <span class="nav-badge nb-cyan">NEW</span></div>
   <div class="nav-section">System</div>
   <div class="nav-item" data-tab="tab-settings" onclick="goTab('tab-settings')"><span class="nav-icon">&#9881;</span> Settings</div>
   <div class="nav-item" data-tab="tab-devnotes" onclick="goTab('tab-devnotes')"><span class="nav-icon">&#128203;</span> Dev Notes <span class="nav-badge nb-cyan">NEW</span></div>
@@ -520,6 +521,92 @@ textarea.form-input{resize:vertical;min-height:80px;}
         <button class="btn pri" onclick="sbSend()">Send</button>
       </div>
       <div id="sb-metadata" style="display:none;margin-top:8px;padding:9px;background:var(--surface2);border-radius:6px;font-size:10px;font-family:'JetBrains Mono';color:var(--muted);"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ====== ANALYZER ====== -->
+<div class="tab-content" id="tab-analyzer">
+  <div class="sh"><span class="sh-title">Bot Analyzer</span><div class="sh-line"></div><button class="btn pri" onclick="loadAnalyzerAll()">Refresh</button></div>
+
+  <div class="grid c2" style="margin-bottom:14px;">
+    <div class="card">
+      <div class="card-title">BotPress (legacy)</div>
+      <div id="an-bp-stats" style="margin-top:6px;">Loading...</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Claude Bot (current)</div>
+      <div id="an-cl-stats" style="margin-top:6px;">Loading...</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:14px;">
+    <div class="sh"><span class="sh-title">Conversation Review</span><div class="sh-line"></div>
+      <div class="itabs" style="margin-bottom:0;">
+        <div class="itab active" data-bt="claude" onclick="switchAnalyzerBot('claude', this)">Claude</div>
+        <div class="itab" data-bt="botpress" onclick="switchAnalyzerBot('botpress', this)">BotPress</div>
+      </div>
+    </div>
+    <div class="frow" style="margin-bottom:10px;">
+      <input class="finput" id="an-search" placeholder="Filter by name..." oninput="renderAnalyzerConvs()">
+      <select class="fsel" id="an-outcome-filter" onchange="loadAnalyzerConversations()">
+        <option value="">All outcomes</option>
+        <option value="appointment_booked">appointment_booked</option>
+        <option value="dnc">dnc</option>
+        <option value="human_handoff">human_handoff</option>
+        <option value="fex_immediate">fex_immediate</option>
+        <option value="mp_immediate">mp_immediate</option>
+      </select>
+    </div>
+    <div class="conv-wrap" style="height:420px;">
+      <div class="conv-list">
+        <div class="conv-list-header" id="an-list-header">Conversations</div>
+        <div id="an-conv-list"></div>
+      </div>
+      <div class="conv-panel">
+        <div class="conv-top">
+          <div><strong id="an-conv-name">Select a conversation</strong><span style="font-size:11px;color:var(--muted);margin-left:10px;" id="an-conv-meta"></span></div>
+        </div>
+        <div class="conv-messages" id="an-messages">
+          <div style="color:var(--muted);text-align:center;padding:40px;">Select a conversation from the left panel.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:14px;">
+    <div class="sh"><span class="sh-title">AI Comparative Analysis</span><div class="sh-line"></div>
+      <button class="btn pri" id="an-run-btn" onclick="runAnalyzerAnalysis()">Run Analysis</button>
+    </div>
+    <div id="an-analysis-result" style="font-family:'JetBrains Mono';font-size:12px;line-height:1.6;color:var(--text);white-space:pre-wrap;padding:10px;background:var(--bg);border-radius:6px;min-height:60px;">Click "Run Analysis" to generate a comparative review.</div>
+  </div>
+
+  <div class="card">
+    <div class="sh"><span class="sh-title">Prompt Editor</span><div class="sh-line"></div></div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+      <div>
+        <div class="form-label" style="margin-bottom:6px;">Current System Prompt</div>
+        <textarea class="kb-textarea" id="an-current-prompt" rows="12" readonly></textarea>
+      </div>
+      <div>
+        <div class="form-label" style="margin-bottom:6px;">Generated / Edited Prompt</div>
+        <textarea class="kb-textarea" id="an-new-prompt" rows="12" placeholder="Generated prompt will appear here..."></textarea>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Describe the changes you want</label>
+      <textarea class="kb-textarea" id="an-change-desc" rows="3" placeholder="e.g. be more direct when handling not-interested objections; drop the chain-smoking joke..."></textarea>
+    </div>
+
+    <div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+      <button class="btn pri" id="an-gen-btn" onclick="generateAnalyzerPrompt()">Generate Updated Prompt</button>
+      <button class="btn grn" onclick="applyAnalyzerPrompt()">Apply Prompt</button>
+      <select class="fsel" id="an-revert-sel">
+        <option value="">Revert to...</option>
+      </select>
+      <button class="btn" onclick="revertAnalyzerPrompt()">Revert</button>
     </div>
   </div>
 </div>
@@ -884,6 +971,7 @@ function loadCurrentTab() {
     case 'tab-review': loadReviewQueue(); break;
     case 'tab-logs': loadLogs(); startLogRefresh(); break;
     case 'tab-settings': loadSettingsData(); break;
+    case 'tab-analyzer': loadAnalyzerAll(); break;
   }
 }
 
@@ -1527,6 +1615,200 @@ document.addEventListener('change', e => {
     else stopLogRefresh();
   }
 });
+
+// ========== ANALYZER ==========
+let analyzerBotType = 'claude';
+let analyzerConvs = [];
+
+async function loadAnalyzerAll() {
+  loadAnalyzerStats();
+  loadAnalyzerConversations();
+  loadAnalyzerPrompt();
+}
+
+async function loadAnalyzerStats() {
+  const data = await api('/api/analyzer/stats');
+  if (!data) return;
+  const cl = data.claude || {};
+  const bp = data.botpress || {};
+
+  const renderOutcomes = (outcomes) => (outcomes || []).map(o => '<div style="font-size:11px;color:var(--muted);">' + esc(o.outcome || o.terminal_outcome) + ': <strong style="color:var(--cyan);">' + fmtNum(o.count) + '</strong></div>').join('');
+
+  document.getElementById('an-cl-stats').innerHTML =
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
+      '<div><div class="card-value sm" style="color:var(--cyan);">' + fmtNum(cl.total) + '</div><div class="card-sub">Total conversations</div></div>' +
+      '<div><div class="card-value sm" style="color:var(--green);">' + fmtPct(cl.completion_rate) + '</div><div class="card-sub">Completion rate</div></div>' +
+      '<div><div class="card-value sm" style="color:var(--amber);">' + fmtNum(cl.avg_messages, 1) + '</div><div class="card-sub">Avg messages</div></div>' +
+      '<div><div class="card-value sm" style="color:var(--green);">' + fmtNum(cl.booked) + '</div><div class="card-sub">Booked</div></div>' +
+    '</div><div class="divider"></div>' + renderOutcomes(cl.outcomes);
+
+  document.getElementById('an-bp-stats').innerHTML =
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
+      '<div><div class="card-value sm" style="color:var(--purple);">' + fmtNum(bp.total) + '</div><div class="card-sub">Total (has botpress history)</div></div>' +
+      '<div><div class="card-value sm" style="color:var(--green);">' + fmtPct(bp.completion_rate) + '</div><div class="card-sub">Est. completion rate</div></div>' +
+      '<div><div class="card-value sm" style="color:var(--amber);">' + fmtNum(bp.avg_exchanges, 1) + '</div><div class="card-sub">Avg exchanges</div></div>' +
+      '<div><div class="card-value sm" style="color:var(--cyan);">' + fmtNum(bp.completed) + '</div><div class="card-sub">Likely booked</div></div>' +
+    '</div><div class="divider"></div>' + renderOutcomes(bp.outcomes);
+}
+
+function switchAnalyzerBot(bt, el) {
+  analyzerBotType = bt;
+  document.querySelectorAll('#tab-analyzer .itab').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  loadAnalyzerConversations();
+}
+
+async function loadAnalyzerConversations() {
+  const outcome = document.getElementById('an-outcome-filter').value;
+  const params = new URLSearchParams({ bot_type: analyzerBotType, limit: '50' });
+  if (outcome) params.set('outcome', outcome);
+  const data = await api('/api/analyzer/conversations?' + params);
+  if (!data) return;
+  analyzerConvs = data.conversations || [];
+  renderAnalyzerConvs();
+}
+
+function renderAnalyzerConvs() {
+  const search = (document.getElementById('an-search').value || '').toLowerCase();
+  const filtered = analyzerConvs.filter(c => {
+    if (!search) return true;
+    const name = ((c.first_name || '') + ' ' + (c.last_name || '')).toLowerCase();
+    return name.includes(search);
+  });
+  document.getElementById('an-list-header').textContent = (analyzerBotType === 'claude' ? 'Claude' : 'BotPress') + ' Conversations (' + filtered.length + ')';
+  const list = document.getElementById('an-conv-list');
+  list.innerHTML = '';
+  filtered.forEach(c => {
+    const item = document.createElement('div');
+    item.className = 'conv-item';
+    item.innerHTML = '<div class="ci-name">' + esc((c.first_name || '') + ' ' + (c.last_name || '')) + '</div>' +
+      '<div class="ci-meta">' + fmtNum(c.message_count) + ' msgs' + (c.terminal_outcome ? ' - ' + esc(c.terminal_outcome) : '') + '</div>';
+    item.onclick = () => {
+      list.querySelectorAll('.conv-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+      loadAnalyzerConversationDetail(c.id);
+    };
+    list.appendChild(item);
+  });
+  if (!filtered.length) list.innerHTML = '<div style="color:var(--muted);text-align:center;padding:30px;font-size:12px;">No conversations.</div>';
+}
+
+async function loadAnalyzerConversationDetail(id) {
+  const data = await api('/api/analyzer/conversation/' + id + '?bot_type=' + analyzerBotType);
+  if (!data) return;
+  const conv = data.conversation || {};
+  document.getElementById('an-conv-name').textContent = (conv.first_name || '') + ' ' + (conv.last_name || '');
+  document.getElementById('an-conv-meta').textContent = (conv.product_type || '') + ' - ' + fmtNum(conv.message_count) + ' msgs' + (conv.terminal_outcome ? ' - ' + conv.terminal_outcome : '');
+
+  const msgsEl = document.getElementById('an-messages');
+  msgsEl.innerHTML = '';
+  (data.messages || []).forEach(m => {
+    const d = document.createElement('div');
+    const isBot = m.direction === 'outbound';
+    d.className = 'bubble ' + (isBot ? 'bot' : 'lead');
+    const lbl = isBot ? 'Bot' + (m.message_type ? ' - ' + m.message_type : '') : 'Lead';
+    d.innerHTML = '<div class="bubble-lbl">' + lbl + '</div>' + esc(m.content || '');
+    msgsEl.appendChild(d);
+  });
+  if (!(data.messages || []).length) msgsEl.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;">No messages.</div>';
+  msgsEl.scrollTop = 0;
+}
+
+async function runAnalyzerAnalysis() {
+  const btn = document.getElementById('an-run-btn');
+  const out = document.getElementById('an-analysis-result');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spinner"></span> Analyzing...';
+  out.textContent = 'Running Claude comparison... this may take 20-40 seconds.';
+  try {
+    const res = await fetch('/api/analyzer/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    const data = await res.json();
+    if (data.error) {
+      out.innerHTML = '<div style="color:var(--red);">Error: ' + esc(data.error) + '</div>';
+    } else {
+      const cached = data.cached ? ' (cached, ' + Math.round(data.cached_age_ms / 1000) + 's old)' : '';
+      out.innerHTML = '<div style="font-size:10px;color:var(--muted);margin-bottom:6px;">Generated ' + esc(data.generated_at || '') + cached + ' - Samples: ' + (data.sample_counts?.claude || 0) + ' Claude / ' + (data.sample_counts?.botpress || 0) + ' BotPress</div>' + esc(data.analysis || '');
+    }
+  } catch (e) {
+    out.innerHTML = '<div style="color:var(--red);">Error: ' + esc(e.message) + '</div>';
+  }
+  btn.disabled = false;
+  btn.textContent = 'Run Analysis';
+}
+
+async function loadAnalyzerPrompt() {
+  const data = await api('/api/analyzer/prompt');
+  if (!data) return;
+  document.getElementById('an-current-prompt').value = data.prompt || '';
+  const sel = document.getElementById('an-revert-sel');
+  sel.innerHTML = '<option value="">Revert to...</option>';
+  (data.history || []).forEach((h, i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = (h.savedAt || '').slice(0, 19) + ' - ' + (h.preview || '').slice(0, 60);
+    sel.appendChild(opt);
+  });
+}
+
+async function generateAnalyzerPrompt() {
+  const btn = document.getElementById('an-gen-btn');
+  const current = document.getElementById('an-current-prompt').value;
+  const desc = document.getElementById('an-change-desc').value.trim();
+  if (!desc) { toast('Describe the changes first.'); return; }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spinner"></span> Generating...';
+  try {
+    const res = await fetch('/api/analyzer/generate-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_prompt: current, change_description: desc })
+    });
+    const data = await res.json();
+    if (data.error) toast('Error: ' + data.error);
+    else {
+      document.getElementById('an-new-prompt').value = data.generated_prompt || '';
+      toast('New prompt generated. Review and click Apply Prompt.');
+    }
+  } catch (e) {
+    toast('Error: ' + e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = 'Generate Updated Prompt';
+}
+
+async function applyAnalyzerPrompt() {
+  const newPrompt = document.getElementById('an-new-prompt').value.trim();
+  if (!newPrompt) { toast('No generated prompt to apply.'); return; }
+  if (!confirm('Apply this prompt? The current version will be archived in history.')) return;
+  const res = await api('/api/analyzer/prompt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: newPrompt })
+  });
+  if (res) {
+    toast('Prompt applied.');
+    loadAnalyzerPrompt();
+  } else {
+    toast('Failed to apply prompt.');
+  }
+}
+
+async function revertAnalyzerPrompt() {
+  const sel = document.getElementById('an-revert-sel');
+  const idx = sel.value;
+  if (idx === '') { toast('Select a version to revert to.'); return; }
+  const res = await api('/api/analyzer/prompt/revert', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ index: parseInt(idx, 10) })
+  });
+  if (res) {
+    toast('Reverted.');
+    loadAnalyzerPrompt();
+  } else {
+    toast('Failed to revert.');
+  }
+}
 
 // ========== FORMATTING HELPERS ==========
 function fmtNum(v, d) {

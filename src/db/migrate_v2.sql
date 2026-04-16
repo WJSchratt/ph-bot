@@ -77,3 +77,28 @@ DO $$ BEGIN
     ALTER TABLE messages ADD COLUMN segments INTEGER;
   END IF;
 END $$;
+
+-- Calendar booking columns on conversations
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='conversations' AND column_name='calendar_id') THEN
+    ALTER TABLE conversations ADD COLUMN calendar_id VARCHAR(255);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='conversations' AND column_name='calendar_assigned_user_id') THEN
+    ALTER TABLE conversations ADD COLUMN calendar_assigned_user_id VARCHAR(255);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='conversations' AND column_name='calendar_event_title') THEN
+    ALTER TABLE conversations ADD COLUMN calendar_event_title TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='conversations' AND column_name='cached_slots') THEN
+    ALTER TABLE conversations ADD COLUMN cached_slots JSONB;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='conversations' AND column_name='cached_slots_at') THEN
+    ALTER TABLE conversations ADD COLUMN cached_slots_at TIMESTAMPTZ;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='conversations' AND column_name='appointment_id') THEN
+    ALTER TABLE conversations ADD COLUMN appointment_id VARCHAR(255);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='conversations' AND column_name='last_outbound_message_type') THEN
+    ALTER TABLE conversations ADD COLUMN last_outbound_message_type VARCHAR(50);
+  END IF;
+END $$;

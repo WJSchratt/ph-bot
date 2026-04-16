@@ -13,6 +13,7 @@ const qcRouter = require('./routes/qc');
 const reviewQueueRouter = require('./routes/reviewQueue');
 const subaccountsRouter = require('./routes/subaccounts');
 const settingsRouter = require('./routes/settings');
+const analyzerRouter = require('./routes/analyzer');
 const cronRoutes = require('./routes/cron');
 
 const app = express();
@@ -31,6 +32,7 @@ app.use('/api', qcRouter);
 app.use('/api', reviewQueueRouter);
 app.use('/api', subaccountsRouter);
 app.use('/api', settingsRouter);
+app.use('/api/analyzer', analyzerRouter);
 app.use('/sandbox', sandboxRouter);
 app.use('/cron', cronRoutes.router);
 

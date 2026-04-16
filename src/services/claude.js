@@ -45,15 +45,16 @@ function normalizeResponse(parsed) {
   };
 }
 
-async function generateResponse(conversation, history, newUserMessage, contact_id) {
-  const system = buildSystemPrompt(conversation);
+async function generateResponse(conversation, history, newUserMessage, contact_id, extraContext) {
+  const baseSystem = buildSystemPrompt(conversation);
+  const system = extraContext ? `${baseSystem}\n\n${extraContext}` : baseSystem;
 
   const messages = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: newUserMessage }
   ];
 
-  logger.log('claude', 'info', contact_id || null, 'Claude request sent', { message_count: messages.length, system_prompt_length: system.length });
+  logger.log('claude', 'info', contact_id || null, 'Claude request sent', { message_count: messages.length, system_prompt_length: system.length, has_extra_context: !!extraContext });
 
   let response;
   try {

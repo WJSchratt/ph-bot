@@ -172,6 +172,44 @@ async function reactivateConversation(conversationId) {
   );
 }
 
+async function saveCalendarInfo(conversationId, { calendarId, assignedUserId, eventTitle }) {
+  await db.query(
+    `UPDATE conversations
+     SET calendar_id = COALESCE($1, calendar_id),
+         calendar_assigned_user_id = COALESCE($2, calendar_assigned_user_id),
+         calendar_event_title = COALESCE($3, calendar_event_title),
+         updated_at = NOW()
+     WHERE id = $4`,
+    [calendarId || null, assignedUserId || null, eventTitle || null, conversationId]
+  );
+}
+
+async function saveCachedSlots(conversationId, slots) {
+  await db.query(
+    `UPDATE conversations
+     SET cached_slots = $1::jsonb,
+         cached_slots_at = NOW(),
+         updated_at = NOW()
+     WHERE id = $2`,
+    [JSON.stringify(slots || []), conversationId]
+  );
+}
+
+async function saveAppointmentId(conversationId, appointmentId) {
+  await db.query(
+    `UPDATE conversations SET appointment_id = $1, updated_at = NOW() WHERE id = $2`,
+    [appointmentId, conversationId]
+  );
+}
+
+async function saveLastOutboundMessageType(conversationId, messageType) {
+  if (!messageType) return;
+  await db.query(
+    `UPDATE conversations SET last_outbound_message_type = $1, updated_at = NOW() WHERE id = $2`,
+    [messageType, conversationId]
+  );
+}
+
 async function deleteSandboxConversation() {
   const res = await db.query(
     `DELETE FROM conversations WHERE contact_id = 'sandbox_user' AND location_id = 'sandbox_location' RETURNING id`
@@ -188,5 +226,9 @@ module.exports = {
   setTerminalOutcome,
   reactivateConversation,
   deleteSandboxConversation,
-  updateTokenCounts
+  updateTokenCounts,
+  saveCalendarInfo,
+  saveCachedSlots,
+  saveAppointmentId,
+  saveLastOutboundMessageType
 };
