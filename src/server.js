@@ -21,6 +21,7 @@ const cronRoutes = require('./routes/cron');
 const conversationStore = require('./services/conversationStore');
 const ghl = require('./services/ghl');
 const logger = require('./services/logger');
+const db = require('./db');
 const { requireAuth } = require('./middleware/auth');
 
 const app = express();
@@ -72,6 +73,21 @@ const FIELD_SYNC_INTERVAL_MS = 60 * 60 * 1000;
 const FIELD_SYNC_BATCH_LIMIT = 100;
 const FIELD_SYNC_STALE_HOURS = 72;
 const FIELD_SYNC_PER_CALL_DELAY_MS = 200;
+
+// Daily cleanup of expired GHL data (pulled conversations older than 90 days)
+const GHL_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+setInterval(async () => {
+  try {
+    const msgDel = await db.query(`DELETE FROM ghl_messages WHERE (ghl_conversation_id, location_id) IN (SELECT ghl_conversation_id, location_id FROM ghl_conversations WHERE expires_at < NOW())`);
+    const convDel = await db.query(`DELETE FROM ghl_conversations WHERE expires_at < NOW()`);
+    logger.log('cleanup', 'info', null, 'Expired GHL data cleaned up', {
+      messages: msgDel.rowCount || 0,
+      conversations: convDel.rowCount || 0
+    });
+  } catch (err) {
+    logger.log('cleanup', 'error', null, 'GHL cleanup failed', { error: err.message });
+  }
+}, GHL_CLEANUP_INTERVAL_MS);
 
 setInterval(async () => {
   try {

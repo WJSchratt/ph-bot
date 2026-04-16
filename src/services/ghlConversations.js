@@ -1,13 +1,15 @@
 const axios = require('axios');
 const logger = require('./logger');
+const db = require('../db');
 
 const GHL_BASE = 'https://services.leadconnectorhq.com';
 const VERSION = '2021-04-15';
-const CONV_PAGE_SIZE = 100;
+const CONV_PAGE_SIZE = 50;
 const MSG_PAGE_SIZE = 100;
-const MSG_RATE_SLEEP_MS = 200;
-const CONV_RATE_SLEEP_MS = 150;
-const MAX_CONVERSATIONS = 5000;
+const MSG_RATE_SLEEP_MS = 50;
+const MSG_PARALLEL = 5;
+const CONV_RATE_SLEEP_MS = 100;
+const MAX_CONVERSATIONS = 10000;
 
 function authHeaders(token) {
   return {
@@ -207,6 +209,318 @@ function isBotpressCompleted(messages) {
   return false;
 }
 
+// ============================================================================
+// Persistent storage: pullAndStore writes conversations + messages to Postgres
+// as they arrive. Survives deploys, supports incremental re-pulls.
+// ============================================================================
+
+function tsOrNull(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const d = new Date(typeof v === 'number' ? v : String(v));
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+function isSmsMessage(m) {
+  const mt = String(m.messageType || m.type || '').toUpperCase();
+  if (!mt) return true;
+  return mt.includes('SMS') || mt === '1' || mt === '2';
+}
+
+function messageText(m) {
+  return String(m.body || m.message || m.content || '').trim();
+}
+
+function extractContactName(c) {
+  return (c.contactName || c.fullName || [c.contactFirstName, c.contactLastName].filter(Boolean).join(' ') || '').trim();
+}
+
+async function upsertGhlConversation(row) {
+  await db.query(
+    `INSERT INTO ghl_conversations
+       (ghl_conversation_id, contact_id, contact_name, contact_phone, location_id,
+        source, ghl_date_added, ghl_date_updated, pulled_at, expires_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(), NOW() + INTERVAL '90 days')
+     ON CONFLICT (ghl_conversation_id, location_id) DO UPDATE SET
+       contact_id = COALESCE(EXCLUDED.contact_id, ghl_conversations.contact_id),
+       contact_name = COALESCE(NULLIF(EXCLUDED.contact_name, ''), ghl_conversations.contact_name),
+       contact_phone = COALESCE(NULLIF(EXCLUDED.contact_phone, ''), ghl_conversations.contact_phone),
+       ghl_date_added = COALESCE(EXCLUDED.ghl_date_added, ghl_conversations.ghl_date_added),
+       ghl_date_updated = COALESCE(EXCLUDED.ghl_date_updated, ghl_conversations.ghl_date_updated),
+       pulled_at = NOW(),
+       expires_at = NOW() + INTERVAL '90 days'`,
+    [
+      row.ghl_conversation_id,
+      row.contact_id || null,
+      row.contact_name || null,
+      row.contact_phone || null,
+      row.location_id,
+      row.source || 'other',
+      row.ghl_date_added,
+      row.ghl_date_updated
+    ]
+  );
+}
+
+async function replaceMessagesForConversation(ghlConversationId, locationId, messages) {
+  await db.query(
+    `DELETE FROM ghl_messages WHERE ghl_conversation_id = $1 AND location_id = $2`,
+    [ghlConversationId, locationId]
+  );
+  if (!messages.length) return;
+
+  const values = [];
+  const params = [];
+  let p = 1;
+  for (const m of messages) {
+    values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+    params.push(
+      ghlConversationId,
+      locationId,
+      m.direction || null,
+      messageText(m) || null,
+      m.messageType || m.type || null,
+      tsOrNull(m.dateAdded || m.created)
+    );
+  }
+  await db.query(
+    `INSERT INTO ghl_messages (ghl_conversation_id, location_id, direction, content, message_type, created_at) VALUES ${values.join(', ')}`,
+    params
+  );
+}
+
+async function updateConversationAggregates(ghlConversationId, locationId, { source, messageCount, lastMessageAt }) {
+  await db.query(
+    `UPDATE ghl_conversations
+     SET source = COALESCE($3, source),
+         message_count = COALESCE($4, message_count),
+         last_message_at = COALESCE($5, last_message_at)
+     WHERE ghl_conversation_id = $1 AND location_id = $2`,
+    [ghlConversationId, locationId, source || null, messageCount, lastMessageAt || null]
+  );
+}
+
+async function getIncrementalCursorMs(locationId) {
+  const q = await db.query(
+    `SELECT MAX(ghl_date_updated) AS max_updated FROM ghl_conversations WHERE location_id = $1`,
+    [locationId]
+  );
+  const v = q.rows[0]?.max_updated;
+  if (!v) return null;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d.getTime();
+}
+
+async function getKnownConversationUpdatedMap(locationId) {
+  const q = await db.query(
+    `SELECT ghl_conversation_id, ghl_date_updated FROM ghl_conversations WHERE location_id = $1`,
+    [locationId]
+  );
+  const map = new Map();
+  for (const r of q.rows) {
+    map.set(r.ghl_conversation_id, r.ghl_date_updated ? new Date(r.ghl_date_updated).getTime() : 0);
+  }
+  return map;
+}
+
+async function loadLocalClaudeContactIds(locationId) {
+  try {
+    const q = await db.query(
+      `SELECT DISTINCT contact_id FROM conversations WHERE location_id = $1 AND is_sandbox = FALSE`,
+      [locationId]
+    );
+    return new Set(q.rows.map((r) => r.contact_id).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
+async function processInParallel(items, concurrency, workerFn) {
+  let i = 0;
+  const runners = [];
+  for (let w = 0; w < concurrency; w++) {
+    runners.push((async () => {
+      while (true) {
+        const idx = i++;
+        if (idx >= items.length) return;
+        await workerFn(items[idx], idx);
+      }
+    })());
+  }
+  await Promise.all(runners);
+}
+
+async function pullAndStore(ghlToken, locationId, progressCallback) {
+  const progress = (p) => { if (typeof progressCallback === 'function') progressCallback(p); };
+
+  const cursorMs = await getIncrementalCursorMs(locationId);
+  const isIncremental = cursorMs !== null;
+
+  logger.log('analyzer', 'info', null, 'pullAndStore started', {
+    locationId, incremental: isIncremental, cursor: cursorMs ? new Date(cursorMs).toISOString() : null
+  });
+
+  // --- Pull conversations, upsert as pages arrive ---
+  let startAfterDate = null;
+  let page = 0;
+  let totalFetched = 0;
+  const fetchedIds = []; // ghl_conversation_id list in the order we saw them
+  const updatedByGhl = new Map(); // id → last ghl_date_updated ms
+
+  outer: while (totalFetched < MAX_CONVERSATIONS) {
+    page++;
+    const params = {
+      locationId,
+      limit: CONV_PAGE_SIZE,
+      sortBy: 'last_message_date',
+      sortOrder: 'desc'
+    };
+    if (startAfterDate !== null) params.startAfterDate = startAfterDate;
+
+    let res;
+    try {
+      res = await axios.get(`${GHL_BASE}/conversations/search`, {
+        headers: { Authorization: `Bearer ${ghlToken}`, Version: VERSION },
+        params,
+        timeout: 30000
+      });
+    } catch (err) {
+      logger.log('analyzer', 'error', null, 'GHL conversations/search failed', {
+        location_id: locationId, page,
+        status: err.response?.status,
+        error: err.response?.data || err.message
+      });
+      throw err;
+    }
+
+    const convs = res.data?.conversations || [];
+    if (!convs.length) break;
+
+    for (const c of convs) {
+      const lastMsgTs = c.lastMessageDate || (Array.isArray(c.sort) && c.sort[0]) || 0;
+      if (isIncremental && lastMsgTs && lastMsgTs < cursorMs) {
+        // Reached data we already have up to date — stop.
+        break outer;
+      }
+      await upsertGhlConversation({
+        ghl_conversation_id: c.id,
+        contact_id: c.contactId || null,
+        contact_name: extractContactName(c),
+        contact_phone: c.phone || c.contactPhone || null,
+        location_id: locationId,
+        source: 'other',
+        ghl_date_added: tsOrNull(c.dateAdded || c.createdAt),
+        ghl_date_updated: tsOrNull(c.lastMessageDate || c.dateUpdated)
+      });
+      fetchedIds.push(c.id);
+      updatedByGhl.set(c.id, typeof lastMsgTs === 'number' ? lastMsgTs : new Date(lastMsgTs || 0).getTime());
+      totalFetched++;
+      if (totalFetched >= MAX_CONVERSATIONS) break outer;
+    }
+
+    progress({ phase: 'conversations', fetched: totalFetched, page });
+
+    if (convs.length < CONV_PAGE_SIZE) break;
+    const last = convs[convs.length - 1];
+    const nextCursor = Array.isArray(last.sort) && last.sort.length ? last.sort[0] : last.lastMessageDate;
+    if (!nextCursor || nextCursor === startAfterDate) break;
+    startAfterDate = nextCursor;
+
+    await sleep(CONV_RATE_SLEEP_MS);
+  }
+
+  logger.log('analyzer', 'info', null, 'Conversations stored', {
+    locationId, count: totalFetched, pages: page, incremental: isIncremental
+  });
+
+  // --- Pick which conversations need messages fetched ---
+  const knownUpdated = await getKnownConversationUpdatedMap(locationId);
+
+  // Also include any DB-known conversations that have zero messages yet.
+  const emptyQ = await db.query(
+    `SELECT c.ghl_conversation_id
+     FROM ghl_conversations c
+     LEFT JOIN (SELECT ghl_conversation_id, COUNT(*) AS n FROM ghl_messages WHERE location_id = $1 GROUP BY ghl_conversation_id) m
+       ON m.ghl_conversation_id = c.ghl_conversation_id
+     WHERE c.location_id = $1 AND (m.n IS NULL OR m.n = 0)`,
+    [locationId]
+  );
+  const emptyIds = new Set(emptyQ.rows.map((r) => r.ghl_conversation_id));
+
+  const toFetch = [];
+  for (const id of fetchedIds) {
+    // If we just saw a newer ghl_date_updated than DB had, fetch messages.
+    const dbUpdated = knownUpdated.get(id) || 0;
+    const ghlUpdated = updatedByGhl.get(id) || 0;
+    if (!dbUpdated || ghlUpdated > dbUpdated || emptyIds.has(id)) {
+      toFetch.push(id);
+    }
+  }
+  // Also pick up any conversations that were known but have zero messages stored.
+  for (const id of emptyIds) {
+    if (!toFetch.includes(id)) toFetch.push(id);
+  }
+
+  const localClaudeIds = await loadLocalClaudeContactIds(locationId);
+
+  // --- Fetch messages in parallel (5 at a time), classify, store ---
+  let messagesFetched = 0;
+  const total = toFetch.length;
+  progress({ phase: 'messages', fetched: 0, total });
+
+  const BATCH = 250;
+  for (let start = 0; start < toFetch.length; start += BATCH) {
+    const batch = toFetch.slice(start, start + BATCH);
+    await processInParallel(batch, MSG_PARALLEL, async (ghlConvId) => {
+      let msgs = [];
+      try {
+        msgs = await pullMessages(ghlToken, ghlConvId);
+      } catch {
+        msgs = [];
+      }
+      const filtered = msgs.filter(isSmsMessage);
+      await replaceMessagesForConversation(ghlConvId, locationId, filtered);
+
+      // Classify
+      const contactIdOfConv = await db.query(
+        `SELECT contact_id FROM ghl_conversations WHERE ghl_conversation_id = $1 AND location_id = $2`,
+        [ghlConvId, locationId]
+      );
+      const convRow = { id: ghlConvId, contactId: contactIdOfConv.rows[0]?.contact_id, location_id: locationId };
+      const classification = classifyConversation(convRow, filtered, localClaudeIds);
+      const terminal = detectTerminalOutcome(filtered);
+      const lastMs = filtered.reduce((acc, m) => {
+        const t = new Date(m.dateAdded || m.created || 0).getTime();
+        return t > acc ? t : acc;
+      }, 0);
+
+      await updateConversationAggregates(ghlConvId, locationId, {
+        source: classification.source,
+        messageCount: filtered.length,
+        lastMessageAt: lastMs ? new Date(lastMs).toISOString() : null
+      });
+      if (terminal) {
+        await db.query(
+          `UPDATE ghl_conversations SET terminal_outcome = $3 WHERE ghl_conversation_id = $1 AND location_id = $2`,
+          [ghlConvId, locationId, terminal]
+        );
+      }
+
+      messagesFetched++;
+      if (messagesFetched % 10 === 0 || messagesFetched === total) {
+        progress({ phase: 'messages', fetched: messagesFetched, total });
+      }
+      if (MSG_RATE_SLEEP_MS) await sleep(MSG_RATE_SLEEP_MS);
+    });
+  }
+
+  logger.log('analyzer', 'info', null, 'pullAndStore complete', {
+    locationId, total_conversations: totalFetched, messages_fetched_for: toFetch.length
+  });
+
+  return { total_conversations: totalFetched, messages_fetched_for: toFetch.length, incremental: isIncremental };
+}
+
 module.exports = {
   pullAllConversations,
   pullMessages,
@@ -215,6 +529,7 @@ module.exports = {
   isBotpressStyleOutbound,
   detectTerminalOutcome,
   isBotpressCompleted,
+  pullAndStore,
   sleep,
   MSG_RATE_SLEEP_MS
 };

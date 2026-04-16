@@ -1807,19 +1807,24 @@ async function analyzerRefreshStatus(autoPullIfMissing) {
     return;
   }
 
-  if (progress.status === 'complete' && data.pulled_at) {
+  // Data already exists (either freshly pulled or from DB from a prior deploy)
+  if (data.pulled_at) {
     hideAnalyzerProgress();
-    document.getElementById('an-pulled-meta').textContent = 'Pulled ' + new Date(data.pulled_at).toLocaleString() + ' — ' +
-      fmtNum(data.counts.total) + ' total (' + fmtNum(data.counts.claude) + ' Claude / ' + fmtNum(data.counts.botpress) + ' BotPress / ' + fmtNum(data.counts.other) + ' Other)';
+    document.getElementById('an-pulled-meta').textContent =
+      'Stored: ' + fmtNum(data.counts.total) + ' conversations (expires in 90 days) — ' +
+      'Last pulled ' + new Date(data.pulled_at).toLocaleString() + ' — ' +
+      fmtNum(data.counts.claude) + ' Claude / ' + fmtNum(data.counts.botpress) + ' BotPress / ' + fmtNum(data.counts.other) + ' Other';
+    const pullBtn = document.getElementById('an-pull-btn');
+    if (pullBtn) pullBtn.textContent = 'Update Conversations';
     analyzerLoadStats();
     analyzerLoadConversations();
     return;
   }
 
-  // idle with no cache
-  if (autoPullIfMissing && !data.pulled_at) {
+  // No data yet
+  if (autoPullIfMissing) {
     analyzerPull();
-  } else if (!data.pulled_at) {
+  } else {
     document.getElementById('an-pulled-meta').textContent = 'No pull yet.';
     document.getElementById('an-stats').innerHTML = '<div style="color:var(--muted);text-align:center;padding:30px;font-size:13px;">Click "Pull Conversations" to fetch all conversations from this subaccount.</div>';
   }

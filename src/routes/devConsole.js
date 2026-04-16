@@ -1,5 +1,6 @@
 const express = require('express');
 const os = require('os');
+const axios = require('axios');
 const Anthropic = require('@anthropic-ai/sdk');
 
 const dc = require('../services/devConsole');
@@ -11,6 +12,78 @@ const standardPrompt = require('../prompts/standard');
 const router = express.Router();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-sonnet-4-20250514';
+
+// --- SQL + HTTP tool execution for Dev Console chat ----------------------
+
+const DISALLOWED_SQL_RE = /\b(insert|update|delete|drop|alter|truncate|create|grant|revoke|rename|vacuum|analyze|attach|detach|call|merge|copy|comment|refresh)\b/i;
+
+function isSafeSelect(sql) {
+  if (!sql || typeof sql !== 'string') return false;
+  const stripped = sql.replace(/--[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '').trim();
+  if (!stripped) return false;
+  if (!/^(with\b[\s\S]*?\bselect\b|select\b)/i.test(stripped)) return false;
+  if (DISALLOWED_SQL_RE.test(stripped)) return false;
+  if (stripped.split(';').filter((s) => s.trim()).length > 1) return false;
+  return true;
+}
+
+async function runSafeQuery(sql) {
+  if (!isSafeSelect(sql)) {
+    return { error: 'blocked: only a single SELECT (or WITH…SELECT) is allowed — no INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE/CREATE.' };
+  }
+  const statementTimeoutMs = 8000;
+  try {
+    const { pool } = require('../db');
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN READ ONLY');
+      await c.query(`SET LOCAL statement_timeout = ${statementTimeoutMs}`);
+      const r = await c.query(sql);
+      await c.query('COMMIT');
+      return {
+        columns: r.fields.map((f) => f.name),
+        rows: r.rows.slice(0, 200),
+        truncated: r.rows.length > 200,
+        row_count: r.rowCount
+      };
+    } finally {
+      c.release();
+    }
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
+function extractTagValues(text, tag) {
+  if (!text) return [];
+  const re = new RegExp(`\\[${tag}:\\s*([^\\]]+?)\\s*\\]`, 'gi');
+  const out = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    out.push(m[1]);
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+
+async function runLocalFetch(pathAndQuery, sessionToken) {
+  if (!pathAndQuery || typeof pathAndQuery !== 'string') return { error: 'no path given' };
+  if (!pathAndQuery.startsWith('/')) return { error: 'path must start with /' };
+  const port = parseInt(process.env.PORT, 10) || 3000;
+  const url = `http://127.0.0.1:${port}${pathAndQuery}`;
+  try {
+    const resp = await axios.get(url, {
+      timeout: 15000,
+      headers: sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {},
+      validateStatus: () => true
+    });
+    let body = resp.data;
+    if (typeof body === 'string' && body.length > 15000) body = body.slice(0, 15000) + '...[truncated]';
+    return { status: resp.status, data: body };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
 
 // --- File tree / file read -----------------------------------------------
 
@@ -150,7 +223,7 @@ async function pickRelevantFiles(message) {
   return results;
 }
 
-function buildDevSystemPrompt(ctx, files) {
+function buildDevSystemPrompt(ctx, files, autoContext) {
   const fileList = ctx.files.map((f) => `  - ${f.path} (${f.size}B)`).join('\n');
   const fileContents = files.map((f) => `\n=== FILE: ${f.path} ===\n${f.content}\n=== END FILE ===`).join('\n');
   const errSummary = (ctx.recentErrors || []).slice(0, 10).map((e) => `  - [${e.stage}] ${e.message} @ ${e.timestamp}`).join('\n');
@@ -165,6 +238,32 @@ ARCHITECTURE QUICK REF:
 - Field sync to GHL contact runs immediately at terminal AND a 72h background job in src/server.js.
 - The dashboard (public/index.html) has tabs for Overview, Wordtracks, Pipeline, QC, AI Review Queue, Sandbox, Analyzer, Settings, Logs — now also Dev Console (you).
 
+YOU HAVE LIVE DATA ACCESS. Two tools, used by including special tags in your response:
+
+1. Read-only SQL against the Postgres DB — include [QUERY: SELECT ...] in your response. Only SELECT (or CTE/WITH … SELECT) is permitted; INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE/CREATE are rejected. Query results are fed back to you on the next turn. Key tables:
+
+- conversations: id, contact_id, location_id, phone, first_name, last_name, terminal_outcome, is_active, messages (JSONB array of {role, content, timestamp}), collected_age, collected_smoker, collected_health, collected_coverage_amount, collected_coverage_for, collected_spouse_name, collected_preferred_time, collected_appointment_time, bot_name, agent_name, ghl_token, calendar_id, appointment_id, fields_dirty, last_synced_at, last_message_at, created_at, updated_at
+- messages: id, conversation_id, direction (inbound/outbound), content, message_type, got_reply, reply_time_seconds, created_at, segments
+- ghl_conversations: ghl_conversation_id, contact_id, contact_name, contact_phone, location_id, source (claude/botpress/other), message_count, last_message_at, terminal_outcome, ghl_date_added, ghl_date_updated, pulled_at, expires_at
+- ghl_messages: ghl_conversation_id, location_id, direction, content, message_type, created_at
+- subaccounts: id, name, ghl_location_id, ghl_api_key, status
+- qc_reviews, ai_review_queue, app_settings, analytics_daily
+
+2. HTTP GET against the app's own API — include [FETCH: /api/...] in your response. Runs on localhost with your session token. Useful endpoints:
+- /api/logs/latest, /api/logs/errors, /api/logs?contact_id=xxx
+- /api/conversations/:contactId/:locationId — full Claude-bot conversation thread
+- /api/analyzer/pulled-stats?locationId=xxx, /api/analyzer/pulled-conversations?locationId=xxx&source=all
+- /api/analyzer/pulled-conversation/{ghlConvId}?locationId=xxx
+- /api/dev/context, /api/dev/git-log, /api/dev/conversations?contact_id=xxx
+
+RULES FOR USING TOOLS:
+- When the user asks about a specific contact / phone / conversation / live state — USE the tools first. NEVER redirect the user to "check another tab". You have full access.
+- Run a query, wait for results, THEN answer.
+- Include at most 3 tool tags per turn. The loop runs at most 3 iterations total.
+- Example for a phone lookup: [QUERY: SELECT contact_id, location_id, phone, first_name, last_name, terminal_outcome, is_active, last_message_at FROM conversations WHERE phone LIKE '%3526721885%' LIMIT 5]
+- Example for recent activity: [FETCH: /api/logs/latest]
+- Example for a full thread: [FETCH: /api/conversations/OxPKj3cNSWuhDly2u8lX/K9xKBbQkhSOUZs6KzTAy]
+
 ENVIRONMENT: ${ctx.environment.platform}, Node ${ctx.environment.node_version}, uptime ${ctx.environment.uptime_seconds}s, RSS ${ctx.environment.memory_mb}MB, HEAD ${ctx.environment.current_commit || 'unknown'}.
 STATS: ${statsLine}
 ${errSummary ? `RECENT ERRORS:\n${errSummary}` : 'No recent errors.'}
@@ -175,10 +274,11 @@ ${fileList}
 PRE-LOADED FILES RELEVANT TO THE USER'S MESSAGE:
 ${fileContents || '(none — ask for specific files if you need them)'}
 
-INSTRUCTIONS:
-1. Answer questions directly and concisely. Cite file paths + line numbers when referencing code.
-2. When the user asks for a code change, first explain what you'll change and why. Then, if they confirm (or the ask is already unambiguous), propose changes using the schema below. Never claim to have deployed — you cannot deploy. The user will click "Apply & Deploy" after reviewing your proposed changes.
-3. Proposed changes format (include this JSON block at the END of your message when proposing changes; the UI parses it). For modify, the "original" block MUST appear exactly once in the file (include enough surrounding context to make it unique):
+${autoContext ? `AUTO-FETCHED CONTEXT (already queried based on keywords in the user's message):\n${autoContext}\n` : ''}
+
+CODE-CHANGE PROPOSAL INSTRUCTIONS:
+1. When the user asks for a code change, first explain what you'll change and why. Then, if they confirm (or the ask is already unambiguous), propose changes using the schema below. Never claim to have deployed — you cannot deploy. The user will click "Apply & Deploy" after reviewing.
+2. Proposed-changes block (include at the END of your message when proposing changes). For modify, the "original" block MUST appear exactly once in the file — include enough surrounding context to make it unique:
 
 <<<CHANGES>>>
 {
@@ -191,8 +291,77 @@ INSTRUCTIONS:
 }
 <<</CHANGES>>>
 
-4. If you need a file not in the pre-loaded list, ASK the user for it — or tell them to click it in the file tree — rather than guessing.
-5. Be skeptical about edits. Don't propose refactors or speculative improvements unless asked. Ship the smallest correct change.`;
+3. If you need a file not pre-loaded, read it: tell the user to click it in the file tree, OR use [FETCH: /api/dev/file?path=src/xxx] (yes the file endpoint works via FETCH too).
+4. Be skeptical about edits. Don't propose refactors or speculative improvements unless asked. Ship the smallest correct change.`;
+}
+
+// Pre-query the DB for data the user's message hints at, so Claude gets live
+// context on the very first turn without having to emit a [QUERY:...] tag.
+async function autoFetchContextForMessage(message) {
+  const out = [];
+  const msg = message || '';
+  const lower = msg.toLowerCase();
+
+  // Phone number pattern
+  const phoneDigits = (msg.match(/\d{3,}/g) || []).find((d) => d.length >= 7);
+  if (phoneDigits) {
+    try {
+      const q = await db.query(
+        `SELECT id, contact_id, location_id, phone, first_name, last_name, terminal_outcome, is_active, last_message_at
+         FROM conversations
+         WHERE phone LIKE $1 OR phone LIKE $2
+         ORDER BY last_message_at DESC NULLS LAST LIMIT 10`,
+        [`%${phoneDigits}%`, `%${phoneDigits.replace(/\D/g, '')}%`]
+      );
+      if (q.rows.length) out.push(`CONVERSATIONS matching phone "${phoneDigits}":\n${JSON.stringify(q.rows, null, 2)}`);
+    } catch (e) { out.push(`(phone lookup failed: ${e.message})`); }
+  }
+
+  if (/\b(error|bug|failure|crash|exception)\b/.test(lower)) {
+    try {
+      const { getLogs } = require('../services/logger');
+      const errs = getLogs({ limit: 200 }).filter((l) => l.level === 'error').slice(0, 20);
+      if (errs.length) out.push(`RECENT ERROR LOGS (${errs.length}):\n${JSON.stringify(errs, null, 2)}`);
+    } catch {}
+  }
+
+  if (/\blogs?\b/.test(lower)) {
+    try {
+      const { getLogs } = require('../services/logger');
+      const recent = getLogs({ limit: 50 });
+      out.push(`LAST 50 LOG ENTRIES:\n${JSON.stringify(recent.slice(0, 50), null, 2)}`);
+    } catch {}
+  }
+
+  if (/\b(deploy|commit|git|push)\b/.test(lower)) {
+    try {
+      const log = await dc.gitLog(15);
+      out.push(`RECENT GIT LOG:\n${JSON.stringify(log, null, 2)}`);
+    } catch {}
+  }
+
+  if (/\bprompt\b/.test(lower)) {
+    out.push(`CURRENT STANDARD SYSTEM PROMPT (first 4000 chars):\n${standardPrompt.slice(0, 4000)}...`);
+  }
+
+  // Name search — "conversation with <NAME>" or "convo for <NAME>"
+  const nameMatch = msg.match(/\b(?:conversation|convo|chat)\b[^a-zA-Z]*(?:with|for|from|of)?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/);
+  if (nameMatch) {
+    const name = nameMatch[1].trim();
+    try {
+      const q = await db.query(
+        `SELECT id, contact_id, location_id, first_name, last_name, terminal_outcome, is_active, last_message_at
+         FROM conversations
+         WHERE LOWER(first_name) = LOWER($1) OR LOWER(last_name) = LOWER($1)
+            OR LOWER(first_name || ' ' || COALESCE(last_name, '')) LIKE LOWER($2)
+         ORDER BY last_message_at DESC NULLS LAST LIMIT 10`,
+        [name.split(/\s+/)[0], `%${name}%`]
+      );
+      if (q.rows.length) out.push(`CONVERSATIONS matching name "${name}":\n${JSON.stringify(q.rows, null, 2)}`);
+    } catch (e) { out.push(`(name lookup failed: ${e.message})`); }
+  }
+
+  return out.join('\n\n');
 }
 
 router.post('/chat', async (req, res) => {
@@ -209,8 +378,9 @@ router.post('/chat', async (req, res) => {
 
     const ctx = await buildContextBundle();
     const preloaded = await pickRelevantFiles(message);
+    const autoContext = await autoFetchContextForMessage(message);
 
-    const system = buildDevSystemPrompt(ctx, preloaded);
+    const system = buildDevSystemPrompt(ctx, preloaded, autoContext);
 
     const messages = [];
     if (Array.isArray(conversationHistory)) {
@@ -226,25 +396,66 @@ router.post('/chat', async (req, res) => {
       user: req.session?.username || null,
       message_preview: message.slice(0, 200),
       preloaded_files: preloaded.map((p) => p.path),
+      auto_context_bytes: autoContext.length,
       history_len: messages.length
     });
 
-    const resp = await client.messages.create({
-      model: MODEL,
-      max_tokens: 4096,
-      system,
-      messages
-    });
+    let finalText = '';
+    let totalIn = 0;
+    let totalOut = 0;
+    const toolTrace = [];
+    const MAX_TOOL_ITERATIONS = 3;
+    const sessionToken = req.sessionToken || null;
 
-    const text = (resp.content.find((b) => b.type === 'text')?.text) || '';
-    const changes = parseChangesBlock(text);
+    for (let iter = 0; iter < MAX_TOOL_ITERATIONS + 1; iter++) {
+      const resp = await client.messages.create({
+        model: MODEL,
+        max_tokens: 4096,
+        system,
+        messages
+      });
+      totalIn += resp.usage?.input_tokens || 0;
+      totalOut += resp.usage?.output_tokens || 0;
+
+      const text = (resp.content.find((b) => b.type === 'text')?.text) || '';
+      finalText = text;
+
+      const queries = extractTagValues(text, 'QUERY');
+      const fetches = extractTagValues(text, 'FETCH');
+
+      if (!queries.length && !fetches.length) break;
+      if (iter >= MAX_TOOL_ITERATIONS) {
+        messages.push({ role: 'assistant', content: text });
+        messages.push({ role: 'user', content: 'Tool iteration limit reached — please answer now using what you already have, without emitting more [QUERY:...] or [FETCH:...] tags.' });
+        continue;
+      }
+
+      const toolResultChunks = [];
+      for (const q of queries) {
+        const result = await runSafeQuery(q);
+        toolTrace.push({ tool: 'query', input: q, result });
+        toolResultChunks.push(`[QUERY RESULT for: ${q}]\n${JSON.stringify(result).slice(0, 10000)}`);
+      }
+      for (const f of fetches) {
+        const result = await runLocalFetch(f, sessionToken);
+        toolTrace.push({ tool: 'fetch', input: f, result });
+        toolResultChunks.push(`[FETCH RESULT for: ${f}]\n${JSON.stringify(result).slice(0, 10000)}`);
+      }
+
+      messages.push({ role: 'assistant', content: text });
+      messages.push({ role: 'user', content: `Tool results:\n\n${toolResultChunks.join('\n\n')}\n\nNow answer the original question using these results.` });
+    }
+
+    const changes = parseChangesBlock(finalText);
 
     res.json({
-      reply: text,
+      reply: finalText,
       proposed_changes: changes,
       preloaded_files: preloaded.map((p) => p.path),
-      input_tokens: resp.usage?.input_tokens || 0,
-      output_tokens: resp.usage?.output_tokens || 0
+      auto_context_used: autoContext.length > 0,
+      tool_trace: toolTrace,
+      input_tokens: totalIn,
+      output_tokens: totalOut
     });
   } catch (err) {
     logger.log('dev_console', 'error', null, 'chat failed', { error: err.message, stack: err.stack });

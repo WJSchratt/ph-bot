@@ -26,6 +26,46 @@ async function migrate() {
     const v2Sql = fs.readFileSync(path.join(__dirname, 'migrate_v2.sql'), 'utf8');
     await pool.query(v2Sql);
     console.log('[migrate] v2 schema applied');
+
+    // Persistent GHL conversation storage (pulled via analyzer)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ghl_conversations (
+        id SERIAL PRIMARY KEY,
+        ghl_conversation_id TEXT NOT NULL,
+        contact_id TEXT,
+        contact_name TEXT,
+        contact_phone TEXT,
+        location_id TEXT NOT NULL,
+        source TEXT DEFAULT 'other',
+        message_count INTEGER DEFAULT 0,
+        last_message_at TIMESTAMPTZ,
+        terminal_outcome TEXT,
+        ghl_date_added TIMESTAMPTZ,
+        ghl_date_updated TIMESTAMPTZ,
+        pulled_at TIMESTAMPTZ DEFAULT NOW(),
+        expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '90 days'),
+        UNIQUE(ghl_conversation_id, location_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS ghl_messages (
+        id SERIAL PRIMARY KEY,
+        ghl_conversation_id TEXT NOT NULL,
+        location_id TEXT NOT NULL,
+        direction TEXT,
+        content TEXT,
+        message_type TEXT,
+        created_at TIMESTAMPTZ,
+        pulled_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ghl_convos_location ON ghl_conversations(location_id);
+      CREATE INDEX IF NOT EXISTS idx_ghl_convos_source ON ghl_conversations(source);
+      CREATE INDEX IF NOT EXISTS idx_ghl_convos_expires ON ghl_conversations(expires_at);
+      CREATE INDEX IF NOT EXISTS idx_ghl_convos_updated ON ghl_conversations(location_id, ghl_date_updated DESC);
+      CREATE INDEX IF NOT EXISTS idx_ghl_messages_convo ON ghl_messages(ghl_conversation_id, location_id);
+      CREATE INDEX IF NOT EXISTS idx_ghl_messages_created ON ghl_messages(ghl_conversation_id, created_at ASC);
+    `);
+    console.log('[migrate] ghl_conversations + ghl_messages ensured');
   } catch (err) {
     console.error('[migrate] failed', err);
     process.exit(1);
