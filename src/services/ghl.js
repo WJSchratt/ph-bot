@@ -201,6 +201,49 @@ async function updateContactFields(token, contactId, conv, contactIdForLog) {
   }
 }
 
+async function clearContactDnd(token, contactId, contactIdForLog) {
+  const cid = contactIdForLog || contactId;
+  try {
+    const res = await axios.put(
+      `${GHL_BASE}/contacts/${contactId}`,
+      {
+        dnd: false,
+        dndSettings: {
+          SMS: { status: 'inactive', message: '', code: '' }
+        }
+      },
+      { headers: authHeaders(token), timeout: 15000 }
+    );
+    logger.log('ghl_send', 'info', cid, 'Contact DND cleared', { status: res.status });
+    return { ok: true, status: res.status };
+  } catch (err) {
+    logger.log('ghl_send', 'error', cid, 'clearContactDnd failed', {
+      status: err.response?.status,
+      error: err.response?.data || err.message
+    });
+    return { ok: false, error: err.response?.data || err.message };
+  }
+}
+
+async function removeContactTags(token, contactId, tags, contactIdForLog) {
+  const cid = contactIdForLog || contactId;
+  try {
+    const res = await axios.delete(
+      `${GHL_BASE}/contacts/${contactId}/tags`,
+      { headers: authHeaders(token), data: { tags }, timeout: 15000 }
+    );
+    logger.log('ghl_send', 'info', cid, 'Contact tags removed', { tags, status: res.status });
+    return { ok: true, status: res.status };
+  } catch (err) {
+    logger.log('ghl_send', 'error', cid, 'removeContactTags failed', {
+      tags,
+      status: err.response?.status,
+      error: err.response?.data || err.message
+    });
+    return { ok: false, error: err.response?.data || err.message };
+  }
+}
+
 async function setContactDnd(token, contactId) {
   try {
     const res = await axios.put(
@@ -226,6 +269,8 @@ module.exports = {
   updateContactFields,
   buildCustomFieldsFromConversation,
   setContactDnd,
+  clearContactDnd,
+  removeContactTags,
   calculateSegments,
   sleep
 };
