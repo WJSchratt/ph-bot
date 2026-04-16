@@ -1,4 +1,5 @@
 const axios = require('axios');
+const logger = require('./logger');
 
 const GHL_BASE = 'https://services.leadconnectorhq.com';
 const VERSION = '2021-04-15';
@@ -21,7 +22,9 @@ async function sendSms(token, contactId, message) {
   );
 }
 
-async function sendMessagesSequentially(token, contactId, messages) {
+async function sendMessagesSequentially(token, contactId, messages, contact_id_for_log) {
+  const cid = contact_id_for_log || contactId;
+  logger.log('ghl_send', 'info', cid, 'Sending to GHL', { message_count: messages.length });
   const results = [];
   for (let i = 0; i < messages.length; i++) {
     if (i > 0) await sleep(2000);
@@ -29,6 +32,7 @@ async function sendMessagesSequentially(token, contactId, messages) {
       const res = await sendSms(token, contactId, messages[i]);
       results.push({ ok: true, status: res.status });
     } catch (err) {
+      logger.log('error', 'error', cid, 'GHL send failed', { error: err.response?.data || err.message, message_index: i });
       console.error('[ghl] sendSms failed', err.response?.status, err.response?.data || err.message);
       results.push({ ok: false, error: err.response?.data || err.message });
     }

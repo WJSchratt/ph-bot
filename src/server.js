@@ -5,6 +5,7 @@ const path = require('path');
 const webhookRouter = require('./routes/webhook');
 const analyticsRouter = require('./routes/analytics');
 const sandboxRouter = require('./routes/sandbox');
+const logsRouter = require('./routes/logs');
 const cronRoutes = require('./routes/cron');
 
 const app = express();
@@ -15,6 +16,7 @@ app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
 app.use('/webhook', webhookRouter);
 app.use('/api', analyticsRouter);
+app.use('/api', logsRouter);
 app.use('/sandbox', sandboxRouter);
 app.use('/cron', cronRoutes.router);
 

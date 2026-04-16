@@ -1,5 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const { buildSystemPrompt } = require('../prompts');
+const logger = require('./logger');
 
 const MODEL = 'claude-sonnet-4-20250514';
 
@@ -44,7 +45,7 @@ function normalizeResponse(parsed) {
   };
 }
 
-async function generateResponse(conversation, history, newUserMessage) {
+async function generateResponse(conversation, history, newUserMessage, contact_id) {
   const system = buildSystemPrompt(conversation);
 
   const messages = [
@@ -52,14 +53,22 @@ async function generateResponse(conversation, history, newUserMessage) {
     { role: 'user', content: newUserMessage }
   ];
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 1024,
-    system: [
-      { type: 'text', text: system, cache_control: { type: 'ephemeral' } }
-    ],
-    messages
-  });
+  logger.log('claude', 'info', contact_id || null, 'Claude request sent', { message_count: messages.length, system_prompt_length: system.length });
+
+  let response;
+  try {
+    response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 1024,
+      system: [
+        { type: 'text', text: system, cache_control: { type: 'ephemeral' } }
+      ],
+      messages
+    });
+  } catch (err) {
+    logger.log('error', 'error', contact_id || null, 'Claude API error', { error: err.message });
+    throw err;
+  }
 
   const textBlock = response.content.find((b) => b.type === 'text');
   const rawText = textBlock ? textBlock.text : '';

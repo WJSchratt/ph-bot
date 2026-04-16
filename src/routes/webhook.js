@@ -4,6 +4,7 @@ const store = require('../services/conversationStore');
 const claude = require('../services/claude');
 const ghl = require('../services/ghl');
 const { firePostCallRouter } = require('../services/postCallRouter');
+const logger = require('../services/logger');
 
 const router = express.Router();
 
@@ -11,8 +12,14 @@ const TERMINAL_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 router.post('/inbound', async (req, res) => {
   const startedAt = Date.now();
+  let contactId = null;
   try {
+    logger.log('inbound', 'info', null, 'Webhook received', { raw_body: req.body });
+
     const parsed = parseInboundPayload(req.body);
+    contactId = parsed.contact_id || null;
+
+    logger.log('parse', 'info', contactId, 'Payload parsed', { contact_id: parsed.contact_id, location_id: parsed.location_id, messageBody: parsed.messageBody, product_type: parsed.product_type, contact_stage: parsed.contact_stage });
 
     if (!parsed.contact_id || !parsed.location_id) {
       return res.status(400).json({ error: 'missing contact_id or location_id' });
@@ -69,7 +76,17 @@ router.post('/inbound', async (req, res) => {
     const history = Array.isArray(conv.messages) ? conv.messages : [];
 
     // Call Claude
-    const claudeResult = await claude.generateResponse(conv, history, parsed.messageBody);
+    const claudeStarted = Date.now();
+    const claudeResult = await claude.generateResponse(conv, history, parsed.messageBody, contactId);
+    const claudeElapsed = Date.now() - claudeStarted;
+
+    logger.log('claude', 'info', contactId, 'Claude responded', {
+      messages: claudeResult.messages,
+      collected_data: claudeResult.collected_data,
+      terminal_outcome: claudeResult.terminal_outcome,
+      message_type: claudeResult.message_type,
+      elapsed_ms: claudeElapsed
+    });
 
     // Persist inbound+outbound into JSONB history
     await store.appendMessageHistory(conv.id, 'user', parsed.messageBody);
@@ -79,10 +96,16 @@ router.post('/inbound', async (req, res) => {
     await store.applyCollectedData(conv.id, claudeResult.collected_data);
 
     // Send SMS via GHL
+    let sendResult = null;
     if (parsed.ghl_token) {
-      await ghl.sendMessagesSequentially(parsed.ghl_token, conv.contact_id, claudeResult.messages);
+      try {
+        sendResult = await ghl.sendMessagesSequentially(parsed.ghl_token, conv.contact_id, claudeResult.messages, contactId);
+        logger.log('ghl_send', 'info', contactId, 'Messages sent to GHL', { send_result: sendResult });
+      } catch (ghlErr) {
+        logger.log('ghl_send', 'error', contactId, 'GHL send failed', { error: ghlErr.message });
+      }
     } else {
-      console.warn('[webhook] no ghl_token, skipping SMS send for', conv.contact_id);
+      logger.log('ghl_send', 'warn', contactId, 'No ghl_token, skipping SMS send');
     }
 
     // Log each outbound message
@@ -107,6 +130,7 @@ router.post('/inbound', async (req, res) => {
         await ghl.setContactDnd(parsed.ghl_token, conv.contact_id);
       }
       await firePostCallRouter(fresh, claudeResult.terminal_outcome);
+      logger.log('webhook_fire', 'info', contactId, 'Post-call router fired', { outcome: claudeResult.terminal_outcome, url: process.env.GHL_POST_CALL_ROUTER_URL });
     }
 
     return res.status(200).json({
@@ -116,6 +140,7 @@ router.post('/inbound', async (req, res) => {
       elapsed_ms: Date.now() - startedAt
     });
   } catch (err) {
+    logger.log('error', 'error', contactId, err.message, { stack: err.stack });
     console.error('[webhook/inbound] error', err);
     return res.status(500).json({ error: 'internal error', detail: err.message });
   }

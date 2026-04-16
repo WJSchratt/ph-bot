@@ -66,6 +66,31 @@
     .sandbox-input-row input { flex: 1; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
     .sandbox-input-row button { background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; }
     .sandbox-input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .logs-controls { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+    .logs-controls input { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; padding: 8px 12px; border-radius: 6px; font-size: 13px; width: 260px; }
+    .logs-controls button { background: #334155; color: #e2e8f0; border: 1px solid #475569; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+    .logs-controls button.primary { background: #2563eb; border-color: #2563eb; }
+    .logs-controls label { font-size: 12px; color: #94a3b8; display: flex; align-items: center; gap: 4px; cursor: pointer; }
+    .logs-controls label input[type="checkbox"] { accent-color: #2563eb; }
+    .log-entry { background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 10px 14px; margin-bottom: 6px; font-size: 13px; }
+    .log-entry .log-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .log-entry .log-ts { color: #64748b; font-size: 11px; font-family: monospace; min-width: 70px; }
+    .log-entry .log-stage { display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 10px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.04em; }
+    .log-stage.inbound { background: #1e3a5f; color: #60a5fa; }
+    .log-stage.parse { background: #3b1f6e; color: #c084fc; }
+    .log-stage.claude { background: #14532d; color: #86efac; }
+    .log-stage.ghl_send { background: #713f12; color: #fdba74; }
+    .log-stage.webhook_fire { background: #134e4a; color: #5eead4; }
+    .log-stage.error { background: #7f1d1d; color: #fca5a5; }
+    .log-entry .log-level { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+    .log-level.info { background: #64748b; }
+    .log-level.warn { background: #eab308; }
+    .log-level.error { background: #ef4444; }
+    .log-entry .log-cid { font-family: monospace; font-size: 11px; color: #94a3b8; }
+    .log-entry .log-msg { color: #e2e8f0; }
+    .log-entry .log-toggle { color: #60a5fa; font-size: 11px; cursor: pointer; margin-top: 4px; display: inline-block; user-select: none; }
+    .log-entry pre { background: #0f172a; color: #94a3b8; padding: 8px 10px; border-radius: 4px; font-size: 11px; overflow-x: auto; margin: 6px 0 0; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+    .logs-empty { color: #64748b; text-align: center; padding: 60px 20px; font-size: 14px; }
   </style>
 </head>
 <body>
@@ -101,6 +126,12 @@
       const [sbMessages, setSbMessages] = useState([]);
       const [sbInput, setSbInput] = useState('');
       const [sbLoading, setSbLoading] = useState(false);
+
+      // Logs state
+      const [logs, setLogs] = useState([]);
+      const [logFilter, setLogFilter] = useState('');
+      const [logAutoRefresh, setLogAutoRefresh] = useState(true);
+      const [logExpanded, setLogExpanded] = useState({});
 
       const queryString = () => {
         const p = new URLSearchParams();
@@ -178,6 +209,27 @@
         if (sbMessagesEndRef.current) sbMessagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
       }, [sbMessages, sbLoading]);
 
+      const fetchLogs = async () => {
+        const qs = logFilter ? `?contact_id=${encodeURIComponent(logFilter)}` : '';
+        const res = await fetch(`/api/logs${qs}`).then(r => r.json());
+        setLogs(res.logs || []);
+      };
+
+      useEffect(() => {
+        if (tab !== 'logs') return;
+        fetchLogs();
+        if (!logAutoRefresh) return;
+        const interval = setInterval(fetchLogs, 3000);
+        return () => clearInterval(interval);
+      }, [tab, logFilter, logAutoRefresh]);
+
+      const toggleLogExpand = (id) => setLogExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+
+      const fmtTime = (iso) => {
+        const d = new Date(iso);
+        return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      };
+
       return (
         <div>
           <div className="controls">
@@ -188,7 +240,7 @@
           </div>
 
           <div className="tabs">
-            {['overview', 'conversations', 'performance', 'sync', 'sandbox'].map(t => (
+            {['overview', 'conversations', 'performance', 'sync', 'sandbox', 'logs'].map(t => (
               <div key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
                 {t.charAt(0).toUpperCase() + t.slice(1)}
               </div>
@@ -283,6 +335,47 @@
             <div className="cards">
               <div className="card"><div className="label">Pending Syncs</div><div className="value">{syncStatus.pending_syncs}</div></div>
               <div className="card"><div className="label">Last Sync</div><div className="value" style={{fontSize: 16}}>{syncStatus.last_synced_at ? new Date(syncStatus.last_synced_at).toLocaleString() : 'never'}</div></div>
+            </div>
+          )}
+
+          {tab === 'logs' && (
+            <div>
+              <div className="logs-controls">
+                <input
+                  placeholder="Filter by contact_id..."
+                  value={logFilter}
+                  onChange={e => setLogFilter(e.target.value)}
+                />
+                <button className="primary" onClick={fetchLogs}>Refresh</button>
+                <button onClick={() => setLogFilter('')}>Clear filter</button>
+                <label>
+                  <input type="checkbox" checked={logAutoRefresh} onChange={e => setLogAutoRefresh(e.target.checked)} />
+                  Auto-refresh
+                </label>
+              </div>
+              {logs.length === 0 ? (
+                <div className="logs-empty">No logs yet. Trigger a webhook to see activity.</div>
+              ) : (
+                logs.map(entry => (
+                  <div key={entry.id} className="log-entry">
+                    <div className="log-header">
+                      <span className="log-ts">{fmtTime(entry.timestamp)}</span>
+                      <span className={`log-stage ${entry.stage}`}>{entry.stage}</span>
+                      <span className={`log-level ${entry.level}`} title={entry.level}></span>
+                      {entry.contact_id && <span className="log-cid">{entry.contact_id}</span>}
+                      <span className="log-msg">{entry.message}</span>
+                    </div>
+                    {entry.data && (
+                      <>
+                        <span className="log-toggle" onClick={() => toggleLogExpand(entry.id)}>
+                          {logExpanded[entry.id] ? 'Hide data' : 'Show data'}
+                        </span>
+                        {logExpanded[entry.id] && <pre>{JSON.stringify(entry.data, null, 2)}</pre>}
+                      </>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
           )}
 
