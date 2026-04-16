@@ -796,12 +796,13 @@ textarea.form-input{resize:vertical;min-height:80px;}
           <div class="form-group"><label class="form-label">MMS / Segment (Outbound)</label><input class="form-input" id="cost-mms-out" type="number" step="0.0001"></div>
           <div class="form-group"><label class="form-label">MMS / Segment (Inbound)</label><input class="form-input" id="cost-mms-in" type="number" step="0.0001"></div>
         </div>
-        <div style="font-size:10px;letter-spacing:1.5px;color:var(--amber);font-weight:700;margin:14px 0 6px;">AI + WEBHOOK COSTS</div>
+        <div style="font-size:10px;letter-spacing:1.5px;color:var(--amber);font-weight:700;margin:14px 0 6px;">AI + WEBHOOK + EMAIL</div>
         <div class="grid c2">
           <div class="form-group"><label class="form-label">Input Token Cost / 1M</label><input class="form-input" id="cost-in-tok" type="number" step="0.01"></div>
           <div class="form-group"><label class="form-label">Output Token Cost / 1M</label><input class="form-input" id="cost-out-tok" type="number" step="0.01"></div>
           <div class="form-group"><label class="form-label">GHL Webhook Free Tier / Month</label><input class="form-input" id="cost-wh-free" type="number"></div>
           <div class="form-group"><label class="form-label">Webhook Cost / Event (after free tier)</label><input class="form-input" id="cost-wh-cost" type="number" step="0.001"></div>
+          <div class="form-group"><label class="form-label">Email Notification / Send</label><input class="form-input" id="cost-email" type="number" step="0.000001"></div>
         </div>
         <button class="btn pri" onclick="saveCostConfig()" style="margin-top:12px;">Save Cost Config</button>
       </div>
@@ -1250,8 +1251,8 @@ async function loadDashboard() {
     '<div class="card"><div class="card-title">AI Token Cost</div><div class="card-value">' + fmtDollar(k.ai_cost, 2) + '</div><div class="card-sub">In ' + fmtNum(k.total_input_tokens) + ' / Out ' + fmtNum(k.total_output_tokens) + '</div></div>' +
     '<div class="card"><div class="card-title">SMS Carrier Cost</div><div class="card-value">' + fmtDollar(k.sms_cost || 0, 2) + '</div><div class="card-sub">' + fmtNum(smsSeg) + ' segments · Signal House</div></div>' +
     '<div class="card"><div class="card-title">MMS Carrier Cost</div><div class="card-value">' + fmtDollar(k.mms_cost || 0, 2) + '</div><div class="card-sub">' + fmtNum(mmsSeg) + ' segments · Signal House</div></div>' +
-    '<div class="card"><div class="card-title">Webhook Cost</div><div class="card-value">' + fmtDollar(k.webhook_cost || 0, 2) + '</div><div class="card-sub">' + fmtNum(k.webhook_billable_events || 0) + ' billable of ' + fmtNum(k.webhook_events || 0) + '</div></div>' +
-    '<div class="card"><div class="card-title">Total Cost</div><div class="card-value">' + fmtDollar(k.total_cost || ((k.ai_cost || 0) + (k.carrier_cost || 0) + (k.webhook_cost || 0)), 2) + '</div><div class="card-sub">AI + SMS + MMS + Webhook</div></div>' +
+    '<div class="card"><div class="card-title">Webhook + Email</div><div class="card-value">' + fmtDollar((k.webhook_cost || 0) + (k.email_cost || 0), 2) + '</div><div class="card-sub">' + fmtNum(k.webhook_billable_events || 0) + ' webhooks · ' + fmtNum(k.email_sends || 0) + ' emails</div></div>' +
+    '<div class="card"><div class="card-title">Total Cost</div><div class="card-value">' + fmtDollar(k.total_cost || ((k.ai_cost || 0) + (k.carrier_cost || 0) + (k.webhook_cost || 0) + (k.email_cost || 0)), 2) + '</div><div class="card-sub">AI + SMS + MMS + Webhook + Email</div></div>' +
     '<div class="card"><div class="card-title">Cost / Message</div><div class="card-value">' + fmtDollar(k.cost_per_message, 4) + '</div><div class="card-sub">Blended</div></div>';
 
   // Trends chart
@@ -1820,7 +1821,8 @@ async function loadSettingsPanel(panelId) {
       document.getElementById('cost-in-tok').value = data.settings.input_token_cost_per_million || '3';
       document.getElementById('cost-out-tok').value = data.settings.output_token_cost_per_million || '15';
       document.getElementById('cost-wh-free').value = data.settings.webhook_free_tier_per_month || '100';
-      document.getElementById('cost-wh-cost').value = data.settings.webhook_cost_per_event || '0.02';
+      document.getElementById('cost-wh-cost').value = data.settings.webhook_cost_per_event || '0.01';
+      document.getElementById('cost-email').value = data.settings.email_cost_per_send || '0.000675';
     }
   }
   if (panelId === 'st-users' && !settingsLoaded.users) {
@@ -2050,7 +2052,7 @@ function renderWeeklyCard(sub, d) {
     '</div>' +
     '<div class="divider"></div>' +
     '<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);"><span>Cost this week</span><span style="color:#fff;">' + fmtDollar(d.total_cost) + '</span></div>' +
-    '<div style="font-size:10px;color:var(--muted);">AI ' + fmtDollar(d.ai_cost) + ' · SMS ' + fmtDollar(d.sms_cost || 0) + ' · MMS ' + fmtDollar(d.mms_cost || 0) + '</div>' +
+    '<div style="font-size:10px;color:var(--muted);">AI ' + fmtDollar(d.ai_cost) + ' · SMS ' + fmtDollar(d.sms_cost || 0) + ' · MMS ' + fmtDollar(d.mms_cost || 0) + ' · WH ' + fmtDollar(d.webhook_cost || 0) + ' · Email ' + fmtDollar(d.email_cost || 0, 4) + '</div>' +
     (appts ? '<div style="margin-top:10px;"><div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);">BOOKED APPOINTMENTS</div><ul style="margin-top:5px;padding-left:20px;font-size:12px;">' + appts + '</ul></div>' : '') +
   '</div>';
 }
@@ -2198,7 +2200,8 @@ async function saveCostConfig() {
     input_token_cost_per_million: document.getElementById('cost-in-tok').value,
     output_token_cost_per_million: document.getElementById('cost-out-tok').value,
     webhook_free_tier_per_month: document.getElementById('cost-wh-free').value,
-    webhook_cost_per_event: document.getElementById('cost-wh-cost').value
+    webhook_cost_per_event: document.getElementById('cost-wh-cost').value,
+    email_cost_per_send: document.getElementById('cost-email').value
   };
   const res = await api('/api/settings/cost_config', {
     method: 'PUT',

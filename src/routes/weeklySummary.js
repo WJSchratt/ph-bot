@@ -23,11 +23,14 @@ async function loadCostConfig() {
       sms_in: parseFloat(m.carrier_cost_per_segment_inbound) || 0.01,
       mms_out: parseFloat(m.carrier_cost_mms_outbound) || 0.04,
       mms_in: parseFloat(m.carrier_cost_mms_inbound) || 0.04,
+      webhook_free: parseInt(m.webhook_free_tier_per_month, 10) || 100,
+      webhook_cost: parseFloat(m.webhook_cost_per_event) || 0.01,
+      email_cost: parseFloat(m.email_cost_per_send) || 0.000675,
       input_cost_per_m: parseFloat(m.input_token_cost_per_million) || 3,
       output_cost_per_m: parseFloat(m.output_token_cost_per_million) || 15
     };
   } catch {
-    return { sms_out: 0.01, sms_in: 0.01, mms_out: 0.04, mms_in: 0.04, input_cost_per_m: 3, output_cost_per_m: 15 };
+    return { sms_out: 0.01, sms_in: 0.01, mms_out: 0.04, mms_in: 0.04, webhook_free: 100, webhook_cost: 0.01, email_cost: 0.000675, input_cost_per_m: 3, output_cost_per_m: 15 };
   }
 }
 
@@ -91,6 +94,19 @@ async function computeSummaryForLocation(locationId, weekStart, weekEnd, costCon
   const mmsCost = mmsSegOut * cost.mms_out + mmsSegIn * cost.mms_in;
   const carrierCost = smsCost + mmsCost;
 
+  // Email: calendar confirmation per booked appointment
+  const emailCost = (g.booked || 0) * cost.email_cost;
+  // Webhook: each terminal outcome (PCR fire); first N/mo free in the config
+  // but weekly view doesn't subtract — the free tier resets monthly, not weekly.
+  const terminalQ = await db.query(
+    `SELECT COUNT(*) FILTER (WHERE terminal_outcome IS NOT NULL)::int AS n
+     FROM ghl_conversations
+     WHERE location_id = $1 AND COALESCE(ghl_date_added, last_message_at, pulled_at) >= $2 AND COALESCE(ghl_date_added, last_message_at, pulled_at) < $3`,
+    [locationId, weekStart, weekEnd]
+  );
+  const webhookEvents = terminalQ.rows[0]?.n || 0;
+  const webhookCost = webhookEvents * cost.webhook_cost;
+
   const apptsQ = await db.query(
     `SELECT contact_name, ghl_conversation_id, last_message_at
      FROM ghl_conversations
@@ -113,7 +129,9 @@ async function computeSummaryForLocation(locationId, weekStart, weekEnd, costCon
     sms_cost: Math.round(smsCost * 100) / 100,
     mms_cost: Math.round(mmsCost * 100) / 100,
     carrier_cost: Math.round(carrierCost * 100) / 100,
-    total_cost: Math.round((aiCost + carrierCost) * 100) / 100,
+    webhook_cost: Math.round(webhookCost * 100) / 100,
+    email_cost: Math.round(emailCost * 10000) / 10000,
+    total_cost: Math.round((aiCost + carrierCost + webhookCost + emailCost) * 100) / 100,
     appointments: apptsQ.rows.map((r) => ({
       contact_name: r.contact_name,
       ghl_conversation_id: r.ghl_conversation_id,

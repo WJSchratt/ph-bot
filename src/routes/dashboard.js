@@ -17,12 +17,13 @@ async function loadCostConfig() {
       mms_out: parseFloat(map.carrier_cost_mms_outbound) || 0.04,
       mms_in: parseFloat(map.carrier_cost_mms_inbound) || 0.04,
       webhook_free: parseInt(map.webhook_free_tier_per_month, 10) || 100,
-      webhook_cost: parseFloat(map.webhook_cost_per_event) || 0.02,
+      webhook_cost: parseFloat(map.webhook_cost_per_event) || 0.01,
+      email_cost: parseFloat(map.email_cost_per_send) || 0.000675,
       input_cost_per_m: parseFloat(map.input_token_cost_per_million) || 3,
       output_cost_per_m: parseFloat(map.output_token_cost_per_million) || 15
     };
   } catch {
-    return { sms_out: 0.01, sms_in: 0.01, mms_out: 0.04, mms_in: 0.04, webhook_free: 100, webhook_cost: 0.02, input_cost_per_m: 3, output_cost_per_m: 15 };
+    return { sms_out: 0.01, sms_in: 0.01, mms_out: 0.04, mms_in: 0.04, webhook_free: 100, webhook_cost: 0.01, email_cost: 0.000675, input_cost_per_m: 3, output_cost_per_m: 15 };
   }
 }
 
@@ -164,7 +165,9 @@ router.get('/dashboard', async (req, res) => {
     const outSegments = smsOutSeg + mmsOutSeg;
     const inSegments = smsInSeg + mmsInSeg;
 
-    // Webhook billing: terminal outcomes fire a webhook. Estimate count.
+    // Webhook billing: each terminal outcome fires one inbound_webhook trigger
+    // at GHL (our post-call router). First N/month are free, then per-event rate.
+    // Webhooks coming FROM GHL to our bot are free and are NOT counted here.
     const webhookFiredQ = await db.query(
       `SELECT COUNT(*)::int AS n FROM conversations ${botWhere} AND terminal_outcome IS NOT NULL`,
       botParams
@@ -173,8 +176,12 @@ router.get('/dashboard', async (req, res) => {
     const webhookBillable = Math.max(0, webhookEvents - costConfig.webhook_free);
     const webhookCost = webhookBillable * costConfig.webhook_cost;
 
+    // Email billing: calendar confirmation per booked appointment, sent by GHL.
+    const emailSends = appointmentsBooked;
+    const emailCost = emailSends * costConfig.email_cost;
+
     const totalMessages = (mg.outbound || 0) + (mg.inbound || 0) || 1;
-    const costPerMessage = (aiCost + carrierCost + webhookCost) / totalMessages;
+    const costPerMessage = (aiCost + carrierCost + webhookCost + emailCost) / totalMessages;
 
     const smsSavedSec = ((mg.outbound || 0) + (mg.inbound || 0)) * 100;
     const callSavedSec = appointmentsBooked * 120;
@@ -334,7 +341,9 @@ router.get('/dashboard', async (req, res) => {
         mms_cost: Math.round(mmsCost * 100) / 100,
         carrier_cost: Math.round(carrierCost * 100) / 100,
         webhook_cost: Math.round(webhookCost * 100) / 100,
-        total_cost: Math.round((aiCost + carrierCost + webhookCost) * 100) / 100,
+        email_cost: Math.round(emailCost * 10000) / 10000,
+        email_sends: emailSends,
+        total_cost: Math.round((aiCost + carrierCost + webhookCost + emailCost) * 100) / 100,
         cost_per_message: Math.round(costPerMessage * 10000) / 10000,
         total_segments: outSegments + inSegments,
         total_segments_outbound: outSegments,

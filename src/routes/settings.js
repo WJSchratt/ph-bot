@@ -17,8 +17,13 @@ const SECTION_DEFAULTS = {
     carrier_cost_per_segment_inbound: '0.01',
     carrier_cost_mms_outbound: '0.04',
     carrier_cost_mms_inbound: '0.04',
+    // GHL premium inbound_webhook trigger (e.g. post-call router fires).
+    // First 100/month are free, then $0.01 each. GHL does NOT charge per SMS —
+    // SMS cost is only the underlying Signal House carrier rate above.
     webhook_free_tier_per_month: '100',
-    webhook_cost_per_event: '0.02',
+    webhook_cost_per_event: '0.01',
+    // GHL emails (calendar confirmations, follow-ups, etc.)
+    email_cost_per_send: '0.000675',
     input_token_cost_per_million: '3',
     output_token_cost_per_million: '15'
   }
