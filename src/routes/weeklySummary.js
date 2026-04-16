@@ -27,10 +27,11 @@ async function loadCostConfig() {
       webhook_cost: parseFloat(m.webhook_cost_per_event) || 0.01,
       email_cost: parseFloat(m.email_cost_per_send) || 0.000675,
       input_cost_per_m: parseFloat(m.input_token_cost_per_million) || 3,
-      output_cost_per_m: parseFloat(m.output_token_cost_per_million) || 15
+      output_cost_per_m: parseFloat(m.output_token_cost_per_million) || 15,
+      botpress_per_msg: parseFloat(m.botpress_ai_cost_per_message) || 0.0186
     };
   } catch {
-    return { sms_out: 0.01, sms_in: 0.01, mms_out: 0.04, mms_in: 0.04, webhook_free: 100, webhook_cost: 0.01, email_cost: 0.000675, input_cost_per_m: 3, output_cost_per_m: 15 };
+    return { sms_out: 0.01, sms_in: 0.01, mms_out: 0.04, mms_in: 0.04, webhook_free: 100, webhook_cost: 0.01, email_cost: 0.000675, input_cost_per_m: 3, output_cost_per_m: 15, botpress_per_msg: 0.0186 };
   }
 }
 
@@ -94,6 +95,17 @@ async function computeSummaryForLocation(locationId, weekStart, weekEnd, costCon
   const mmsCost = mmsSegOut * cost.mms_out + mmsSegIn * cost.mms_in;
   const carrierCost = smsCost + mmsCost;
 
+  // BotPress AI cost: outbound messages from BP-classified conversations
+  const bpQ = await db.query(
+    `SELECT COUNT(*)::int AS n FROM ghl_messages gm
+     JOIN ghl_conversations gc ON gc.ghl_conversation_id = gm.ghl_conversation_id AND gc.location_id = gm.location_id
+     WHERE gc.source = 'botpress' AND gm.direction = 'outbound'
+       AND gm.location_id = $1 AND gm.created_at >= $2 AND gm.created_at < $3`,
+    [locationId, weekStart, weekEnd]
+  );
+  const botpressMessages = bpQ.rows[0]?.n || 0;
+  const botpressAiCost = botpressMessages * cost.botpress_per_msg;
+
   // Email: calendar confirmation per booked appointment
   const emailCost = (g.booked || 0) * cost.email_cost;
   // Webhook: each terminal outcome (PCR fire); first N/mo free in the config
@@ -126,12 +138,14 @@ async function computeSummaryForLocation(locationId, weekStart, weekEnd, costCon
     appointments_booked: g.booked || 0,
     dnc_count: g.dnc || 0,
     ai_cost: Math.round(aiCost * 100) / 100,
+    botpress_ai_cost: Math.round(botpressAiCost * 100) / 100,
+    botpress_messages: botpressMessages,
     sms_cost: Math.round(smsCost * 100) / 100,
     mms_cost: Math.round(mmsCost * 100) / 100,
     carrier_cost: Math.round(carrierCost * 100) / 100,
     webhook_cost: Math.round(webhookCost * 100) / 100,
     email_cost: Math.round(emailCost * 10000) / 10000,
-    total_cost: Math.round((aiCost + carrierCost + webhookCost + emailCost) * 100) / 100,
+    total_cost: Math.round((aiCost + botpressAiCost + carrierCost + webhookCost + emailCost) * 100) / 100,
     appointments: apptsQ.rows.map((r) => ({
       contact_name: r.contact_name,
       ghl_conversation_id: r.ghl_conversation_id,

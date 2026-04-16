@@ -20,10 +20,11 @@ async function loadCostConfig() {
       webhook_cost: parseFloat(map.webhook_cost_per_event) || 0.01,
       email_cost: parseFloat(map.email_cost_per_send) || 0.000675,
       input_cost_per_m: parseFloat(map.input_token_cost_per_million) || 3,
-      output_cost_per_m: parseFloat(map.output_token_cost_per_million) || 15
+      output_cost_per_m: parseFloat(map.output_token_cost_per_million) || 15,
+      botpress_per_msg: parseFloat(map.botpress_ai_cost_per_message) || 0.0186
     };
   } catch {
-    return { sms_out: 0.01, sms_in: 0.01, mms_out: 0.04, mms_in: 0.04, webhook_free: 100, webhook_cost: 0.01, email_cost: 0.000675, input_cost_per_m: 3, output_cost_per_m: 15 };
+    return { sms_out: 0.01, sms_in: 0.01, mms_out: 0.04, mms_in: 0.04, webhook_free: 100, webhook_cost: 0.01, email_cost: 0.000675, input_cost_per_m: 3, output_cost_per_m: 15, botpress_per_msg: 0.0186 };
   }
 }
 
@@ -180,8 +181,22 @@ router.get('/dashboard', async (req, res) => {
     const emailSends = appointmentsBooked;
     const emailCost = emailSends * costConfig.email_cost;
 
-    const totalMessages = (mg.outbound || 0) + (mg.inbound || 0) || 1;
-    const costPerMessage = (aiCost + carrierCost + webhookCost + emailCost) / totalMessages;
+    // BotPress AI cost: count outbound messages from BotPress-classified
+    // conversations within the window × configured per-message rate.
+    const bpParams = [daysInt];
+    let bpWhere = `gc.source = 'botpress' AND gm.direction = 'outbound' AND gm.created_at >= NOW() - ($1 || ' days')::interval`;
+    if (locIds.length) { bpParams.push(locIds); bpWhere += ` AND gm.location_id = ANY($${bpParams.length})`; }
+    const bpQ = await db.query(
+      `SELECT COUNT(*)::int AS n FROM ghl_messages gm
+       JOIN ghl_conversations gc ON gc.ghl_conversation_id = gm.ghl_conversation_id AND gc.location_id = gm.location_id
+       WHERE ${bpWhere}`,
+      bpParams
+    );
+    const botpressMessages = bpQ.rows[0]?.n || 0;
+    const botpressAiCost = botpressMessages * costConfig.botpress_per_msg;
+
+    const totalMessages = (mg.outbound || 0) + (mg.inbound || 0) + botpressMessages || 1;
+    const costPerMessage = (aiCost + botpressAiCost + carrierCost + webhookCost + emailCost) / totalMessages;
 
     const smsSavedSec = ((mg.outbound || 0) + (mg.inbound || 0)) * 100;
     const callSavedSec = appointmentsBooked * 120;
@@ -219,8 +234,17 @@ router.get('/dashboard', async (req, res) => {
          FROM messages
          WHERE created_at >= NOW() - ($1 || ' days')::interval
          GROUP BY location_id
+       ),
+       bp_agg AS (
+         SELECT gm.location_id,
+           COUNT(*)::int AS bp_messages
+         FROM ghl_messages gm
+         JOIN ghl_conversations gc ON gc.ghl_conversation_id = gm.ghl_conversation_id AND gc.location_id = gm.location_id
+         WHERE gc.source = 'botpress' AND gm.direction = 'outbound'
+           AND gm.created_at >= NOW() - ($1 || ' days')::interval
+         GROUP BY gm.location_id
        )
-       SELECT COALESCE(g.location_id, b.location_id, m.location_id) AS location_id,
+       SELECT COALESCE(g.location_id, b.location_id, m.location_id, bp.location_id) AS location_id,
               s.name AS subaccount_name,
               COALESCE(g.total, b.bot_total, 0) AS total_conversations,
               COALESCE(g.booked, 0) AS appointments_booked,
@@ -231,11 +255,13 @@ router.get('/dashboard', async (req, res) => {
               COALESCE(b.input_tokens, 0) AS input_tokens,
               COALESCE(b.output_tokens, 0) AS output_tokens,
               COALESCE(m.out_segments, 0) AS out_segments,
-              COALESCE(m.in_segments, 0) AS in_segments
+              COALESCE(m.in_segments, 0) AS in_segments,
+              COALESCE(bp.bp_messages, 0) AS bp_messages
          FROM ghl_agg g
          FULL OUTER JOIN bot_agg b ON g.location_id = b.location_id
          FULL OUTER JOIN msg_agg m ON COALESCE(g.location_id, b.location_id) = m.location_id
-         LEFT JOIN subaccounts s ON s.ghl_location_id = COALESCE(g.location_id, b.location_id, m.location_id)
+         FULL OUTER JOIN bp_agg bp ON COALESCE(g.location_id, b.location_id, m.location_id) = bp.location_id
+         LEFT JOIN subaccounts s ON s.ghl_location_id = COALESCE(g.location_id, b.location_id, m.location_id, bp.location_id)
         ORDER BY total_conversations DESC`,
       subParams
     );
@@ -253,6 +279,8 @@ router.get('/dashboard', async (req, res) => {
       // Per-subaccount row doesn't have the SMS/MMS split (messages table doesn't
       // distinguish here); treat as SMS since that's what the bot sends.
       const carrier = outSeg * costConfig.sms_out + inSeg * costConfig.sms_in;
+      const bpMessages = Number(r.bp_messages) || 0;
+      const bpCost = bpMessages * costConfig.botpress_per_msg;
       return {
         location_id: r.location_id,
         subaccount_name: r.subaccount_name || null,
@@ -265,8 +293,10 @@ router.get('/dashboard', async (req, res) => {
         booking_rate: total ? booked / total : 0,
         avg_messages_per_conversation: Number(r.avg_messages_per_conversation) || 0,
         ai_cost: Math.round(ai * 10000) / 10000,
+        botpress_ai_cost: Math.round(bpCost * 10000) / 10000,
+        botpress_messages: bpMessages,
         carrier_cost: Math.round(carrier * 10000) / 10000,
-        total_cost: Math.round((ai + carrier) * 10000) / 10000,
+        total_cost: Math.round((ai + bpCost + carrier) * 10000) / 10000,
         time_saved_hours: Math.round(((outSeg + inSeg) * 100 + booked * 120) / 3600)
       };
     });
@@ -337,13 +367,15 @@ router.get('/dashboard', async (req, res) => {
         total_input_tokens: Number(botKpi.input_tokens) || 0,
         total_output_tokens: Number(botKpi.output_tokens) || 0,
         ai_cost: Math.round(aiCost * 100) / 100,
+        botpress_ai_cost: Math.round(botpressAiCost * 100) / 100,
+        botpress_messages: botpressMessages,
         sms_cost: Math.round(smsCost * 100) / 100,
         mms_cost: Math.round(mmsCost * 100) / 100,
         carrier_cost: Math.round(carrierCost * 100) / 100,
         webhook_cost: Math.round(webhookCost * 100) / 100,
         email_cost: Math.round(emailCost * 10000) / 10000,
         email_sends: emailSends,
-        total_cost: Math.round((aiCost + carrierCost + webhookCost + emailCost) * 100) / 100,
+        total_cost: Math.round((aiCost + botpressAiCost + carrierCost + webhookCost + emailCost) * 100) / 100,
         cost_per_message: Math.round(costPerMessage * 10000) / 10000,
         total_segments: outSegments + inSegments,
         total_segments_outbound: outSegments,

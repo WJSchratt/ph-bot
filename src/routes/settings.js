@@ -25,7 +25,10 @@ const SECTION_DEFAULTS = {
     // GHL emails (calendar confirmations, follow-ups, etc.)
     email_cost_per_send: '0.000675',
     input_token_cost_per_million: '3',
-    output_token_cost_per_million: '15'
+    output_token_cost_per_million: '15',
+    // BotPress AI cost — average per OUTBOUND bot message. Calculate from
+    // BotPress dashboard: total monthly AI spend ÷ total messages.
+    botpress_ai_cost_per_message: '0.0186'
   }
 };
 

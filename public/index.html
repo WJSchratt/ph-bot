@@ -78,6 +78,7 @@ main{position:fixed;top:var(--header-h);left:var(--nav-w);right:0;bottom:0;overf
 .c4{grid-template-columns:repeat(4,1fr);}
 .c5{grid-template-columns:repeat(5,1fr);}
 .c6{grid-template-columns:repeat(6,1fr);}
+.c7{grid-template-columns:repeat(7,1fr);}
 .s2{grid-column:span 2;}
 .s3{grid-column:span 3;}
 .s4{grid-column:span 4;}
@@ -425,7 +426,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
       <div class="chart-wrap" style="height:190px;"><canvas id="ch-resp-outcome"></canvas></div>
     </div>
   </div>
-  <div class="grid c6" style="margin-bottom:13px;" id="cost-cards"></div>
+  <div class="grid c7" style="margin-bottom:13px;" id="cost-cards"></div>
   <div class="grid c2" style="margin-bottom:13px;">
     <div class="card">
       <div class="card-title">Appointments by Type</div>
@@ -804,6 +805,11 @@ textarea.form-input{resize:vertical;min-height:80px;}
           <div class="form-group"><label class="form-label">Webhook Cost / Event (after free tier)</label><input class="form-input" id="cost-wh-cost" type="number" step="0.001"></div>
           <div class="form-group"><label class="form-label">Email Notification / Send</label><input class="form-input" id="cost-email" type="number" step="0.000001"></div>
         </div>
+        <div style="font-size:10px;letter-spacing:1.5px;color:var(--amber);font-weight:700;margin:14px 0 6px;">BOTPRESS COSTS</div>
+        <div class="grid c2">
+          <div class="form-group"><label class="form-label">BotPress AI Cost per Message</label><input class="form-input" id="cost-bp-msg" type="number" step="0.0001"></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Average cost per BotPress message. Calculate from BotPress dashboard: total monthly AI spend &divide; total messages.</div>
         <button class="btn pri" onclick="saveCostConfig()" style="margin-top:12px;">Save Cost Config</button>
       </div>
       <!-- User Management -->
@@ -1248,11 +1254,12 @@ async function loadDashboard() {
   const smsSeg = (k.sms_segments && k.sms_segments.total) || 0;
   const mmsSeg = (k.mms_segments && k.mms_segments.total) || 0;
   costEl.innerHTML =
-    '<div class="card"><div class="card-title">AI Token Cost</div><div class="card-value">' + fmtDollar(k.ai_cost, 2) + '</div><div class="card-sub">In ' + fmtNum(k.total_input_tokens) + ' / Out ' + fmtNum(k.total_output_tokens) + '</div></div>' +
+    '<div class="card"><div class="card-title">AI Token Cost</div><div class="card-value">' + fmtDollar(k.ai_cost, 2) + '</div><div class="card-sub">Claude · In ' + fmtNum(k.total_input_tokens) + ' / Out ' + fmtNum(k.total_output_tokens) + '</div></div>' +
+    '<div class="card"><div class="card-title">BotPress AI Cost</div><div class="card-value">' + fmtDollar(k.botpress_ai_cost || 0, 2) + '</div><div class="card-sub">' + fmtNum(k.botpress_messages || 0) + ' outbound messages</div></div>' +
     '<div class="card"><div class="card-title">SMS Carrier Cost</div><div class="card-value">' + fmtDollar(k.sms_cost || 0, 2) + '</div><div class="card-sub">' + fmtNum(smsSeg) + ' segments · Signal House</div></div>' +
     '<div class="card"><div class="card-title">MMS Carrier Cost</div><div class="card-value">' + fmtDollar(k.mms_cost || 0, 2) + '</div><div class="card-sub">' + fmtNum(mmsSeg) + ' segments · Signal House</div></div>' +
     '<div class="card"><div class="card-title">Webhook + Email</div><div class="card-value">' + fmtDollar((k.webhook_cost || 0) + (k.email_cost || 0), 2) + '</div><div class="card-sub">' + fmtNum(k.webhook_billable_events || 0) + ' webhooks · ' + fmtNum(k.email_sends || 0) + ' emails</div></div>' +
-    '<div class="card"><div class="card-title">Total Cost</div><div class="card-value">' + fmtDollar(k.total_cost || ((k.ai_cost || 0) + (k.carrier_cost || 0) + (k.webhook_cost || 0) + (k.email_cost || 0)), 2) + '</div><div class="card-sub">AI + SMS + MMS + Webhook + Email</div></div>' +
+    '<div class="card"><div class="card-title">Total Cost</div><div class="card-value">' + fmtDollar(k.total_cost || ((k.ai_cost || 0) + (k.botpress_ai_cost || 0) + (k.carrier_cost || 0) + (k.webhook_cost || 0) + (k.email_cost || 0)), 2) + '</div><div class="card-sub">Claude + BP + SMS + MMS + WH + Email</div></div>' +
     '<div class="card"><div class="card-title">Cost / Message</div><div class="card-value">' + fmtDollar(k.cost_per_message, 4) + '</div><div class="card-sub">Blended</div></div>';
 
   // Trends chart
@@ -1823,6 +1830,7 @@ async function loadSettingsPanel(panelId) {
       document.getElementById('cost-wh-free').value = data.settings.webhook_free_tier_per_month || '100';
       document.getElementById('cost-wh-cost').value = data.settings.webhook_cost_per_event || '0.01';
       document.getElementById('cost-email').value = data.settings.email_cost_per_send || '0.000675';
+      document.getElementById('cost-bp-msg').value = data.settings.botpress_ai_cost_per_message || '0.0186';
     }
   }
   if (panelId === 'st-users' && !settingsLoaded.users) {
@@ -2052,7 +2060,7 @@ function renderWeeklyCard(sub, d) {
     '</div>' +
     '<div class="divider"></div>' +
     '<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);"><span>Cost this week</span><span style="color:#fff;">' + fmtDollar(d.total_cost) + '</span></div>' +
-    '<div style="font-size:10px;color:var(--muted);">AI ' + fmtDollar(d.ai_cost) + ' · SMS ' + fmtDollar(d.sms_cost || 0) + ' · MMS ' + fmtDollar(d.mms_cost || 0) + ' · WH ' + fmtDollar(d.webhook_cost || 0) + ' · Email ' + fmtDollar(d.email_cost || 0, 4) + '</div>' +
+    '<div style="font-size:10px;color:var(--muted);">Claude ' + fmtDollar(d.ai_cost) + ' · BP ' + fmtDollar(d.botpress_ai_cost || 0) + ' · SMS ' + fmtDollar(d.sms_cost || 0) + ' · MMS ' + fmtDollar(d.mms_cost || 0) + ' · WH ' + fmtDollar(d.webhook_cost || 0) + ' · Email ' + fmtDollar(d.email_cost || 0, 4) + '</div>' +
     (appts ? '<div style="margin-top:10px;"><div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);">BOOKED APPOINTMENTS</div><ul style="margin-top:5px;padding-left:20px;font-size:12px;">' + appts + '</ul></div>' : '') +
   '</div>';
 }
@@ -2201,7 +2209,8 @@ async function saveCostConfig() {
     output_token_cost_per_million: document.getElementById('cost-out-tok').value,
     webhook_free_tier_per_month: document.getElementById('cost-wh-free').value,
     webhook_cost_per_event: document.getElementById('cost-wh-cost').value,
-    email_cost_per_send: document.getElementById('cost-email').value
+    email_cost_per_send: document.getElementById('cost-email').value,
+    botpress_ai_cost_per_message: document.getElementById('cost-bp-msg').value
   };
   const res = await api('/api/settings/cost_config', {
     method: 'PUT',
