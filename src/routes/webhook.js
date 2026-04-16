@@ -136,8 +136,10 @@ router.post('/inbound', async (req, res) => {
 
     const conv = await store.upsertConversation(parsed);
 
-    // Terminal cooldown handling
-    if (!conv.is_active && conv.terminal_outcome) {
+    // Terminal cooldown handling — gate on the outcome itself, not is_active.
+    // This is defensive: if a stale row has is_active=false but a non-deactivating
+    // outcome (e.g. appointment_booked from pre-fix data), we still want to respond.
+    if (store.shouldDeactivateForOutcome(conv.terminal_outcome)) {
       const lastMsgAt = conv.last_message_at ? new Date(conv.last_message_at).getTime() : 0;
       const elapsed = Date.now() - lastMsgAt;
       if (elapsed < TERMINAL_COOLDOWN_MS) {
@@ -166,6 +168,9 @@ router.post('/inbound', async (req, res) => {
       await store.reactivateConversation(conv.id);
       conv.is_active = true;
       conv.terminal_outcome = null;
+    } else if (!conv.is_active && conv.terminal_outcome) {
+      // Non-deactivating outcome but somehow is_active=false — repair in place, keep outcome.
+      conv.is_active = true;
     }
 
     // Log inbound

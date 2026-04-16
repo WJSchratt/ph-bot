@@ -78,6 +78,16 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- One-shot: unstick existing conversations booked under the old code path.
+-- Old setTerminalOutcome flipped is_active=false for ALL terminal outcomes, trapping
+-- booked/handoff leads in the 24h cooldown loop. Reactivate every non-deactivating row.
+-- Idempotent: after the first run, matching rows already have is_active=TRUE.
+UPDATE conversations
+SET is_active = TRUE, updated_at = NOW()
+WHERE is_active = FALSE
+  AND terminal_outcome IS NOT NULL
+  AND LOWER(terminal_outcome) NOT IN ('dnc', 'opted_out', 'opt_out', 'stop_requested');
+
 -- Calendar booking columns on conversations
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='conversations' AND column_name='calendar_id') THEN
