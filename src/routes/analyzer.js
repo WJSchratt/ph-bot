@@ -3,6 +3,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../db');
 const logger = require('../services/logger');
 const standardPrompt = require('../prompts/standard');
+const ghlConv = require('../services/ghlConversations');
 
 const router = express.Router();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -12,6 +13,10 @@ let analyzeCache = { ts: 0, result: null };
 
 const promptHistory = [];
 const MAX_PROMPT_HISTORY = 10;
+
+// In-memory cache of pulled GHL conversations keyed by locationId
+const pulledDataCache = {};
+const pullProgress = {};
 
 function parseBotpressHistory(text) {
   if (!text || typeof text !== 'string') return [];
@@ -392,6 +397,446 @@ router.post('/generate-prompt', async (req, res) => {
     });
   } catch (err) {
     logger.log('analyzer', 'error', null, 'generate-prompt failed', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
+// ============================================================
+// GHL PULL: background job that fetches all convos for a location
+// ============================================================
+
+async function findGhlTokenForLocation(locationId) {
+  try {
+    const fromSub = await db.query(
+      `SELECT ghl_api_key FROM subaccounts WHERE ghl_location_id = $1 AND ghl_api_key IS NOT NULL AND ghl_api_key <> ''`,
+      [locationId]
+    );
+    if (fromSub.rows[0]?.ghl_api_key) return fromSub.rows[0].ghl_api_key;
+  } catch {}
+  try {
+    const fromConv = await db.query(
+      `SELECT ghl_token FROM conversations
+       WHERE location_id = $1 AND ghl_token IS NOT NULL AND ghl_token <> ''
+       ORDER BY updated_at DESC LIMIT 1`,
+      [locationId]
+    );
+    if (fromConv.rows[0]?.ghl_token) return fromConv.rows[0].ghl_token;
+  } catch {}
+  return null;
+}
+
+function extractTextFromGhlMessage(m) {
+  return String(m.body || m.message || m.content || '').trim();
+}
+
+function countNonEmptyMessages(messages) {
+  return (messages || []).filter((m) => extractTextFromGhlMessage(m)).length;
+}
+
+function isSmsMessage(m) {
+  const mt = String(m.messageType || m.type || '').toUpperCase();
+  if (!mt) return true;
+  return mt.includes('SMS') || mt === '1' || mt === '2';
+}
+
+async function loadLocalContactIdsForLocation(locationId) {
+  try {
+    const q = await db.query(
+      `SELECT DISTINCT contact_id FROM conversations WHERE location_id = $1 AND is_sandbox = FALSE`,
+      [locationId]
+    );
+    return new Set(q.rows.map((r) => r.contact_id).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
+function buildSourceStats(conversations, sourceFilter) {
+  const subset = sourceFilter === 'all'
+    ? conversations
+    : conversations.filter((c) => c.source === sourceFilter);
+  let completed = 0;
+  let totalMsgs = 0;
+  const outcomes = {};
+  for (const c of subset) {
+    totalMsgs += c.message_count || 0;
+    if (c.completed) completed++;
+    const out = c.outcome || 'incomplete';
+    outcomes[out] = (outcomes[out] || 0) + 1;
+  }
+  const count = subset.length;
+  return {
+    count,
+    completed,
+    completion_rate: count ? completed / count : 0,
+    avg_messages: count ? totalMsgs / count : 0,
+    outcomes
+  };
+}
+
+function summarizeConversation(conv, msgs, classification) {
+  const filtered = (msgs || []).filter(isSmsMessage);
+  const terminal = ghlConv.detectTerminalOutcome(filtered);
+  let completed = false;
+  let outcome = terminal || 'incomplete';
+  if (classification.source === 'claude') {
+    completed = !!terminal;
+  } else if (classification.source === 'botpress') {
+    completed = ghlConv.isBotpressCompleted(filtered);
+    if (!terminal && completed) outcome = 'likely_booked';
+  } else {
+    completed = !!terminal;
+  }
+
+  const contactName = conv.contactName || conv.fullName || [conv.contactFirstName, conv.contactLastName].filter(Boolean).join(' ') || '';
+
+  return {
+    id: conv.id,
+    contactId: conv.contactId,
+    locationId: conv.locationId,
+    contactName: contactName.trim(),
+    phone: conv.phone || conv.contactPhone || '',
+    lastMessageDate: conv.lastMessageDate || (Array.isArray(conv.sort) && conv.sort[0]) || null,
+    source: classification.source,
+    reason: classification.reason,
+    message_count: filtered.length,
+    completed,
+    outcome,
+    messages: filtered.map((m) => ({
+      id: m.id,
+      direction: m.direction || 'unknown',
+      body: extractTextFromGhlMessage(m),
+      dateAdded: m.dateAdded || m.created || null,
+      messageType: m.messageType || m.type || null
+    }))
+  };
+}
+
+async function runPullJob(locationId, ghlToken) {
+  pullProgress[locationId] = {
+    status: 'pulling',
+    stage: 'conversations',
+    fetched: 0,
+    total: 0,
+    messages_fetched: 0,
+    started_at: new Date().toISOString(),
+    error: null
+  };
+
+  try {
+    logger.log('analyzer', 'info', null, 'Pulling GHL conversations', { locationId });
+
+    const convs = await ghlConv.pullAllConversations(ghlToken, locationId, ({ fetched }) => {
+      pullProgress[locationId].fetched = fetched;
+    });
+    pullProgress[locationId].total = convs.length;
+    pullProgress[locationId].stage = 'messages';
+
+    const localIds = await loadLocalContactIdsForLocation(locationId);
+
+    const out = [];
+    for (let i = 0; i < convs.length; i++) {
+      const c = convs[i];
+      let msgs = [];
+      try {
+        msgs = await ghlConv.pullMessages(ghlToken, c.id);
+      } catch (err) {
+        msgs = [];
+      }
+      const filtered = msgs.filter(isSmsMessage);
+      const classification = ghlConv.classifyConversation(c, filtered, localIds);
+      const summary = summarizeConversation(c, filtered, classification);
+      out.push(summary);
+
+      pullProgress[locationId].messages_fetched = i + 1;
+      if (ghlConv.MSG_RATE_SLEEP_MS) await ghlConv.sleep(ghlConv.MSG_RATE_SLEEP_MS);
+    }
+
+    const stats = {
+      total: out.length,
+      claude: buildSourceStats(out, 'claude'),
+      botpress: buildSourceStats(out, 'botpress'),
+      other: buildSourceStats(out, 'other'),
+      combined: buildSourceStats(out, 'all')
+    };
+
+    pulledDataCache[locationId] = {
+      conversations: out,
+      pulled_at: Date.now(),
+      stats
+    };
+
+    pullProgress[locationId] = {
+      status: 'complete',
+      stage: 'done',
+      fetched: out.length,
+      total: out.length,
+      messages_fetched: out.length,
+      started_at: pullProgress[locationId].started_at,
+      completed_at: new Date().toISOString(),
+      counts: {
+        claude: stats.claude.count,
+        botpress: stats.botpress.count,
+        other: stats.other.count
+      }
+    };
+
+    logger.log('analyzer', 'info', null, 'GHL pull complete', {
+      locationId,
+      total: out.length,
+      claude: stats.claude.count,
+      botpress: stats.botpress.count,
+      other: stats.other.count
+    });
+  } catch (err) {
+    pullProgress[locationId] = {
+      ...(pullProgress[locationId] || {}),
+      status: 'error',
+      error: err.message,
+      completed_at: new Date().toISOString()
+    };
+    logger.log('analyzer', 'error', null, 'Pull job failed', { locationId, error: err.message, stack: err.stack });
+  }
+}
+
+router.post('/pull', async (req, res) => {
+  try {
+    const locationId = req.body?.locationId;
+    if (!locationId) return res.status(400).json({ error: 'locationId is required' });
+
+    let token = req.body?.ghlToken || null;
+    if (!token) token = await findGhlTokenForLocation(locationId);
+    if (!token) {
+      return res.status(400).json({ error: 'No GHL token found for this location. Provide ghlToken, or add one under Settings → Subaccounts.' });
+    }
+
+    if (pullProgress[locationId]?.status === 'pulling') {
+      return res.json({ status: 'pulling', locationId, progress: pullProgress[locationId] });
+    }
+
+    runPullJob(locationId, token).catch((err) => {
+      logger.log('analyzer', 'error', null, 'runPullJob unhandled', { locationId, error: err.message, stack: err.stack });
+    });
+
+    res.json({ status: 'pulling', locationId, startedAt: new Date().toISOString() });
+  } catch (err) {
+    logger.log('analyzer', 'error', null, 'pull dispatch failed', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
+router.get('/pull-status', (req, res) => {
+  const locationId = req.query.locationId;
+  if (!locationId) return res.status(400).json({ error: 'locationId required' });
+  const progress = pullProgress[locationId] || { status: 'idle' };
+  const cache = pulledDataCache[locationId];
+  res.json({
+    locationId,
+    progress,
+    pulled_at: cache?.pulled_at || null,
+    counts: cache ? {
+      total: cache.stats.total,
+      claude: cache.stats.claude.count,
+      botpress: cache.stats.botpress.count,
+      other: cache.stats.other.count
+    } : null
+  });
+});
+
+router.get('/pulled-stats', (req, res) => {
+  const locationId = req.query.locationId;
+  if (!locationId) return res.status(400).json({ error: 'locationId required' });
+  const cache = pulledDataCache[locationId];
+  if (!cache) return res.status(404).json({ error: 'no pulled data for this location — run /pull first' });
+  res.json({
+    locationId,
+    pulled_at: cache.pulled_at,
+    stats: cache.stats
+  });
+});
+
+router.get('/pulled-conversations', (req, res) => {
+  const locationId = req.query.locationId;
+  if (!locationId) return res.status(400).json({ error: 'locationId required' });
+  const cache = pulledDataCache[locationId];
+  if (!cache) return res.status(404).json({ error: 'no pulled data' });
+
+  const source = (req.query.source || 'all').toLowerCase();
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
+  const offset = parseInt(req.query.offset, 10) || 0;
+  const search = (req.query.search || '').toLowerCase();
+
+  let list = cache.conversations;
+  if (source !== 'all') list = list.filter((c) => c.source === source);
+  if (search) {
+    list = list.filter((c) => `${c.contactName || ''} ${c.phone || ''}`.toLowerCase().includes(search));
+  }
+
+  const total = list.length;
+  const page = list.slice(offset, offset + limit).map((c) => ({
+    id: c.id,
+    contactId: c.contactId,
+    contactName: c.contactName,
+    phone: c.phone,
+    lastMessageDate: c.lastMessageDate,
+    source: c.source,
+    message_count: c.message_count,
+    completed: c.completed,
+    outcome: c.outcome
+  }));
+  res.json({ locationId, source, total, conversations: page });
+});
+
+router.get('/pulled-conversation/:conversationId', (req, res) => {
+  const locationId = req.query.locationId;
+  if (!locationId) return res.status(400).json({ error: 'locationId required' });
+  const cache = pulledDataCache[locationId];
+  if (!cache) return res.status(404).json({ error: 'no pulled data' });
+  const conv = cache.conversations.find((c) => c.id === req.params.conversationId);
+  if (!conv) return res.status(404).json({ error: 'conversation not in cache' });
+  res.json({ conversation: conv });
+});
+
+// ============================================================
+// Override /analyze and /generate-prompt to use pulled cache when locationId given
+// ============================================================
+
+function serializePulledConversation(c, maxLen = 500) {
+  return (c.messages || []).slice(0, 30).map((m) => `[${m.direction === 'outbound' ? 'BOT' : 'USER'}] ${String(m.body || '').slice(0, maxLen)}`).join('\n');
+}
+
+function samplePulled(cache, source, count) {
+  if (!cache) return [];
+  const list = source === 'all'
+    ? cache.conversations
+    : cache.conversations.filter((c) => c.source === source);
+  const incomplete = list.filter((c) => !c.completed);
+  const completed = list.filter((c) => c.completed);
+  const picked = [];
+  for (let i = 0; i < count; i++) {
+    if (i % 2 === 0 && incomplete.length) picked.push(incomplete.shift());
+    else if (completed.length) picked.push(completed.shift());
+    else if (incomplete.length) picked.push(incomplete.shift());
+    else break;
+  }
+  return picked;
+}
+
+router.post('/analyze-pulled', async (req, res) => {
+  try {
+    const { locationId, source } = req.body || {};
+    if (!locationId) return res.status(400).json({ error: 'locationId required' });
+    const cache = pulledDataCache[locationId];
+    if (!cache) return res.status(404).json({ error: 'no pulled data — run /pull first' });
+
+    const filterSource = (source || 'all').toLowerCase();
+
+    let userContent;
+    if (filterSource === 'all') {
+      const claudeSamples = samplePulled(cache, 'claude', 5);
+      const bpSamples = samplePulled(cache, 'botpress', 5);
+      const claudeBlocks = claudeSamples.map((c, i) => `=== CLAUDE #${i + 1} (${c.outcome}, ${c.message_count} msgs) ===\n${serializePulledConversation(c)}`).join('\n\n');
+      const bpBlocks = bpSamples.map((c, i) => `=== BOTPRESS #${i + 1} (${c.outcome}, ${c.message_count} msgs) ===\n${serializePulledConversation(c)}`).join('\n\n');
+      userContent = `Compare these two SMS qualification bot implementations on real production conversations for GHL location ${locationId}.
+
+## Stats (this pull)
+- Total: ${cache.stats.total}
+- Claude: ${cache.stats.claude.count} (completion ${(cache.stats.claude.completion_rate * 100).toFixed(1)}%)
+- BotPress: ${cache.stats.botpress.count} (completion ${(cache.stats.botpress.completion_rate * 100).toFixed(1)}%)
+- Other: ${cache.stats.other.count}
+
+## CLAUDE CONVERSATIONS (${claudeSamples.length})
+${claudeBlocks || '(none)'}
+
+## BOTPRESS CONVERSATIONS (${bpSamples.length})
+${bpBlocks || '(none)'}
+
+Produce a structured analysis (<2000 words):
+1. Performance comparison (which bot converts better, naturalness)
+2. Claude bot drop-off points
+3. What Claude does better / worse than BotPress
+4. Specific prompt improvements with exact phrasing`;
+    } else {
+      const samples = samplePulled(cache, filterSource, 10);
+      const blocks = samples.map((c, i) => `=== ${filterSource.toUpperCase()} #${i + 1} (${c.outcome}, ${c.message_count} msgs) ===\n${serializePulledConversation(c)}`).join('\n\n');
+      const stats = cache.stats[filterSource] || { count: 0, completion_rate: 0, avg_messages: 0 };
+      userContent = `Analyze these ${filterSource} bot conversations for GHL location ${locationId}.
+
+## Stats
+- Count: ${stats.count}
+- Completion rate: ${(stats.completion_rate * 100).toFixed(1)}%
+- Avg messages: ${stats.avg_messages.toFixed(1)}
+
+## CONVERSATIONS
+${blocks || '(none)'}
+
+Produce a focused analysis (<1500 words):
+1. Common drop-off points
+2. Response quality issues
+3. Specific improvements with exact phrasing`;
+    }
+
+    const resp = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 3000,
+      system: 'You are a conversational AI quality analyst. Be specific, cite examples, and recommend concrete prompt changes.',
+      messages: [{ role: 'user', content: userContent }]
+    });
+    const textBlock = resp.content.find((b) => b.type === 'text');
+    res.json({
+      analysis: textBlock ? textBlock.text : '',
+      source: filterSource,
+      locationId,
+      pulled_at: cache.pulled_at,
+      sample_counts: filterSource === 'all'
+        ? { claude: Math.min(cache.stats.claude.count, 5), botpress: Math.min(cache.stats.botpress.count, 5) }
+        : { [filterSource]: Math.min(cache.stats[filterSource].count, 10) },
+      input_tokens: resp.usage?.input_tokens || 0,
+      output_tokens: resp.usage?.output_tokens || 0,
+      generated_at: new Date().toISOString()
+    });
+  } catch (err) {
+    logger.log('analyzer', 'error', null, 'analyze-pulled failed', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
+router.post('/generate-prompt-pulled', async (req, res) => {
+  try {
+    const { current_prompt, change_description, locationId, source } = req.body || {};
+    if (!change_description) return res.status(400).json({ error: 'change_description required' });
+    const base = current_prompt || (await getCurrentPrompt());
+
+    let sampleText = '';
+    if (locationId && pulledDataCache[locationId]) {
+      const cache = pulledDataCache[locationId];
+      const filterSource = (source || 'all').toLowerCase();
+      const samples = filterSource === 'all'
+        ? [...samplePulled(cache, 'claude', 3), ...samplePulled(cache, 'botpress', 3)]
+        : samplePulled(cache, filterSource, 6);
+      sampleText = samples.map((c, i) => `=== SAMPLE #${i + 1} (${c.source}, ${c.outcome}) ===\n${serializePulledConversation(c)}`).join('\n\n');
+    }
+
+    const resp = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 8000,
+      system: `You are a prompt engineer rewriting an SMS bot system prompt. Apply the requested changes precisely while preserving the existing structure, tone rules, and JSON response format. Output ONLY the full revised prompt text with no markdown fences, no commentary, no preamble.`,
+      messages: [
+        {
+          role: 'user',
+          content: `CURRENT SYSTEM PROMPT:\n\n${base}\n\n---\n\nREQUESTED CHANGES:\n${change_description}\n\n---\n\nREAL CONVERSATION SAMPLES (prioritized: incomplete / drop-offs) to inform the rewrite:\n${sampleText || '(no samples available — rely solely on the requested changes)'}\n\n---\n\nRewrite the full system prompt with the requested changes applied. Preserve anything not asked to change.`
+        }
+      ]
+    });
+    const textBlock = resp.content.find((b) => b.type === 'text');
+    res.json({
+      generated_prompt: textBlock ? textBlock.text : '',
+      input_tokens: resp.usage?.input_tokens || 0,
+      output_tokens: resp.usage?.output_tokens || 0,
+      samples_used: sampleText ? sampleText.length : 0
+    });
+  } catch (err) {
+    logger.log('analyzer', 'error', null, 'generate-prompt-pulled failed', { error: err.message, stack: err.stack });
     res.status(500).json({ error: err.message, stack: err.stack });
   }
 });

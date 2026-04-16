@@ -527,38 +527,46 @@ textarea.form-input{resize:vertical;min-height:80px;}
 
 <!-- ====== ANALYZER ====== -->
 <div class="tab-content" id="tab-analyzer">
-  <div class="sh"><span class="sh-title">Bot Analyzer</span><div class="sh-line"></div><button class="btn pri" onclick="loadAnalyzerAll()">Refresh</button></div>
+  <div class="sh"><span class="sh-title">Bot Analyzer</span><div class="sh-line"></div></div>
 
-  <div class="grid c2" style="margin-bottom:14px;">
-    <div class="card">
-      <div class="card-title">BotPress (legacy)</div>
-      <div id="an-bp-stats" style="margin-top:6px;">Loading...</div>
+  <!-- Subaccount selector -->
+  <div class="card" style="margin-bottom:14px;">
+    <div class="frow" style="margin-bottom:0;">
+      <select class="fsel" id="an-subaccount" onchange="analyzerOnSubaccountChange()" style="min-width:260px;">
+        <option value="">-- Select a subaccount --</option>
+      </select>
+      <input class="finput" id="an-token-override" placeholder="GHL token (optional override)" style="min-width:260px;">
+      <button class="btn pri" id="an-pull-btn" onclick="analyzerPull()">Pull Conversations</button>
+      <span id="an-pulled-meta" style="font-size:12px;color:var(--muted);margin-left:6px;"></span>
     </div>
-    <div class="card">
-      <div class="card-title">Claude Bot (current)</div>
-      <div id="an-cl-stats" style="margin-top:6px;">Loading...</div>
+    <div id="an-progress-wrap" style="display:none;margin-top:10px;">
+      <div class="pb-wrap" style="height:10px;"><div class="pb" id="an-progress-bar" style="width:0%;"></div></div>
+      <div id="an-progress-text" style="font-size:11px;color:var(--muted);margin-top:4px;">Starting...</div>
     </div>
   </div>
 
+  <!-- Source filter -->
+  <div class="itabs" style="margin-bottom:12px;">
+    <div class="itab active" data-src="all" onclick="analyzerSetSource('all', this)">All (Combined)</div>
+    <div class="itab" data-src="claude" onclick="analyzerSetSource('claude', this)">Claude Bot</div>
+    <div class="itab" data-src="botpress" onclick="analyzerSetSource('botpress', this)">BotPress</div>
+    <div class="itab" data-src="other" onclick="analyzerSetSource('other', this)">Other</div>
+  </div>
+
+  <!-- Section 1: Performance Overview -->
+  <div class="card" style="margin-bottom:14px;">
+    <div class="sh"><span class="sh-title">Performance Overview</span><div class="sh-line"></div></div>
+    <div id="an-stats">
+      <div style="color:var(--muted);text-align:center;padding:30px;font-size:13px;">Select a subaccount to pull conversations from GHL.</div>
+    </div>
+  </div>
+
+  <!-- Section 2: Conversation Review -->
   <div class="card" style="margin-bottom:14px;">
     <div class="sh"><span class="sh-title">Conversation Review</span><div class="sh-line"></div>
-      <div class="itabs" style="margin-bottom:0;">
-        <div class="itab active" data-bt="claude" onclick="switchAnalyzerBot('claude', this)">Claude</div>
-        <div class="itab" data-bt="botpress" onclick="switchAnalyzerBot('botpress', this)">BotPress</div>
-      </div>
+      <input class="finput" id="an-search" placeholder="Search by name/phone..." oninput="analyzerRenderConvs()" style="min-width:220px;">
     </div>
-    <div class="frow" style="margin-bottom:10px;">
-      <input class="finput" id="an-search" placeholder="Filter by name..." oninput="renderAnalyzerConvs()">
-      <select class="fsel" id="an-outcome-filter" onchange="loadAnalyzerConversations()">
-        <option value="">All outcomes</option>
-        <option value="appointment_booked">appointment_booked</option>
-        <option value="dnc">dnc</option>
-        <option value="human_handoff">human_handoff</option>
-        <option value="fex_immediate">fex_immediate</option>
-        <option value="mp_immediate">mp_immediate</option>
-      </select>
-    </div>
-    <div class="conv-wrap" style="height:420px;">
+    <div class="conv-wrap" style="height:440px;">
       <div class="conv-list">
         <div class="conv-list-header" id="an-list-header">Conversations</div>
         <div id="an-conv-list"></div>
@@ -566,6 +574,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
       <div class="conv-panel">
         <div class="conv-top">
           <div><strong id="an-conv-name">Select a conversation</strong><span style="font-size:11px;color:var(--muted);margin-left:10px;" id="an-conv-meta"></span></div>
+          <span class="pill c" id="an-conv-source-pill" style="margin-left:auto;display:none;"></span>
         </div>
         <div class="conv-messages" id="an-messages">
           <div style="color:var(--muted);text-align:center;padding:40px;">Select a conversation from the left panel.</div>
@@ -574,13 +583,15 @@ textarea.form-input{resize:vertical;min-height:80px;}
     </div>
   </div>
 
+  <!-- Section 3: AI Analysis -->
   <div class="card" style="margin-bottom:14px;">
-    <div class="sh"><span class="sh-title">AI Comparative Analysis</span><div class="sh-line"></div>
-      <button class="btn pri" id="an-run-btn" onclick="runAnalyzerAnalysis()">Run Analysis</button>
+    <div class="sh"><span class="sh-title">AI Analysis</span><div class="sh-line"></div>
+      <button class="btn pri" id="an-run-btn" onclick="analyzerRunAnalysis()">Run Analysis</button>
     </div>
-    <div id="an-analysis-result" style="font-family:'JetBrains Mono';font-size:12px;line-height:1.6;color:var(--text);white-space:pre-wrap;padding:10px;background:var(--bg);border-radius:6px;min-height:60px;">Click "Run Analysis" to generate a comparative review.</div>
+    <div id="an-analysis-result" style="font-family:'JetBrains Mono';font-size:12px;line-height:1.6;color:var(--text);white-space:pre-wrap;padding:10px;background:var(--bg);border-radius:6px;min-height:60px;">Pull conversations, then click "Run Analysis" to generate a review scoped to the selected source.</div>
   </div>
 
+  <!-- Section 4: Prompt Editor -->
   <div class="card">
     <div class="sh"><span class="sh-title">Prompt Editor</span><div class="sh-line"></div></div>
 
@@ -601,13 +612,14 @@ textarea.form-input{resize:vertical;min-height:80px;}
     </div>
 
     <div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
-      <button class="btn pri" id="an-gen-btn" onclick="generateAnalyzerPrompt()">Generate Updated Prompt</button>
-      <button class="btn grn" onclick="applyAnalyzerPrompt()">Apply Prompt</button>
+      <button class="btn pri" id="an-gen-btn" onclick="analyzerGeneratePrompt()">Generate Updated Prompt</button>
+      <button class="btn grn" onclick="analyzerApplyPrompt()">Apply Prompt</button>
       <select class="fsel" id="an-revert-sel">
         <option value="">Revert to...</option>
       </select>
-      <button class="btn" onclick="revertAnalyzerPrompt()">Revert</button>
+      <button class="btn" onclick="analyzerRevertPrompt()">Revert</button>
     </div>
+    <div style="font-size:11px;color:var(--muted);">Prompt generation uses incomplete conversations from the pulled cache (scoped to the selected source) as real-world examples.</div>
   </div>
 </div>
 
@@ -1617,117 +1629,260 @@ document.addEventListener('change', e => {
 });
 
 // ========== ANALYZER ==========
-let analyzerBotType = 'claude';
+let analyzerLocationId = '';
+let analyzerSource = 'all';
 let analyzerConvs = [];
+let analyzerSelectedConvId = null;
+let analyzerPollTimer = null;
+
+function analyzerInitSubaccountDropdown() {
+  const sel = document.getElementById('an-subaccount');
+  if (!sel) return;
+  const currentVal = sel.value;
+  sel.innerHTML = '<option value="">-- Select a subaccount --</option>';
+  (subaccounts || []).forEach(a => {
+    const opt = document.createElement('option');
+    opt.value = a.ghl_location_id;
+    opt.textContent = a.name + ' (' + a.ghl_location_id + ')';
+    sel.appendChild(opt);
+  });
+  if (currentVal) sel.value = currentVal;
+}
 
 async function loadAnalyzerAll() {
-  loadAnalyzerStats();
-  loadAnalyzerConversations();
+  analyzerInitSubaccountDropdown();
   loadAnalyzerPrompt();
+  if (analyzerLocationId) analyzerRefreshStatus();
 }
 
-async function loadAnalyzerStats() {
-  const data = await api('/api/analyzer/stats');
+function analyzerOnSubaccountChange() {
+  const sel = document.getElementById('an-subaccount');
+  analyzerLocationId = sel.value;
+  document.getElementById('an-conv-list').innerHTML = '';
+  document.getElementById('an-messages').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;">Select a conversation from the left panel.</div>';
+  document.getElementById('an-stats').innerHTML = '<div style="color:var(--muted);text-align:center;padding:30px;font-size:13px;">Loading status...</div>';
+  if (!analyzerLocationId) return;
+  analyzerRefreshStatus(true);
+}
+
+async function analyzerRefreshStatus(autoPullIfMissing) {
+  if (!analyzerLocationId) return;
+  const data = await api('/api/analyzer/pull-status?locationId=' + encodeURIComponent(analyzerLocationId));
   if (!data) return;
-  const cl = data.claude || {};
-  const bp = data.botpress || {};
+  const progress = data.progress || { status: 'idle' };
+  if (progress.status === 'pulling') {
+    showAnalyzerProgress(progress);
+    if (!analyzerPollTimer) analyzerPollTimer = setInterval(() => analyzerRefreshStatus(false), 2000);
+    return;
+  }
+  if (analyzerPollTimer) { clearInterval(analyzerPollTimer); analyzerPollTimer = null; }
 
-  const renderOutcomes = (outcomes) => (outcomes || []).map(o => '<div style="font-size:11px;color:var(--muted);">' + esc(o.outcome || o.terminal_outcome) + ': <strong style="color:var(--cyan);">' + fmtNum(o.count) + '</strong></div>').join('');
+  if (progress.status === 'error') {
+    hideAnalyzerProgress();
+    document.getElementById('an-pulled-meta').textContent = 'Pull failed: ' + (progress.error || 'unknown');
+    document.getElementById('an-stats').innerHTML = '<div style="color:var(--red);padding:20px;">Pull failed: ' + esc(progress.error || '') + '</div>';
+    return;
+  }
 
-  document.getElementById('an-cl-stats').innerHTML =
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
-      '<div><div class="card-value sm" style="color:var(--cyan);">' + fmtNum(cl.total) + '</div><div class="card-sub">Total conversations</div></div>' +
-      '<div><div class="card-value sm" style="color:var(--green);">' + fmtPct(cl.completion_rate) + '</div><div class="card-sub">Completion rate</div></div>' +
-      '<div><div class="card-value sm" style="color:var(--amber);">' + fmtNum(cl.avg_messages, 1) + '</div><div class="card-sub">Avg messages</div></div>' +
-      '<div><div class="card-value sm" style="color:var(--green);">' + fmtNum(cl.booked) + '</div><div class="card-sub">Booked</div></div>' +
-    '</div><div class="divider"></div>' + renderOutcomes(cl.outcomes);
+  if (progress.status === 'complete' && data.pulled_at) {
+    hideAnalyzerProgress();
+    document.getElementById('an-pulled-meta').textContent = 'Pulled ' + new Date(data.pulled_at).toLocaleString() + ' — ' +
+      fmtNum(data.counts.total) + ' total (' + fmtNum(data.counts.claude) + ' Claude / ' + fmtNum(data.counts.botpress) + ' BotPress / ' + fmtNum(data.counts.other) + ' Other)';
+    analyzerLoadStats();
+    analyzerLoadConversations();
+    return;
+  }
 
-  document.getElementById('an-bp-stats').innerHTML =
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
-      '<div><div class="card-value sm" style="color:var(--purple);">' + fmtNum(bp.total) + '</div><div class="card-sub">Total (has botpress history)</div></div>' +
-      '<div><div class="card-value sm" style="color:var(--green);">' + fmtPct(bp.completion_rate) + '</div><div class="card-sub">Est. completion rate</div></div>' +
-      '<div><div class="card-value sm" style="color:var(--amber);">' + fmtNum(bp.avg_exchanges, 1) + '</div><div class="card-sub">Avg exchanges</div></div>' +
-      '<div><div class="card-value sm" style="color:var(--cyan);">' + fmtNum(bp.completed) + '</div><div class="card-sub">Likely booked</div></div>' +
-    '</div><div class="divider"></div>' + renderOutcomes(bp.outcomes);
+  // idle with no cache
+  if (autoPullIfMissing && !data.pulled_at) {
+    analyzerPull();
+  } else if (!data.pulled_at) {
+    document.getElementById('an-pulled-meta').textContent = 'No pull yet.';
+    document.getElementById('an-stats').innerHTML = '<div style="color:var(--muted);text-align:center;padding:30px;font-size:13px;">Click "Pull Conversations" to fetch all conversations from this subaccount.</div>';
+  }
 }
 
-function switchAnalyzerBot(bt, el) {
-  analyzerBotType = bt;
+function showAnalyzerProgress(progress) {
+  document.getElementById('an-progress-wrap').style.display = 'block';
+  const pct = progress.total > 0 ? Math.min(100, Math.round((progress.messages_fetched / progress.total) * 100)) : 0;
+  document.getElementById('an-progress-bar').style.width = pct + '%';
+  const stageLabel = progress.stage === 'conversations' ? 'Fetching conversations' : 'Fetching messages';
+  document.getElementById('an-progress-text').textContent = stageLabel + '... ' +
+    (progress.stage === 'conversations'
+      ? fmtNum(progress.fetched) + ' conversations'
+      : fmtNum(progress.messages_fetched) + ' / ' + fmtNum(progress.total) + ' conversations');
+  document.getElementById('an-pulled-meta').textContent = 'Pulling...';
+}
+
+function hideAnalyzerProgress() {
+  document.getElementById('an-progress-wrap').style.display = 'none';
+}
+
+async function analyzerPull() {
+  if (!analyzerLocationId) { toast('Select a subaccount first.'); return; }
+  const token = document.getElementById('an-token-override').value.trim();
+  const btn = document.getElementById('an-pull-btn');
+  btn.disabled = true;
+  btn.textContent = 'Starting...';
+  const res = await fetch('/api/analyzer/pull', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ locationId: analyzerLocationId, ghlToken: token || undefined })
+  });
+  const data = await res.json().catch(() => null);
+  btn.disabled = false;
+  btn.textContent = 'Pull Conversations';
+  if (!res.ok || !data) {
+    toast('Pull failed: ' + (data?.error || 'unknown'));
+    document.getElementById('an-pulled-meta').textContent = 'Pull failed: ' + (data?.error || 'unknown');
+    return;
+  }
+  showAnalyzerProgress({ stage: 'conversations', fetched: 0, total: 0, messages_fetched: 0 });
+  if (!analyzerPollTimer) analyzerPollTimer = setInterval(() => analyzerRefreshStatus(false), 2000);
+}
+
+function analyzerSetSource(src, el) {
+  analyzerSource = src;
   document.querySelectorAll('#tab-analyzer .itab').forEach(i => i.classList.remove('active'));
   el.classList.add('active');
-  loadAnalyzerConversations();
+  if (!analyzerLocationId) return;
+  analyzerLoadStats();
+  analyzerLoadConversations();
 }
 
-async function loadAnalyzerConversations() {
-  const outcome = document.getElementById('an-outcome-filter').value;
-  const params = new URLSearchParams({ bot_type: analyzerBotType, limit: '50' });
-  if (outcome) params.set('outcome', outcome);
-  const data = await api('/api/analyzer/conversations?' + params);
+async function analyzerLoadStats() {
+  if (!analyzerLocationId) return;
+  const data = await api('/api/analyzer/pulled-stats?locationId=' + encodeURIComponent(analyzerLocationId));
+  const el = document.getElementById('an-stats');
+  if (!data || !data.stats) {
+    el.innerHTML = '<div style="color:var(--muted);text-align:center;padding:30px;font-size:13px;">No data. Click "Pull Conversations".</div>';
+    return;
+  }
+  const s = data.stats;
+  const renderCard = (label, color, stats) => {
+    const topOutcomes = Object.entries(stats.outcomes || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    const outcomesHtml = topOutcomes.map(([o, c]) => '<div style="font-size:11px;color:var(--muted);">' + esc(o) + ': <strong style="color:var(--cyan);">' + fmtNum(c) + '</strong></div>').join('') || '<div style="font-size:11px;color:var(--muted);">(no outcomes)</div>';
+    return '<div class="card kpi-l ' + color + '" style="padding:13px;">' +
+      '<div class="card-title">' + label + '</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;">' +
+        '<div><div class="card-value sm">' + fmtNum(stats.count) + '</div><div class="card-sub">Conversations</div></div>' +
+        '<div><div class="card-value sm" style="color:var(--green);">' + fmtPct(stats.completion_rate) + '</div><div class="card-sub">Completion</div></div>' +
+        '<div><div class="card-value sm" style="color:var(--amber);">' + fmtNum(stats.avg_messages, 1) + '</div><div class="card-sub">Avg msgs</div></div>' +
+        '<div><div class="card-value sm" style="color:var(--cyan);">' + fmtNum(stats.completed) + '</div><div class="card-sub">Completed</div></div>' +
+      '</div>' +
+      '<div class="divider"></div>' +
+      '<div style="font-size:10px;letter-spacing:1px;color:var(--muted);margin-bottom:4px;">TOP OUTCOMES</div>' +
+      outcomesHtml +
+    '</div>';
+  };
+
+  if (analyzerSource === 'all') {
+    el.innerHTML = renderCard('Combined (All Sources)', 'g', s.combined) +
+      '<div class="divider"></div>' +
+      '<div class="grid c3" style="margin-top:10px;">' +
+        renderCard('Claude Bot', '', s.claude) +
+        renderCard('BotPress', 'p', s.botpress) +
+        renderCard('Other', 'a', s.other) +
+      '</div>';
+  } else if (analyzerSource === 'claude') {
+    el.innerHTML = renderCard('Claude Bot', '', s.claude);
+  } else if (analyzerSource === 'botpress') {
+    el.innerHTML = renderCard('BotPress', 'p', s.botpress);
+  } else {
+    el.innerHTML = renderCard('Other', 'a', s.other);
+  }
+}
+
+async function analyzerLoadConversations() {
+  if (!analyzerLocationId) return;
+  const params = new URLSearchParams({ locationId: analyzerLocationId, source: analyzerSource, limit: '500' });
+  const data = await api('/api/analyzer/pulled-conversations?' + params);
   if (!data) return;
   analyzerConvs = data.conversations || [];
-  renderAnalyzerConvs();
+  analyzerRenderConvs();
 }
 
-function renderAnalyzerConvs() {
+function sourcePillHtml(src) {
+  if (src === 'claude') return '<span class="pill b">CLAUDE</span>';
+  if (src === 'botpress') return '<span class="pill a">BOTPRESS</span>';
+  return '<span class="pill" style="background:rgba(74,101,128,.15);color:var(--muted);border:1px solid var(--border2);">OTHER</span>';
+}
+
+function analyzerRenderConvs() {
   const search = (document.getElementById('an-search').value || '').toLowerCase();
   const filtered = analyzerConvs.filter(c => {
     if (!search) return true;
-    const name = ((c.first_name || '') + ' ' + (c.last_name || '')).toLowerCase();
-    return name.includes(search);
+    return ((c.contactName || '') + ' ' + (c.phone || '')).toLowerCase().includes(search);
   });
-  document.getElementById('an-list-header').textContent = (analyzerBotType === 'claude' ? 'Claude' : 'BotPress') + ' Conversations (' + filtered.length + ')';
+  document.getElementById('an-list-header').textContent = 'Conversations (' + filtered.length + ')';
   const list = document.getElementById('an-conv-list');
   list.innerHTML = '';
-  filtered.forEach(c => {
+  filtered.slice(0, 200).forEach(c => {
     const item = document.createElement('div');
-    item.className = 'conv-item';
-    item.innerHTML = '<div class="ci-name">' + esc((c.first_name || '') + ' ' + (c.last_name || '')) + '</div>' +
-      '<div class="ci-meta">' + fmtNum(c.message_count) + ' msgs' + (c.terminal_outcome ? ' - ' + esc(c.terminal_outcome) : '') + '</div>';
+    item.className = 'conv-item' + (c.id === analyzerSelectedConvId ? ' active' : '');
+    const date = c.lastMessageDate ? new Date(c.lastMessageDate).toLocaleDateString() : '';
+    item.innerHTML = '<div class="ci-name">' + esc(c.contactName || c.phone || c.contactId || 'Unknown') + '</div>' +
+      '<div class="ci-meta" style="display:flex;gap:6px;align-items:center;">' +
+        sourcePillHtml(c.source) +
+        '<span>' + fmtNum(c.message_count) + ' msgs</span>' +
+        (c.outcome ? '<span>- ' + esc(c.outcome) + '</span>' : '') +
+        (date ? '<span>- ' + date + '</span>' : '') +
+      '</div>';
     item.onclick = () => {
+      analyzerSelectedConvId = c.id;
       list.querySelectorAll('.conv-item').forEach(i => i.classList.remove('active'));
       item.classList.add('active');
-      loadAnalyzerConversationDetail(c.id);
+      analyzerLoadConvDetail(c.id);
     };
     list.appendChild(item);
   });
-  if (!filtered.length) list.innerHTML = '<div style="color:var(--muted);text-align:center;padding:30px;font-size:12px;">No conversations.</div>';
+  if (!filtered.length) list.innerHTML = '<div style="color:var(--muted);text-align:center;padding:30px;font-size:12px;">No conversations in this filter.</div>';
 }
 
-async function loadAnalyzerConversationDetail(id) {
-  const data = await api('/api/analyzer/conversation/' + id + '?bot_type=' + analyzerBotType);
-  if (!data) return;
-  const conv = data.conversation || {};
-  document.getElementById('an-conv-name').textContent = (conv.first_name || '') + ' ' + (conv.last_name || '');
-  document.getElementById('an-conv-meta').textContent = (conv.product_type || '') + ' - ' + fmtNum(conv.message_count) + ' msgs' + (conv.terminal_outcome ? ' - ' + conv.terminal_outcome : '');
+async function analyzerLoadConvDetail(id) {
+  const data = await api('/api/analyzer/pulled-conversation/' + encodeURIComponent(id) + '?locationId=' + encodeURIComponent(analyzerLocationId));
+  if (!data || !data.conversation) return;
+  const conv = data.conversation;
+  document.getElementById('an-conv-name').textContent = conv.contactName || conv.phone || conv.contactId || 'Unknown';
+  const date = conv.lastMessageDate ? new Date(conv.lastMessageDate).toLocaleString() : '';
+  document.getElementById('an-conv-meta').textContent = conv.phone + ' — ' + fmtNum(conv.message_count) + ' msgs — ' + (conv.outcome || '') + (date ? ' — ' + date : '');
+  const pill = document.getElementById('an-conv-source-pill');
+  pill.style.display = 'inline-block';
+  pill.className = 'pill ' + (conv.source === 'claude' ? 'b' : conv.source === 'botpress' ? 'a' : 'c');
+  pill.textContent = conv.source.toUpperCase();
 
   const msgsEl = document.getElementById('an-messages');
   msgsEl.innerHTML = '';
-  (data.messages || []).forEach(m => {
+  (conv.messages || []).forEach(m => {
     const d = document.createElement('div');
     const isBot = m.direction === 'outbound';
     d.className = 'bubble ' + (isBot ? 'bot' : 'lead');
-    const lbl = isBot ? 'Bot' + (m.message_type ? ' - ' + m.message_type : '') : 'Lead';
-    d.innerHTML = '<div class="bubble-lbl">' + lbl + '</div>' + esc(m.content || '');
+    d.innerHTML = '<div class="bubble-lbl">' + (isBot ? 'Bot' : 'Lead') + '</div>' + esc(m.body || '');
     msgsEl.appendChild(d);
   });
-  if (!(data.messages || []).length) msgsEl.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;">No messages.</div>';
+  if (!(conv.messages || []).length) msgsEl.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;">No messages.</div>';
   msgsEl.scrollTop = 0;
 }
 
-async function runAnalyzerAnalysis() {
+async function analyzerRunAnalysis() {
+  if (!analyzerLocationId) { toast('Select a subaccount and pull data first.'); return; }
   const btn = document.getElementById('an-run-btn');
   const out = document.getElementById('an-analysis-result');
   btn.disabled = true;
   btn.innerHTML = '<span class="loading-spinner"></span> Analyzing...';
-  out.textContent = 'Running Claude comparison... this may take 20-40 seconds.';
+  out.textContent = 'Running Claude analysis... this may take 20-40 seconds.';
   try {
-    const res = await fetch('/api/analyzer/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    const res = await fetch('/api/analyzer/analyze-pulled', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locationId: analyzerLocationId, source: analyzerSource })
+    });
     const data = await res.json();
     if (data.error) {
       out.innerHTML = '<div style="color:var(--red);">Error: ' + esc(data.error) + '</div>';
     } else {
-      const cached = data.cached ? ' (cached, ' + Math.round(data.cached_age_ms / 1000) + 's old)' : '';
-      out.innerHTML = '<div style="font-size:10px;color:var(--muted);margin-bottom:6px;">Generated ' + esc(data.generated_at || '') + cached + ' - Samples: ' + (data.sample_counts?.claude || 0) + ' Claude / ' + (data.sample_counts?.botpress || 0) + ' BotPress</div>' + esc(data.analysis || '');
+      const samples = data.sample_counts ? JSON.stringify(data.sample_counts) : '';
+      out.innerHTML = '<div style="font-size:10px;color:var(--muted);margin-bottom:6px;">Generated ' + esc(data.generated_at || '') + ' — Source: ' + esc(data.source) + ' — Samples: ' + esc(samples) + '</div>' + esc(data.analysis || '');
     }
   } catch (e) {
     out.innerHTML = '<div style="color:var(--red);">Error: ' + esc(e.message) + '</div>';
@@ -1750,7 +1905,7 @@ async function loadAnalyzerPrompt() {
   });
 }
 
-async function generateAnalyzerPrompt() {
+async function analyzerGeneratePrompt() {
   const btn = document.getElementById('an-gen-btn');
   const current = document.getElementById('an-current-prompt').value;
   const desc = document.getElementById('an-change-desc').value.trim();
@@ -1758,10 +1913,13 @@ async function generateAnalyzerPrompt() {
   btn.disabled = true;
   btn.innerHTML = '<span class="loading-spinner"></span> Generating...';
   try {
-    const res = await fetch('/api/analyzer/generate-prompt', {
+    const endpoint = analyzerLocationId ? '/api/analyzer/generate-prompt-pulled' : '/api/analyzer/generate-prompt';
+    const body = { current_prompt: current, change_description: desc };
+    if (analyzerLocationId) { body.locationId = analyzerLocationId; body.source = analyzerSource; }
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ current_prompt: current, change_description: desc })
+      body: JSON.stringify(body)
     });
     const data = await res.json();
     if (data.error) toast('Error: ' + data.error);
@@ -1776,7 +1934,7 @@ async function generateAnalyzerPrompt() {
   btn.textContent = 'Generate Updated Prompt';
 }
 
-async function applyAnalyzerPrompt() {
+async function analyzerApplyPrompt() {
   const newPrompt = document.getElementById('an-new-prompt').value.trim();
   if (!newPrompt) { toast('No generated prompt to apply.'); return; }
   if (!confirm('Apply this prompt? The current version will be archived in history.')) return;
@@ -1785,15 +1943,11 @@ async function applyAnalyzerPrompt() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt: newPrompt })
   });
-  if (res) {
-    toast('Prompt applied.');
-    loadAnalyzerPrompt();
-  } else {
-    toast('Failed to apply prompt.');
-  }
+  if (res) { toast('Prompt applied.'); loadAnalyzerPrompt(); }
+  else toast('Failed to apply prompt.');
 }
 
-async function revertAnalyzerPrompt() {
+async function analyzerRevertPrompt() {
   const sel = document.getElementById('an-revert-sel');
   const idx = sel.value;
   if (idx === '') { toast('Select a version to revert to.'); return; }
@@ -1802,12 +1956,8 @@ async function revertAnalyzerPrompt() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ index: parseInt(idx, 10) })
   });
-  if (res) {
-    toast('Reverted.');
-    loadAnalyzerPrompt();
-  } else {
-    toast('Failed to revert.');
-  }
+  if (res) { toast('Reverted.'); loadAnalyzerPrompt(); }
+  else toast('Failed to revert.');
 }
 
 // ========== FORMATTING HELPERS ==========
