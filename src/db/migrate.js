@@ -21,6 +21,11 @@ async function migrate() {
       END $$;
     `);
     console.log('[migrate] is_sandbox column ensured');
+
+    // V2 Command Center tables and columns
+    const v2Sql = fs.readFileSync(path.join(__dirname, 'migrate_v2.sql'), 'utf8');
+    await pool.query(v2Sql);
+    console.log('[migrate] v2 schema applied');
   } catch (err) {
     console.error('[migrate] failed', err);
     process.exit(1);

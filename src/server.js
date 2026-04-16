@@ -6,6 +6,13 @@ const webhookRouter = require('./routes/webhook');
 const analyticsRouter = require('./routes/analytics');
 const sandboxRouter = require('./routes/sandbox');
 const logsRouter = require('./routes/logs');
+const dashboardRouter = require('./routes/dashboard');
+const wordtracksRouter = require('./routes/wordtracks');
+const pipelineRouter = require('./routes/pipeline');
+const qcRouter = require('./routes/qc');
+const reviewQueueRouter = require('./routes/reviewQueue');
+const subaccountsRouter = require('./routes/subaccounts');
+const settingsRouter = require('./routes/settings');
 const cronRoutes = require('./routes/cron');
 
 const app = express();
@@ -17,6 +24,13 @@ app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 app.use('/webhook', webhookRouter);
 app.use('/api', analyticsRouter);
 app.use('/api', logsRouter);
+app.use('/api', dashboardRouter);
+app.use('/api', wordtracksRouter);
+app.use('/api', pipelineRouter);
+app.use('/api', qcRouter);
+app.use('/api', reviewQueueRouter);
+app.use('/api', subaccountsRouter);
+app.use('/api', settingsRouter);
 app.use('/sandbox', sandboxRouter);
 app.use('/cron', cronRoutes.router);
 

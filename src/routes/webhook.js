@@ -95,6 +95,9 @@ router.post('/inbound', async (req, res) => {
     // Apply collected data
     await store.applyCollectedData(conv.id, claudeResult.collected_data);
 
+    // Store token usage
+    await store.updateTokenCounts(conv.id, claudeResult.input_tokens, claudeResult.output_tokens);
+
     // Send SMS via GHL
     let sendResult = null;
     if (parsed.ghl_token) {
@@ -108,7 +111,7 @@ router.post('/inbound', async (req, res) => {
       logger.log('ghl_send', 'warn', contactId, 'No ghl_token, skipping SMS send');
     }
 
-    // Log each outbound message
+    // Log each outbound message with segment counts
     for (const msg of claudeResult.messages) {
       await store.logMessage({
         conversationId: conv.id,
@@ -116,7 +119,8 @@ router.post('/inbound', async (req, res) => {
         locationId: conv.location_id,
         direction: 'outbound',
         content: msg,
-        messageType: claudeResult.message_type
+        messageType: claudeResult.message_type,
+        segments: ghl.calculateSegments(msg)
       });
     }
 

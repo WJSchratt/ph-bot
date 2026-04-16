@@ -99,14 +99,25 @@ async function appendMessageHistory(conversationId, role, content) {
   );
 }
 
-async function logMessage({ conversationId, contactId, locationId, direction, content, messageType }) {
+async function logMessage({ conversationId, contactId, locationId, direction, content, messageType, segments }) {
   const res = await db.query(
-    `INSERT INTO messages (conversation_id, contact_id, location_id, direction, content, char_count, message_type)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
+    `INSERT INTO messages (conversation_id, contact_id, location_id, direction, content, char_count, message_type, segments)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
      RETURNING id, created_at`,
-    [conversationId, contactId, locationId, direction, content, content?.length || 0, messageType || null]
+    [conversationId, contactId, locationId, direction, content, content?.length || 0, messageType || null, segments || null]
   );
   return res.rows[0];
+}
+
+async function updateTokenCounts(conversationId, inputTokens, outputTokens) {
+  await db.query(
+    `UPDATE conversations
+     SET input_tokens = COALESCE(input_tokens, 0) + $1,
+         output_tokens = COALESCE(output_tokens, 0) + $2,
+         updated_at = NOW()
+     WHERE id = $3`,
+    [inputTokens || 0, outputTokens || 0, conversationId]
+  );
 }
 
 async function markReplyToPreviousOutbound(conversationId) {
@@ -176,5 +187,6 @@ module.exports = {
   applyCollectedData,
   setTerminalOutcome,
   reactivateConversation,
-  deleteSandboxConversation
+  deleteSandboxConversation,
+  updateTokenCounts
 };

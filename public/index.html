@@ -1,460 +1,1536 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PH Insurance SMS Bot Dashboard</title>
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
-    header { background: #1e293b; padding: 16px 24px; border-bottom: 1px solid #334155; }
-    header h1 { margin: 0; font-size: 20px; }
-    main { max-width: 1400px; margin: 0 auto; padding: 24px; }
-    .controls { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
-    .controls input, .controls select, .controls button {
-      background: #1e293b; color: #e2e8f0; border: 1px solid #334155; padding: 8px 12px; border-radius: 6px; font-size: 14px;
-    }
-    .controls button { background: #2563eb; border-color: #2563eb; cursor: pointer; }
-    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
-    .card { background: #1e293b; padding: 16px; border-radius: 8px; border: 1px solid #334155; }
-    .card .label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }
-    .card .value { font-size: 28px; font-weight: 600; margin-top: 4px; }
-    .section { margin-bottom: 32px; }
-    .section h2 { font-size: 16px; margin: 0 0 12px; color: #cbd5e1; }
-    table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 8px; overflow: hidden; }
-    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #334155; font-size: 13px; }
-    th { background: #0f172a; color: #94a3b8; font-weight: 500; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; }
-    tr:last-child td { border-bottom: none; }
-    tr.clickable { cursor: pointer; }
-    tr.clickable:hover { background: #273449; }
-    .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid #334155; }
-    .tab { padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent; color: #94a3b8; }
-    .tab.active { color: #e2e8f0; border-bottom-color: #2563eb; }
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; text-transform: uppercase; }
-    .badge.success { background: #166534; color: #bbf7d0; }
-    .badge.warn { background: #854d0e; color: #fef3c7; }
-    .badge.danger { background: #991b1b; color: #fecaca; }
-    .badge.neutral { background: #334155; color: #cbd5e1; }
-    .messages-panel { background: #1e293b; padding: 16px; border-radius: 8px; max-height: 500px; overflow-y: auto; }
-    .msg { padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; max-width: 75%; font-size: 13px; }
-    .msg.inbound { background: #334155; margin-right: auto; }
-    .msg.outbound { background: #1d4ed8; color: white; margin-left: auto; }
-    .msg .meta { font-size: 10px; opacity: 0.7; margin-top: 4px; }
-    .close-btn { background: #334155; color: #e2e8f0; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
-    .sandbox-layout { display: flex; gap: 20px; height: calc(100vh - 200px); min-height: 500px; }
-    .sandbox-vars { width: 30%; min-width: 260px; background: #1e293b; border-radius: 8px; border: 1px solid #334155; padding: 16px; overflow-y: auto; }
-    .sandbox-vars h3 { margin: 0 0 12px; font-size: 14px; color: #cbd5e1; }
-    .sandbox-vars label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px; margin-top: 10px; }
-    .sandbox-vars input, .sandbox-vars select {
-      width: 100%; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; padding: 6px 10px; border-radius: 4px; font-size: 13px;
-    }
-    .sandbox-vars button { margin-top: 16px; width: 100%; background: #334155; color: #e2e8f0; border: 1px solid #475569; padding: 8px; border-radius: 6px; cursor: pointer; font-size: 12px; }
-    .sandbox-vars button:hover { background: #475569; }
-    .sandbox-chat { flex: 1; display: flex; flex-direction: column; background: #1e293b; border-radius: 8px; border: 1px solid #334155; overflow: hidden; }
-    .sandbox-chat-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #334155; }
-    .sandbox-chat-header h3 { margin: 0; font-size: 14px; color: #cbd5e1; }
-    .sandbox-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
-    .sb-msg { padding: 10px 12px; border-radius: 8px; max-width: 75%; font-size: 13px; word-wrap: break-word; }
-    .sb-msg.user { background: #1d4ed8; color: white; margin-left: auto; }
-    .sb-msg.bot { background: #334155; margin-right: auto; }
-    .sb-msg .sb-meta { font-size: 10px; color: #94a3b8; margin-top: 4px; }
-    .sb-typing { padding: 10px 12px; font-size: 13px; color: #94a3b8; font-style: italic; }
-    .sandbox-input-row { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #334155; }
-    .sandbox-input-row input { flex: 1; background: #0f172a; color: #e2e8f0; border: 1px solid #334155; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
-    .sandbox-input-row button { background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; }
-    .sandbox-input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .logs-controls { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
-    .logs-controls input { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; padding: 8px 12px; border-radius: 6px; font-size: 13px; width: 260px; }
-    .logs-controls button { background: #334155; color: #e2e8f0; border: 1px solid #475569; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; }
-    .logs-controls button.primary { background: #2563eb; border-color: #2563eb; }
-    .logs-controls label { font-size: 12px; color: #94a3b8; display: flex; align-items: center; gap: 4px; cursor: pointer; }
-    .logs-controls label input[type="checkbox"] { accent-color: #2563eb; }
-    .log-entry { background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 10px 14px; margin-bottom: 6px; font-size: 13px; }
-    .log-entry .log-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .log-entry .log-ts { color: #64748b; font-size: 11px; font-family: monospace; min-width: 70px; }
-    .log-entry .log-stage { display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 10px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.04em; }
-    .log-stage.inbound { background: #1e3a5f; color: #60a5fa; }
-    .log-stage.parse { background: #3b1f6e; color: #c084fc; }
-    .log-stage.claude { background: #14532d; color: #86efac; }
-    .log-stage.ghl_send { background: #713f12; color: #fdba74; }
-    .log-stage.webhook_fire { background: #134e4a; color: #5eead4; }
-    .log-stage.error { background: #7f1d1d; color: #fca5a5; }
-    .log-entry .log-level { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
-    .log-level.info { background: #64748b; }
-    .log-level.warn { background: #eab308; }
-    .log-level.error { background: #ef4444; }
-    .log-entry .log-cid { font-family: monospace; font-size: 11px; color: #94a3b8; }
-    .log-entry .log-msg { color: #e2e8f0; }
-    .log-entry .log-toggle { color: #60a5fa; font-size: 11px; cursor: pointer; margin-top: 4px; display: inline-block; user-select: none; }
-    .log-entry pre { background: #0f172a; color: #94a3b8; padding: 8px 10px; border-radius: 4px; font-size: 11px; overflow-x: auto; margin: 6px 0 0; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
-    .logs-empty { color: #64748b; text-align: center; padding: 60px 20px; font-size: 14px; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Profit Hexagon — SMS AI Command Center</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg:#080c12; --surface:#0f1621; --surface2:#151d2b; --surface3:#1a2436;
+  --border:#1c2a3a; --border2:#253447;
+  --cyan:#00d4ff; --amber:#f59e0b; --green:#10d98a; --red:#ff4560;
+  --purple:#a78bfa; --blue:#3b82f6;
+  --text:#c8d8e8; --muted:#4a6580; --dim:#2a3f55;
+  --header-h:56px; --nav-w:228px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;overflow:hidden;}
+body{background:var(--bg);color:var(--text);font-family:'Rajdhani',sans-serif;font-size:14px;}
+.mono{font-family:'JetBrains Mono',monospace;}
+
+/* HEADER */
+header{position:fixed;top:0;left:0;right:0;height:var(--header-h);background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 18px;gap:14px;z-index:100;}
+.logo{display:flex;align-items:center;gap:9px;flex-shrink:0;}
+.logo-text{font-size:16px;font-weight:700;letter-spacing:1px;color:#fff;}
+.logo-sub{font-size:9px;font-family:'JetBrains Mono';color:var(--cyan);letter-spacing:2px;}
+.header-sep{width:1px;height:30px;background:var(--border);}
+.header-controls{display:flex;align-items:center;gap:10px;flex:1;min-width:0;}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0;}
+.sandbox-badge{background:var(--amber);color:#000;font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;letter-spacing:1px;cursor:pointer;}
+.avatar{width:28px;height:28px;border-radius:50%;background:var(--surface2);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;color:var(--text);}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block;margin-right:5px;box-shadow:0 0 6px var(--green);}
+
+/* ACCOUNT DROPDOWN */
+.acct-select-wrap{position:relative;}
+.acct-btn{background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:5px 11px 5px 9px;border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:8px;font-family:'Rajdhani';font-size:13px;transition:border-color .2s;}
+.acct-btn:hover{border-color:var(--cyan);}
+.acct-name{font-weight:600;color:#fff;font-size:13px;display:block;}
+.acct-id{font-family:'JetBrains Mono';font-size:9px;color:var(--muted);display:block;}
+.chevron{font-size:10px;color:var(--muted);transition:transform .2s;margin-left:4px;}
+.acct-dropdown{display:none;position:absolute;top:calc(100% + 6px);left:0;background:var(--surface);border:1px solid var(--border2);border-radius:8px;min-width:330px;z-index:300;box-shadow:0 16px 40px rgba(0,0,0,.7);padding:8px;}
+.acct-dropdown.open{display:block;}
+.acct-search{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:5px;font-family:'Rajdhani';font-size:13px;margin-bottom:6px;outline:none;}
+.acct-search:focus{border-color:var(--cyan);}
+.acct-list{max-height:270px;overflow-y:auto;}
+.acct-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:5px;cursor:pointer;transition:background .15s;}
+.acct-item:hover{background:var(--surface2);}
+.chk{width:14px;height:14px;border:1px solid var(--border2);border-radius:3px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px;}
+.acct-item.selected .chk{background:var(--cyan);border-color:var(--cyan);color:#000;}
+.acct-footer{border-top:1px solid var(--border);padding-top:8px;margin-top:4px;display:flex;gap:6px;}
+
+/* TF SELECT */
+.tf-select{background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:6px 10px;border-radius:6px;font-family:'Rajdhani';font-size:13px;cursor:pointer;outline:none;}
+.tf-select:focus{border-color:var(--cyan);}
+
+/* NAV */
+nav{position:fixed;top:var(--header-h);left:0;bottom:0;width:var(--nav-w);background:var(--surface);border-right:1px solid var(--border);overflow-y:auto;padding:10px 0;z-index:90;}
+.nav-section{padding:10px 16px 3px;font-size:9px;letter-spacing:2px;color:var(--muted);font-weight:700;text-transform:uppercase;}
+.nav-item{display:flex;align-items:center;gap:9px;padding:9px 16px;cursor:pointer;transition:all .15s;border-left:3px solid transparent;color:var(--muted);font-size:13px;font-weight:500;}
+.nav-item:hover{background:rgba(0,212,255,.04);color:var(--text);}
+.nav-item.active{border-left-color:var(--cyan);background:rgba(0,212,255,.06);color:var(--cyan);}
+.nav-icon{width:15px;text-align:center;font-size:13px;}
+.nav-badge{margin-left:auto;color:#fff;font-size:9px;border-radius:10px;padding:1px 6px;}
+.nb-red{background:var(--red);}
+.nb-amber{background:var(--amber);color:#000;}
+.nb-cyan{background:var(--cyan);color:#000;}
+
+/* MAIN */
+main{position:fixed;top:var(--header-h);left:var(--nav-w);right:0;bottom:0;overflow-y:auto;padding:18px;}
+.tab-content{display:none;}
+.tab-content.active{display:block;}
+
+/* GRID */
+.grid{display:grid;gap:14px;}
+.c2{grid-template-columns:repeat(2,1fr);}
+.c3{grid-template-columns:repeat(3,1fr);}
+.c4{grid-template-columns:repeat(4,1fr);}
+.c5{grid-template-columns:repeat(5,1fr);}
+.s2{grid-column:span 2;}
+.s3{grid-column:span 3;}
+.s4{grid-column:span 4;}
+
+/* CARD */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:15px;position:relative;overflow:hidden;}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(0,212,255,.18),transparent);}
+.card-title{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:10px;}
+.card-value{font-size:30px;font-weight:700;color:#fff;line-height:1;}
+.card-value.sm{font-size:21px;}
+.card-sub{font-size:12px;color:var(--muted);margin-top:4px;}
+.kpi-l{border-left:3px solid var(--cyan);}
+.kpi-l.g{border-left-color:var(--green);}
+.kpi-l.a{border-left-color:var(--amber);}
+.kpi-l.r{border-left-color:var(--red);}
+.kpi-l.p{border-left-color:var(--purple);}
+.kpi-l.b{border-left-color:var(--blue);}
+.trend-up{color:var(--green);font-size:12px;}
+.trend-dn{color:var(--red);font-size:12px;}
+.trend-fl{color:var(--amber);font-size:12px;}
+
+/* CHART */
+.chart-wrap{position:relative;}
+.chart-wrap canvas{max-width:100%;}
+
+/* SECTION HEADER */
+.sh{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.sh-title{font-size:15px;font-weight:700;color:#fff;letter-spacing:.5px;}
+.sh-line{flex:1;height:1px;background:var(--border);}
+.sh-action{font-size:12px;color:var(--cyan);cursor:pointer;padding:3px 10px;border:1px solid rgba(0,212,255,.3);border-radius:4px;}
+
+/* TABLE */
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{text-align:left;padding:7px 11px;font-size:9px;letter-spacing:1.5px;color:var(--muted);font-weight:600;text-transform:uppercase;border-bottom:1px solid var(--border);background:var(--bg);}
+td{padding:9px 11px;border-bottom:1px solid var(--border);vertical-align:middle;}
+tr:hover td{background:rgba(0,212,255,.02);}
+tr:last-child td{border-bottom:none;}
+.sortable{cursor:pointer;user-select:none;}
+.sortable:hover{color:var(--cyan);}
+
+/* PILL */
+.pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;}
+.pill.g{background:rgba(16,217,138,.15);color:var(--green);border:1px solid rgba(16,217,138,.3);}
+.pill.r{background:rgba(255,69,96,.15);color:var(--red);border:1px solid rgba(255,69,96,.3);}
+.pill.a{background:rgba(245,158,11,.15);color:var(--amber);border:1px solid rgba(245,158,11,.3);}
+.pill.c{background:rgba(0,212,255,.1);color:var(--cyan);border:1px solid rgba(0,212,255,.25);}
+.pill.p{background:rgba(167,139,250,.12);color:var(--purple);border:1px solid rgba(167,139,250,.3);}
+.pill.b{background:rgba(59,130,246,.12);color:var(--blue);border:1px solid rgba(59,130,246,.3);}
+
+/* PROGRESS */
+.pb-wrap{background:var(--bg);border-radius:3px;height:5px;overflow:hidden;}
+.pb{height:100%;border-radius:3px;background:var(--cyan);}
+.pb.g{background:var(--green);}
+.pb.r{background:var(--red);}
+.pb.a{background:var(--amber);}
+.pb.p{background:var(--purple);}
+
+/* BUTTONS */
+.btn{padding:6px 13px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--text);cursor:pointer;font-family:'Rajdhani';font-size:13px;font-weight:600;transition:all .15s;}
+.btn:hover{border-color:var(--cyan);color:var(--cyan);}
+.btn.pri{background:var(--cyan);border-color:var(--cyan);color:#000;}
+.btn.pri:hover{background:#00bbee;}
+.btn.dan{background:var(--red);border-color:var(--red);color:#fff;}
+.btn.amb{background:var(--amber);border-color:var(--amber);color:#000;}
+.btn.grn{background:var(--green);border-color:var(--green);color:#000;}
+.btn.pur{background:var(--purple);border-color:var(--purple);color:#000;}
+.btn-sm{padding:4px 9px;border-radius:4px;border:1px solid var(--border2);background:transparent;color:var(--text);cursor:pointer;font-family:'Rajdhani';font-size:12px;transition:all .15s;}
+.btn-sm:hover{border-color:var(--cyan);color:var(--cyan);}
+.btn-sm.pri{background:var(--cyan);border-color:var(--cyan);color:#000;font-weight:700;}
+
+/* INNER TABS */
+.itabs{display:flex;gap:2px;background:var(--bg);border-radius:7px;padding:3px;margin-bottom:14px;width:fit-content;}
+.itab{padding:5px 13px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:500;color:var(--muted);transition:all .2s;}
+.itab.active{background:var(--surface2);color:#fff;}
+.itab:hover:not(.active){color:var(--text);}
+
+/* FILTER ROW */
+.frow{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:14px;}
+.finput{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 11px;border-radius:6px;font-family:'Rajdhani';font-size:13px;outline:none;}
+.finput:focus{border-color:var(--cyan);}
+.fsel{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 9px;border-radius:6px;font-family:'Rajdhani';font-size:13px;outline:none;cursor:pointer;}
+.fsel:focus{border-color:var(--cyan);}
+
+/* WORDTRACK ROW */
+.wt-row{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:13px 15px;margin-bottom:8px;transition:border-color .2s;position:relative;}
+.wt-row:hover{border-color:var(--cyan);}
+.wt-meta{display:flex;align-items:center;gap:7px;margin-bottom:8px;flex-wrap:wrap;}
+.wt-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:9px;}
+.wt-stat{text-align:center;}
+.wt-stat .v{font-size:17px;font-weight:700;font-family:'JetBrains Mono';}
+.wt-stat .l{font-size:9px;letter-spacing:1px;color:var(--muted);text-transform:uppercase;}
+.origin-tag{font-size:9px;padding:2px 7px;border-radius:3px;font-family:'JetBrains Mono';font-weight:700;}
+.origin-wf{background:rgba(245,158,11,.15);color:var(--amber);border:1px solid rgba(245,158,11,.25);}
+.origin-ai{background:rgba(167,139,250,.15);color:var(--purple);border:1px solid rgba(167,139,250,.25);}
+
+/* PIPELINE */
+.pipe-stage{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border);}
+.pipe-name{width:220px;font-size:13px;font-weight:500;flex-shrink:0;}
+.pipe-bar{flex:1;}
+.pipe-count{width:65px;text-align:right;font-family:'JetBrains Mono';font-size:13px;color:var(--cyan);font-weight:700;}
+.pipe-pct{width:38px;text-align:right;font-family:'JetBrains Mono';font-size:10px;color:var(--muted);}
+
+/* QC / CONVERSATION */
+.conv-wrap{display:flex;gap:14px;height:480px;}
+.conv-list{width:250px;flex-shrink:0;background:var(--bg);border:1px solid var(--border);border-radius:8px;overflow-y:auto;display:flex;flex-direction:column;}
+.conv-list-header{padding:8px 12px;font-size:9px;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border);background:var(--surface2);flex-shrink:0;}
+.conv-item{padding:10px 13px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;border-left:3px solid transparent;}
+.conv-item:hover,.conv-item.active{background:rgba(0,212,255,.05);border-left-color:var(--cyan);}
+.ci-name{font-weight:600;font-size:13px;}
+.ci-meta{font-size:10px;color:var(--muted);margin-top:2px;font-family:'JetBrains Mono';}
+.conv-panel{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;display:flex;flex-direction:column;min-width:0;}
+.conv-top{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:9px;background:var(--surface);border-radius:8px 8px 0 0;flex-shrink:0;}
+.conv-messages{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:9px;}
+.bubble{max-width:72%;padding:9px 13px;border-radius:11px;font-size:13px;line-height:1.5;}
+.bubble.lead{background:var(--surface2);border:1px solid var(--border2);align-self:flex-start;border-bottom-left-radius:3px;}
+.bubble.bot{background:rgba(0,212,255,.07);border:1px solid rgba(0,212,255,.18);align-self:flex-end;border-bottom-right-radius:3px;}
+.bubble-lbl{font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:3px;}
+.qc-acts{padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:7px;align-items:center;flex-shrink:0;flex-wrap:wrap;}
+.qc-score{margin-left:auto;font-size:12px;color:var(--muted);}
+
+/* REVIEW ITEMS */
+.rv-item{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:15px;margin-bottom:11px;}
+.rv-header{display:flex;align-items:center;gap:9px;margin-bottom:11px;flex-wrap:wrap;}
+.rv-body{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.rv-block{background:var(--bg);border-radius:6px;padding:11px;}
+.rv-block-lbl{font-size:9px;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase;font-weight:600;margin-bottom:5px;}
+.rv-block-txt{font-size:13px;line-height:1.6;color:var(--text);}
+.rv-reason{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:6px;padding:9px 11px;margin-top:9px;font-size:12px;color:var(--amber);}
+.rv-acts{display:flex;gap:7px;margin-top:11px;align-items:center;flex-wrap:wrap;}
+.modify-in{flex:1;min-width:180px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 11px;border-radius:6px;font-family:'Rajdhani';font-size:13px;outline:none;}
+.modify-in:focus{border-color:var(--cyan);}
+
+/* SANDBOX */
+.sb-grid{display:grid;grid-template-columns:370px 1fr;gap:16px;}
+.sb-panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;}
+.form-group{display:flex;flex-direction:column;gap:4px;margin-bottom:11px;}
+.form-label{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);font-weight:600;}
+.form-input{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:8px 11px;border-radius:6px;font-family:'Rajdhani';font-size:14px;outline:none;}
+.form-input:focus{border-color:var(--cyan);}
+textarea.form-input{resize:vertical;min-height:80px;}
+.sb-output{background:var(--bg);border-radius:8px;padding:14px;min-height:260px;display:flex;flex-direction:column;gap:9px;}
+.sb-input-row{display:flex;gap:8px;align-items:flex-end;margin-top:10px;}
+.sb-text-input{flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:6px;font-family:'Rajdhani';font-size:14px;outline:none;resize:none;min-height:42px;}
+.sb-text-input:focus{border-color:var(--cyan);}
+
+/* SETTINGS */
+.settings-grid{display:grid;grid-template-columns:250px 1fr;gap:16px;height:calc(100vh - 120px);}
+.settings-nav{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 0;overflow-y:auto;}
+.sn-item{padding:9px 16px;cursor:pointer;font-size:13px;font-weight:500;color:var(--muted);border-left:3px solid transparent;transition:all .15s;}
+.sn-item:hover{color:var(--text);}
+.sn-item.active{border-left-color:var(--cyan);color:var(--cyan);background:rgba(0,212,255,.05);}
+.sn-section{padding:12px 16px 3px;font-size:9px;letter-spacing:2px;color:var(--muted);font-weight:700;text-transform:uppercase;}
+.settings-content{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;overflow-y:auto;}
+.settings-panel{display:none;}
+.settings-panel.active{display:block;}
+.sub-cfg-row{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:13px 15px;margin-bottom:9px;}
+.sub-cfg-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;}
+.sub-cfg-name{font-weight:700;color:#fff;font-size:14px;}
+.sub-cfg-id{font-family:'JetBrains Mono';font-size:10px;color:var(--muted);}
+.sub-cfg-fields{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
+.api-key-field{display:flex;align-items:center;gap:8px;}
+.api-key-input{flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 11px;border-radius:6px;font-family:'JetBrains Mono';font-size:11px;outline:none;}
+.api-key-input:focus{border-color:var(--cyan);}
+.kb-textarea{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:6px;font-family:'Rajdhani';font-size:13px;outline:none;resize:vertical;min-height:140px;line-height:1.6;}
+.kb-textarea:focus{border-color:var(--cyan);}
+
+/* DEV NOTES */
+.devnotes-body{font-family:'JetBrains Mono';font-size:12px;line-height:1.8;color:var(--text);max-width:900px;}
+.devnotes-body h1{font-family:'Rajdhani';font-size:24px;font-weight:700;color:#fff;margin-bottom:6px;letter-spacing:1px;}
+.devnotes-body h2{font-family:'Rajdhani';font-size:17px;font-weight:700;color:var(--cyan);margin:24px 0 10px;border-bottom:1px solid var(--border);padding-bottom:6px;}
+.devnotes-body h3{font-family:'Rajdhani';font-size:14px;font-weight:700;color:var(--amber);margin:16px 0 6px;}
+.devnotes-body p{margin-bottom:10px;color:var(--muted);}
+.devnotes-body code{background:var(--surface2);border:1px solid var(--border);padding:1px 6px;border-radius:3px;font-size:11px;color:var(--green);}
+.devnotes-body .formula{background:var(--surface2);border:1px solid var(--border2);border-left:3px solid var(--cyan);padding:10px 14px;border-radius:0 6px 6px 0;margin:8px 0;color:var(--cyan);}
+.devnotes-body .warn{background:rgba(255,69,96,.06);border:1px solid rgba(255,69,96,.2);border-radius:6px;padding:10px 14px;color:var(--red);margin:10px 0;}
+.devnotes-body .note{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:6px;padding:10px 14px;color:var(--amber);margin:10px 0;}
+.devnotes-body ul{margin-left:20px;margin-bottom:10px;}
+.devnotes-body li{color:var(--muted);margin-bottom:4px;}
+
+/* LOGS */
+.log-entry{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-bottom:6px;font-size:13px;}
+.log-header{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.log-ts{color:var(--muted);font-size:11px;font-family:'JetBrains Mono';min-width:70px;}
+.log-stage{display:inline-block;padding:1px 8px;border-radius:4px;font-size:10px;text-transform:uppercase;font-weight:600;letter-spacing:.04em;}
+.log-stage.inbound{background:#1e3a5f;color:#60a5fa;}
+.log-stage.parse{background:#3b1f6e;color:#c084fc;}
+.log-stage.claude{background:#14532d;color:#86efac;}
+.log-stage.ghl_send{background:#713f12;color:#fdba74;}
+.log-stage.webhook_fire{background:#134e4a;color:#5eead4;}
+.log-stage.error{background:#7f1d1d;color:#fca5a5;}
+.log-level{display:inline-block;width:8px;height:8px;border-radius:50%;}
+.log-level.info{background:#64748b;}
+.log-level.warn{background:#eab308;}
+.log-level.error{background:#ef4444;}
+.log-cid{font-family:'JetBrains Mono';font-size:11px;color:#94a3b8;}
+.log-msg{color:var(--text);}
+.log-toggle{color:#60a5fa;font-size:11px;cursor:pointer;margin-top:4px;display:inline-block;user-select:none;}
+.log-data-pre{background:var(--bg);color:#94a3b8;padding:8px 10px;border-radius:4px;font-size:11px;overflow-x:auto;margin:6px 0 0;max-height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;font-family:'JetBrains Mono';}
+
+/* ACC BARS */
+.acc-bar-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+.acc-bar-label{width:90px;font-size:12px;}
+.acc-bar-wrap{flex:1;background:var(--bg);border-radius:4px;height:18px;overflow:hidden;position:relative;}
+.acc-bar-fill{height:100%;border-radius:4px;display:flex;align-items:center;padding-left:8px;font-size:10px;font-family:'JetBrains Mono';font-weight:700;color:#000;}
+.acc-pct{width:40px;text-align:right;font-family:'JetBrains Mono';font-size:12px;font-weight:700;}
+
+/* MISC */
+.divider{height:1px;background:var(--border);margin:13px 0;}
+.dim-text{color:var(--muted);font-size:12px;}
+.hl{color:var(--cyan);}
+.spacer{height:18px;}
+.dev-note{background:rgba(255,69,96,.05);border:1px dashed rgba(255,69,96,.3);border-radius:6px;padding:9px 13px;font-size:11px;color:var(--red);font-family:'JetBrains Mono';line-height:1.6;}
+.dev-note strong{color:#fff;}
+.confirm-banner{background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.2);border-radius:8px;padding:12px 15px;display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.confirm-banner p{font-size:13px;color:var(--cyan);}
+.toast{position:fixed;bottom:20px;right:20px;background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:12px 18px;font-size:13px;z-index:999;display:none;box-shadow:0 8px 30px rgba(0,0,0,.5);max-width:380px;white-space:pre-line;}
+.toast.show{display:block;}
+.loading-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--cyan);border-radius:50%;animation:spin .6s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--dim);border-radius:2px;}
+</style>
 </head>
 <body>
-  <header><h1>PH Insurance SMS Bot — Dashboard</h1></header>
-  <main id="root"></main>
 
-  <script type="text/babel">
-    const { useState, useEffect } = React;
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
 
-    function fmt(v, digits = 0) {
-      if (v === null || v === undefined || isNaN(v)) return '—';
-      return Number(v).toFixed(digits);
-    }
-    function pct(v) {
-      if (v === null || v === undefined || isNaN(v)) return '—';
-      return (Number(v) * 100).toFixed(1) + '%';
-    }
-
-    function App() {
-      const [tab, setTab] = useState('overview');
-      const [locationId, setLocationId] = useState('');
-      const [startDate, setStartDate] = useState('');
-      const [endDate, setEndDate] = useState('');
-      const [analytics, setAnalytics] = useState(null);
-      const [conversations, setConversations] = useState([]);
-      const [performance, setPerformance] = useState([]);
-      const [syncStatus, setSyncStatus] = useState(null);
-      const [selectedConv, setSelectedConv] = useState(null);
-
-      // Sandbox state
-      const sbDefaults = { first_name: 'Walt', state: 'FL', offer: 'Final Expense', tags: 'fex-lead', bot_name: 'Sarah', agent_name: 'Jeremiah', contact_stage: 'lead', existing_age: '', existing_smoker: '', existing_health: '' };
-      const [sbVars, setSbVars] = useState({ ...sbDefaults });
-      const [sbMessages, setSbMessages] = useState([]);
-      const [sbInput, setSbInput] = useState('');
-      const [sbLoading, setSbLoading] = useState(false);
-
-      // Logs state
-      const [logs, setLogs] = useState([]);
-      const [logFilter, setLogFilter] = useState('');
-      const [logAutoRefresh, setLogAutoRefresh] = useState(true);
-      const [logExpanded, setLogExpanded] = useState({});
-
-      const queryString = () => {
-        const p = new URLSearchParams();
-        if (locationId) p.set('location_id', locationId);
-        if (startDate) p.set('start_date', startDate);
-        if (endDate) p.set('end_date', endDate);
-        return p.toString();
-      };
-
-      const load = async () => {
-        const qs = queryString();
-        const [a, c, p, s] = await Promise.all([
-          fetch(`/api/analytics?${qs}`).then(r => r.json()),
-          fetch(`/api/conversations?${qs}`).then(r => r.json()),
-          fetch(`/api/message-performance?${qs}`).then(r => r.json()),
-          fetch(`/api/sync-status`).then(r => r.json())
-        ]);
-        setAnalytics(a); setConversations(c.conversations || []); setPerformance(p.performance || []); setSyncStatus(s);
-      };
-
-      useEffect(() => { load(); }, []);
-
-      const openConv = async (contactId, locId) => {
-        const res = await fetch(`/api/conversations/${contactId}/${locId}`).then(r => r.json());
-        setSelectedConv(res);
-      };
-
-      const outcomeBadge = (outcome) => {
-        if (!outcome) return <span className="badge neutral">active</span>;
-        const map = {
-          appointment_booked: 'success',
-          fex_immediate: 'success',
-          mp_immediate: 'success',
-          human_handoff: 'warn',
-          dnc: 'danger'
-        };
-        return <span className={`badge ${map[outcome] || 'neutral'}`}>{outcome}</span>;
-      };
-
-      const sbSend = async () => {
-        const text = sbInput.trim();
-        if (!text || sbLoading) return;
-        setSbInput('');
-        setSbMessages(prev => [...prev, { role: 'user', text }]);
-        setSbLoading(true);
-        try {
-          const resp = await fetch('/sandbox/message', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ variables: sbVars, message: text })
-          });
-          const data = await resp.json();
-          if (data.error) throw new Error(data.error);
-          const botMsgs = (data.messages || []).map(m => ({
-            role: 'bot', text: m,
-            collected_data: data.collected_data,
-            message_type: data.message_type,
-            terminal_outcome: data.terminal_outcome,
-            elapsed_ms: data.elapsed_ms
-          }));
-          setSbMessages(prev => [...prev, ...botMsgs]);
-        } catch (err) {
-          setSbMessages(prev => [...prev, { role: 'bot', text: '[Error: ' + err.message + ']' }]);
-        }
-        setSbLoading(false);
-      };
-
-      const sbReset = async () => {
-        await fetch('/sandbox/reset', { method: 'POST' });
-        setSbMessages([]);
-      };
-
-      const sbMessagesEndRef = React.useRef(null);
-      React.useEffect(() => {
-        if (sbMessagesEndRef.current) sbMessagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-      }, [sbMessages, sbLoading]);
-
-      const fetchLogs = async () => {
-        const qs = logFilter ? `?contact_id=${encodeURIComponent(logFilter)}` : '';
-        const res = await fetch(`/api/logs${qs}`).then(r => r.json());
-        setLogs(res.logs || []);
-      };
-
-      useEffect(() => {
-        if (tab !== 'logs') return;
-        fetchLogs();
-        if (!logAutoRefresh) return;
-        const interval = setInterval(fetchLogs, 3000);
-        return () => clearInterval(interval);
-      }, [tab, logFilter, logAutoRefresh]);
-
-      const toggleLogExpand = (id) => setLogExpanded(prev => ({ ...prev, [id]: !prev[id] }));
-
-      const fmtTime = (iso) => {
-        const d = new Date(iso);
-        return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      };
-
-      return (
-        <div>
-          <div className="controls">
-            <input placeholder="location_id (blank = all)" value={locationId} onChange={e => setLocationId(e.target.value)} />
-            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
-            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
-            <button onClick={load}>Refresh</button>
-          </div>
-
-          <div className="tabs">
-            {['overview', 'conversations', 'performance', 'sync', 'sandbox', 'logs'].map(t => (
-              <div key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
-                {t.charAt(0).toUpperCase() + t.slice(1)}
-              </div>
-            ))}
-          </div>
-
-          {tab === 'overview' && analytics && (
-            <>
-              <div className="cards">
-                <div className="card"><div className="label">Total Conversations</div><div className="value">{analytics.summary.total_conversations}</div></div>
-                <div className="card"><div className="label">Appointments</div><div className="value">{analytics.summary.appointments_booked}</div></div>
-                <div className="card"><div className="label">Appointment Rate</div><div className="value">{pct(analytics.summary.appointment_rate)}</div></div>
-                <div className="card"><div className="label">Handoffs</div><div className="value">{analytics.summary.human_handoffs}</div></div>
-                <div className="card"><div className="label">DNC</div><div className="value">{analytics.summary.dnc_count}</div></div>
-                <div className="card"><div className="label">Opt-out Rate</div><div className="value">{pct(analytics.summary.opt_out_rate)}</div></div>
-                <div className="card"><div className="label">Avg Msgs / Conv</div><div className="value">{fmt(analytics.summary.avg_messages_per_conversation, 1)}</div></div>
-                <div className="card"><div className="label">Avg Reply Time (s)</div><div className="value">{fmt(analytics.summary.avg_response_time_seconds, 0)}</div></div>
-              </div>
-
-              {analytics.per_location && analytics.per_location.length > 0 && (
-                <div className="section">
-                  <h2>Per-Location Breakdown</h2>
-                  <table>
-                    <thead><tr><th>Location</th><th>Total</th><th>Appointments</th><th>DNC</th></tr></thead>
-                    <tbody>
-                      {analytics.per_location.map(l => (
-                        <tr key={l.location_id}><td>{l.location_id}</td><td>{l.total}</td><td>{l.appointments}</td><td>{l.dnc}</td></tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
-
-          {tab === 'conversations' && (
-            <>
-              <table>
-                <thead><tr><th>Name</th><th>Phone</th><th>Location</th><th>Product</th><th>Stage</th><th>Outcome</th><th>Msgs</th><th>Last Msg</th></tr></thead>
-                <tbody>
-                  {conversations.map(c => (
-                    <tr key={c.id} className="clickable" onClick={() => openConv(c.contact_id, c.location_id)}>
-                      <td>{c.first_name} {c.last_name}</td>
-                      <td>{c.phone}</td>
-                      <td>{c.location_id}</td>
-                      <td>{c.product_type}</td>
-                      <td>{c.contact_stage}</td>
-                      <td>{outcomeBadge(c.terminal_outcome)}</td>
-                      <td>{c.message_count}</td>
-                      <td>{c.last_message_at ? new Date(c.last_message_at).toLocaleString() : ''}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {selectedConv && (
-                <div className="section" style={{marginTop: 24}}>
-                  <h2>
-                    Conversation: {selectedConv.conversation.first_name} {selectedConv.conversation.last_name}
-                    <button className="close-btn" style={{marginLeft: 12}} onClick={() => setSelectedConv(null)}>Close</button>
-                  </h2>
-                  <div className="messages-panel">
-                    {selectedConv.messages.map(m => (
-                      <div key={m.id} className={`msg ${m.direction}`}>
-                        {m.content}
-                        <div className="meta">{m.message_type || ''} · {new Date(m.created_at).toLocaleString()}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
-          {tab === 'performance' && (
-            <table>
-              <thead><tr><th>Message Type</th><th>Total Sent</th><th>Replies</th><th>Reply Rate</th><th>Avg Reply Time (s)</th></tr></thead>
-              <tbody>
-                {performance.map(p => (
-                  <tr key={p.message_type}>
-                    <td>{p.message_type}</td>
-                    <td>{p.total_sent}</td>
-                    <td>{p.replies}</td>
-                    <td>{pct(p.reply_rate)}</td>
-                    <td>{fmt(p.avg_reply_time_seconds, 0)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          {tab === 'sync' && syncStatus && (
-            <div className="cards">
-              <div className="card"><div className="label">Pending Syncs</div><div className="value">{syncStatus.pending_syncs}</div></div>
-              <div className="card"><div className="label">Last Sync</div><div className="value" style={{fontSize: 16}}>{syncStatus.last_synced_at ? new Date(syncStatus.last_synced_at).toLocaleString() : 'never'}</div></div>
-            </div>
-          )}
-
-          {tab === 'logs' && (
-            <div>
-              <div className="logs-controls">
-                <input
-                  placeholder="Filter by contact_id..."
-                  value={logFilter}
-                  onChange={e => setLogFilter(e.target.value)}
-                />
-                <button className="primary" onClick={fetchLogs}>Refresh</button>
-                <button onClick={() => setLogFilter('')}>Clear filter</button>
-                <label>
-                  <input type="checkbox" checked={logAutoRefresh} onChange={e => setLogAutoRefresh(e.target.checked)} />
-                  Auto-refresh
-                </label>
-              </div>
-              {logs.length === 0 ? (
-                <div className="logs-empty">No logs yet. Trigger a webhook to see activity.</div>
-              ) : (
-                logs.map(entry => (
-                  <div key={entry.id} className="log-entry">
-                    <div className="log-header">
-                      <span className="log-ts">{fmtTime(entry.timestamp)}</span>
-                      <span className={`log-stage ${entry.stage}`}>{entry.stage}</span>
-                      <span className={`log-level ${entry.level}`} title={entry.level}></span>
-                      {entry.contact_id && <span className="log-cid">{entry.contact_id}</span>}
-                      <span className="log-msg">{entry.message}</span>
-                    </div>
-                    {entry.data && (
-                      <>
-                        <span className="log-toggle" onClick={() => toggleLogExpand(entry.id)}>
-                          {logExpanded[entry.id] ? 'Hide data' : 'Show data'}
-                        </span>
-                        {logExpanded[entry.id] && <pre>{JSON.stringify(entry.data, null, 2)}</pre>}
-                      </>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-
-          {tab === 'sandbox' && (
-            <div className="sandbox-layout">
-              <div className="sandbox-vars">
-                <h3>Test Variables</h3>
-                <label>First Name</label>
-                <input value={sbVars.first_name} onChange={e => setSbVars(v => ({...v, first_name: e.target.value}))} />
-                <label>State</label>
-                <input value={sbVars.state} onChange={e => setSbVars(v => ({...v, state: e.target.value}))} />
-                <label>Offer</label>
-                <select value={sbVars.offer} onChange={e => setSbVars(v => ({...v, offer: e.target.value}))}>
-                  <option>Final Expense</option>
-                  <option>Mortgage Protection</option>
-                  <option>Other</option>
-                </select>
-                <label>Tags (comma-separated)</label>
-                <input value={sbVars.tags} onChange={e => setSbVars(v => ({...v, tags: e.target.value}))} />
-                <label>Bot Name</label>
-                <input value={sbVars.bot_name} onChange={e => setSbVars(v => ({...v, bot_name: e.target.value}))} />
-                <label>Agent Name</label>
-                <input value={sbVars.agent_name} onChange={e => setSbVars(v => ({...v, agent_name: e.target.value}))} />
-                <label>Contact Stage</label>
-                <select value={sbVars.contact_stage} onChange={e => setSbVars(v => ({...v, contact_stage: e.target.value}))}>
-                  <option value="lead">lead</option>
-                  <option value="client">client</option>
-                  <option value="application">application</option>
-                </select>
-                <label>Existing Age (optional)</label>
-                <input value={sbVars.existing_age} onChange={e => setSbVars(v => ({...v, existing_age: e.target.value}))} />
-                <label>Existing Smoker (optional)</label>
-                <input value={sbVars.existing_smoker} onChange={e => setSbVars(v => ({...v, existing_smoker: e.target.value}))} />
-                <label>Existing Health (optional)</label>
-                <input value={sbVars.existing_health} onChange={e => setSbVars(v => ({...v, existing_health: e.target.value}))} />
-                <button onClick={() => setSbVars({...sbDefaults})}>Reset Variables to Defaults</button>
-              </div>
-              <div className="sandbox-chat">
-                <div className="sandbox-chat-header">
-                  <h3>Sandbox Chat</h3>
-                  <button className="close-btn" onClick={sbReset}>Clear Conversation</button>
-                </div>
-                <div className="sandbox-messages">
-                  {sbMessages.map((m, i) => (
-                    <div key={i} className={`sb-msg ${m.role}`}>
-                      {m.text}
-                      {m.role === 'bot' && (
-                        <div className="sb-meta">
-                          {m.message_type && <span>{m.message_type}</span>}
-                          {m.terminal_outcome && <span> · outcome: {m.terminal_outcome}</span>}
-                          {m.collected_data && Object.keys(m.collected_data).filter(k => m.collected_data[k]).length > 0 && (
-                            <span> · collected: {JSON.stringify(Object.fromEntries(Object.entries(m.collected_data).filter(([,v]) => v)))}</span>
-                          )}
-                          {m.elapsed_ms && <span> · {m.elapsed_ms}ms</span>}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  {sbLoading && <div className="sb-typing">...</div>}
-                  <div ref={sbMessagesEndRef} />
-                </div>
-                <div className="sandbox-input-row">
-                  <input
-                    value={sbInput}
-                    onChange={e => setSbInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') sbSend(); }}
-                    placeholder="Type a message..."
-                    disabled={sbLoading}
-                  />
-                  <button onClick={sbSend} disabled={sbLoading || !sbInput.trim()}>Send</button>
-                </div>
-              </div>
-            </div>
-          )}
+<!-- HEADER -->
+<header>
+  <div class="logo">
+    <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+      <polygon points="13,2 23,7.5 23,18.5 13,24 3,18.5 3,7.5" fill="none" stroke="#00d4ff" stroke-width="1.5"/>
+      <polygon points="13,7 18,9.8 18,16.2 13,19 8,16.2 8,9.8" fill="rgba(0,212,255,.12)" stroke="#00d4ff" stroke-width="1"/>
+    </svg>
+    <div><div class="logo-text">PROFIT HEXAGON</div><div class="logo-sub">SMS AI COMMAND</div></div>
+  </div>
+  <div class="header-sep"></div>
+  <div class="header-controls">
+    <div class="acct-select-wrap">
+      <button class="acct-btn" onclick="toggleDrop()">
+        <div><span class="acct-name" id="acct-name-disp">All Subaccounts</span><span class="acct-id" id="acct-id-disp">Loading...</span></div>
+        <span class="chevron" id="acct-chev">&#9660;</span>
+      </button>
+      <div class="acct-dropdown" id="acct-drop">
+        <input class="acct-search" placeholder="Search subaccounts..." oninput="filterAccts(this.value)">
+        <div class="acct-list" id="acct-list-el"></div>
+        <div class="acct-footer">
+          <button class="btn-sm" onclick="selAll()">All</button>
+          <button class="btn-sm" onclick="clrAll()">Clear</button>
+          <button class="btn-sm pri" onclick="applyAccts()">Apply</button>
         </div>
-      );
+      </div>
+    </div>
+    <select class="tf-select" id="tf-global" onchange="onTimeframeChange()">
+      <option value="7">7 Days</option>
+      <option value="30" selected>30 Days</option>
+      <option value="60">60 Days</option>
+      <option value="90">90 Days</option>
+    </select>
+    <span style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono';"><span class="status-dot"></span>Live</span>
+  </div>
+  <div class="header-right">
+    <span class="sandbox-badge" onclick="goTab('tab-sandbox')">SANDBOX</span>
+    <div class="avatar">JR</div>
+  </div>
+</header>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-section">Analytics</div>
+  <div class="nav-item active" data-tab="tab-dashboard" onclick="goTab('tab-dashboard')"><span class="nav-icon">&#9638;</span> Overview Dashboard</div>
+  <div class="nav-item" data-tab="tab-wordtracks" onclick="goTab('tab-wordtracks')"><span class="nav-icon">&#9993;</span> Wordtracks</div>
+  <div class="nav-item" data-tab="tab-pipeline" onclick="goTab('tab-pipeline')"><span class="nav-icon">&#9672;</span> Pipeline Stages</div>
+  <div class="nav-section">AI Management</div>
+  <div class="nav-item" data-tab="tab-qc" onclick="goTab('tab-qc')"><span class="nav-icon">&#9678;</span> QC Portal <span class="nav-badge nb-amber" id="nav-qc-badge"></span></div>
+  <div class="nav-item" data-tab="tab-review" onclick="goTab('tab-review')"><span class="nav-icon">&#8635;</span> AI Review Queue <span class="nav-badge nb-red" id="nav-review-badge"></span></div>
+  <div class="nav-section">Tools</div>
+  <div class="nav-item" data-tab="tab-sandbox" onclick="goTab('tab-sandbox')"><span class="nav-icon">&#9879;</span> Sandbox</div>
+  <div class="nav-section">System</div>
+  <div class="nav-item" data-tab="tab-settings" onclick="goTab('tab-settings')"><span class="nav-icon">&#9881;</span> Settings</div>
+  <div class="nav-item" data-tab="tab-devnotes" onclick="goTab('tab-devnotes')"><span class="nav-icon">&#128203;</span> Dev Notes <span class="nav-badge nb-cyan">NEW</span></div>
+  <div class="nav-item" data-tab="tab-logs" onclick="goTab('tab-logs')"><span class="nav-icon">&#9783;</span> Logs</div>
+</nav>
+
+<!-- MAIN -->
+<main>
+
+<!-- ====== DASHBOARD ====== -->
+<div class="tab-content active" id="tab-dashboard">
+  <div class="grid c5" style="margin-bottom:13px;" id="kpi-row1"></div>
+  <div class="grid c5" style="margin-bottom:13px;" id="kpi-row2"></div>
+  <div class="grid c3" style="margin-bottom:13px;">
+    <div class="card s2">
+      <div class="card-title">SMS Performance Trends</div>
+      <div class="chart-wrap" style="height:190px;"><canvas id="ch-trends"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Response Outcome</div>
+      <div class="chart-wrap" style="height:190px;"><canvas id="ch-resp-outcome"></canvas></div>
+    </div>
+  </div>
+  <div class="grid c3" style="margin-bottom:13px;" id="cost-cards"></div>
+  <div class="card" style="margin-bottom:13px;">
+    <div class="card-title">Per-Subaccount Breakdown</div>
+    <table id="subaccount-table">
+      <thead><tr><th>Subaccount</th><th>Conversations</th><th>Booked</th><th>Handoffs</th><th>DNC</th><th>Opt-Out Rate</th><th>Avg Msgs</th></tr></thead>
+      <tbody id="subaccount-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ====== WORDTRACKS ====== -->
+<div class="tab-content" id="tab-wordtracks">
+  <div class="frow">
+    <select class="fsel" id="wt-sort" onchange="loadWordtracks()">
+      <option value="total_sent">Sort: Total Sent</option>
+      <option value="reply_rate">Sort: Reply Rate</option>
+      <option value="opt_out_rate">Sort: Opt-Out Rate</option>
+      <option value="booking_rate">Sort: Booking Rate</option>
+      <option value="transfer_rate">Sort: Transfer Rate</option>
+    </select>
+    <select class="fsel" id="wt-dir" onchange="loadWordtracks()">
+      <option value="desc">Descending</option>
+      <option value="asc">Ascending</option>
+    </select>
+    <button class="btn pri" onclick="loadWordtracks()">Refresh</button>
+  </div>
+  <div id="wt-list"></div>
+</div>
+
+<!-- ====== PIPELINE ====== -->
+<div class="tab-content" id="tab-pipeline">
+  <div class="grid c2">
+    <div class="card">
+      <div class="card-title">Lead Pipeline -- Stage Counts</div>
+      <div id="pipe-stages-el"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Pipeline Funnel</div>
+      <div class="chart-wrap" style="height:420px;"><canvas id="ch-pipeline"></canvas></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px;">
+    <div class="card-title">Stage Breakdown</div>
+    <table id="pipe-table">
+      <thead><tr><th>Stage</th><th>Total</th><th>Active</th><th>Booked</th><th>Handoff</th><th>DNC</th></tr></thead>
+      <tbody id="pipe-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ====== QC PORTAL ====== -->
+<div class="tab-content" id="tab-qc">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+    <div><div style="font-size:17px;font-weight:700;color:#fff;">Bot Accuracy QC Portal</div><div class="dim-text">Weekly spot-check -- Authorized reviewers only</div></div>
+    <div style="display:flex;gap:9px;align-items:center;">
+      <div class="card" style="padding:9px 15px;display:flex;gap:18px;border-color:var(--amber);" id="qc-stats-card"></div>
+      <button class="btn pri" onclick="pullRandomConv()">Pull Random Conversation</button>
+    </div>
+  </div>
+  <div class="conv-wrap">
+    <div class="conv-list">
+      <div class="conv-list-header" id="qc-list-header">Pending Review</div>
+      <div id="qc-conv-list"></div>
+    </div>
+    <div class="conv-panel">
+      <div class="conv-top">
+        <div><strong id="qc-lead-name">Select a conversation</strong><span style="font-size:11px;color:var(--muted);margin-left:10px;" id="qc-lead-meta"></span></div>
+        <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
+          <span class="pill a" id="qc-status-pill">Pending QC</span>
+        </div>
+      </div>
+      <div class="conv-messages" id="qc-messages">
+        <div style="color:var(--muted);text-align:center;padding:40px;">Select a conversation from the left panel.</div>
+      </div>
+      <div class="qc-acts">
+        <button class="btn grn" onclick="qcAction('approved')">Approve</button>
+        <button class="btn dan" onclick="qcAction('failed')">Mark Failed</button>
+        <input type="text" placeholder="Type corrected response..." id="qc-edit-input" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 11px;border-radius:6px;font-family:'Rajdhani';font-size:13px;outline:none;">
+        <button class="btn amb" onclick="qcAction('modified')">Save & Train</button>
+        <span class="qc-score" id="qc-accuracy-display"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ====== AI REVIEW ====== -->
+<div class="tab-content" id="tab-review">
+  <div class="confirm-banner" id="review-banner">
+    <p id="review-banner-text">Loading review items...</p>
+  </div>
+  <div id="review-list"></div>
+</div>
+
+<!-- ====== SANDBOX ====== -->
+<div class="tab-content" id="tab-sandbox">
+  <div class="sb-grid">
+    <div class="sb-panel">
+      <div class="card-title" style="margin-bottom:12px;">Sandbox Configuration</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;">
+        <div class="form-group"><label class="form-label">First Name</label><input class="form-input" id="sb-first_name" value="Walt"></div>
+        <div class="form-group"><label class="form-label">State</label><input class="form-input" id="sb-state" value="FL"></div>
+        <div class="form-group"><label class="form-label">Offer</label>
+          <select class="form-input" id="sb-offer">
+            <option value="Final Expense" selected>Final Expense</option>
+            <option value="Medicare Advantage">Medicare Advantage</option>
+            <option value="Mortgage Protection">Mortgage Protection</option>
+            <option value="IUL">IUL</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Tags</label><input class="form-input" id="sb-tags" value="fex-lead"></div>
+        <div class="form-group"><label class="form-label">Bot Name</label><input class="form-input" id="sb-bot_name" value="Sarah"></div>
+        <div class="form-group"><label class="form-label">Agent Name</label><input class="form-input" id="sb-agent_name" value="Jeremiah"></div>
+        <div class="form-group"><label class="form-label">Contact Stage</label>
+          <select class="form-input" id="sb-contact_stage">
+            <option value="lead" selected>lead</option>
+            <option value="engaged">engaged</option>
+            <option value="qualified">qualified</option>
+            <option value="nurture">nurture</option>
+            <option value="aged">aged</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Existing Age</label><input class="form-input" id="sb-existing_age" placeholder="e.g. 62"></div>
+        <div class="form-group"><label class="form-label">Existing Smoker</label><input class="form-input" id="sb-existing_smoker" placeholder="yes/no"></div>
+        <div class="form-group"><label class="form-label">Existing Health</label><input class="form-input" id="sb-existing_health" placeholder="good/fair/poor"></div>
+      </div>
+      <div style="display:flex;gap:7px;margin-top:12px;">
+        <button class="btn pri" style="flex:1;" onclick="sbSend()">Send</button>
+        <button class="btn" onclick="sbReset()">Clear</button>
+      </div>
+    </div>
+    <div class="sb-panel" style="display:flex;flex-direction:column;">
+      <div class="card-title" style="margin-bottom:12px;">Conversation Simulator</div>
+      <div class="sb-output" id="sb-output" style="flex:1;min-height:300px;">
+        <div style="color:var(--muted);text-align:center;padding:40px 20px;font-size:13px;">Type a message and click Send to begin the conversation.</div>
+      </div>
+      <div class="sb-input-row">
+        <textarea class="sb-text-input" id="sb-text-input" placeholder="Type a message as the lead..." rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sbSend();}"></textarea>
+        <button class="btn pri" onclick="sbSend()">Send</button>
+      </div>
+      <div id="sb-metadata" style="display:none;margin-top:8px;padding:9px;background:var(--surface2);border-radius:6px;font-size:10px;font-family:'JetBrains Mono';color:var(--muted);"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ====== SETTINGS ====== -->
+<div class="tab-content" id="tab-settings">
+  <div class="settings-grid">
+    <div class="settings-nav">
+      <div class="sn-section">Configuration</div>
+      <div class="sn-item active" onclick="switchSettings(this,'st-subaccounts')">Subaccounts</div>
+      <div class="sn-item" onclick="switchSettings(this,'st-ai')">Claude AI</div>
+      <div class="sn-item" onclick="switchSettings(this,'st-kb')">Knowledge Base</div>
+      <div class="sn-item" onclick="switchSettings(this,'st-prompt')">System Prompt</div>
+      <div class="sn-item" onclick="switchSettings(this,'st-instructions')">Bot Instructions</div>
+      <div class="sn-section">System</div>
+      <div class="sn-item" onclick="switchSettings(this,'st-webhooks')">Webhooks</div>
+      <div class="sn-item" onclick="switchSettings(this,'st-notifications')">Notifications</div>
+    </div>
+    <div class="settings-content">
+      <!-- Subaccounts -->
+      <div class="settings-panel active" id="st-subaccounts">
+        <div class="sh"><span class="sh-title">Subaccount Configuration</span><div class="sh-line"></div><button class="btn pri" onclick="showAddSubaccount()">+ Add Subaccount</button></div>
+        <div id="add-sub-form" style="display:none;margin-bottom:14px;" class="sub-cfg-row">
+          <div class="sub-cfg-fields">
+            <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="new-sub-name"></div>
+            <div class="form-group"><label class="form-label">GHL Location ID</label><input class="form-input" id="new-sub-loc"></div>
+            <div class="form-group"><label class="form-label">GHL API Key</label><input class="form-input" id="new-sub-key" type="password"></div>
+            <div class="form-group"><label class="form-label">Status</label><select class="form-input" id="new-sub-status"><option value="active">Active</option><option value="paused">Paused</option></select></div>
+          </div>
+          <div style="display:flex;gap:7px;margin-top:9px;"><button class="btn pri" onclick="createSubaccount()">Save</button><button class="btn" onclick="document.getElementById('add-sub-form').style.display='none'">Cancel</button></div>
+        </div>
+        <div id="sub-cfg-list"></div>
+      </div>
+      <!-- Claude AI -->
+      <div class="settings-panel" id="st-ai">
+        <div class="sh"><span class="sh-title">Claude AI Settings</span><div class="sh-line"></div></div>
+        <div class="form-group"><label class="form-label">Model</label><input class="form-input" id="set-ai-model" value=""></div>
+        <div class="form-group"><label class="form-label">Max Tokens</label><input class="form-input" id="set-ai-max-tokens" type="number" value=""></div>
+        <div class="form-group"><label class="form-label">Temperature (0-1)</label><input class="form-input" id="set-ai-temperature" type="number" step="0.1" min="0" max="1" value=""></div>
+        <button class="btn pri" onclick="saveSettings('claude_config',{model:document.getElementById('set-ai-model').value,max_tokens:parseInt(document.getElementById('set-ai-max-tokens').value),temperature:parseFloat(document.getElementById('set-ai-temperature').value)})">Save AI Settings</button>
+      </div>
+      <!-- Knowledge Base -->
+      <div class="settings-panel" id="st-kb">
+        <div class="sh"><span class="sh-title">Knowledge Base</span><div class="sh-line"></div></div>
+        <div class="form-group"><label class="form-label">Knowledge Base Content</label><textarea class="kb-textarea" id="set-kb-content" rows="16"></textarea></div>
+        <button class="btn pri" onclick="saveSettings('knowledge_base',{content:document.getElementById('set-kb-content').value})">Save Knowledge Base</button>
+      </div>
+      <!-- System Prompt -->
+      <div class="settings-panel" id="st-prompt">
+        <div class="sh"><span class="sh-title">System Prompt</span><div class="sh-line"></div></div>
+        <div class="form-group"><label class="form-label">System Prompt (sent with every conversation)</label><textarea class="kb-textarea" id="set-prompt-content" rows="18"></textarea></div>
+        <button class="btn pri" onclick="saveSettings('system_prompt',{base_prompt_override:document.getElementById('set-prompt-content').value})">Save System Prompt</button>
+      </div>
+      <!-- Bot Instructions -->
+      <div class="settings-panel" id="st-instructions">
+        <div class="sh"><span class="sh-title">Bot Instructions</span><div class="sh-line"></div></div>
+        <div class="form-group"><label class="form-label">Custom Instructions</label><textarea class="kb-textarea" id="set-instructions-content" rows="14"></textarea></div>
+        <button class="btn pri" onclick="saveSettings('bot_instructions',{custom_instructions:document.getElementById('set-instructions-content').value})">Save Instructions</button>
+      </div>
+      <!-- Webhooks -->
+      <div class="settings-panel" id="st-webhooks">
+        <div class="sh"><span class="sh-title">Webhooks</span><div class="sh-line"></div></div>
+        <div id="webhooks-fields"></div>
+        <button class="btn pri" onclick="saveWebhooks()" style="margin-top:12px;">Save Webhooks</button>
+      </div>
+      <!-- Notifications -->
+      <div class="settings-panel" id="st-notifications">
+        <div class="sh"><span class="sh-title">Notification Settings</span><div class="sh-line"></div></div>
+        <div id="notifications-fields"></div>
+        <button class="btn pri" onclick="saveNotifications()" style="margin-top:12px;">Save Notifications</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ====== DEV NOTES ====== -->
+<div class="tab-content" id="tab-devnotes">
+  <div class="devnotes-body">
+    <h1>Developer Calculation Logic &amp; Architecture Notes</h1>
+    <p>This page documents every metric shown in the dashboard, how it should be calculated, data sources, and implementation notes. All calculations assume data is pulled from GHL webhooks + AI conversation logs stored in your database.</p>
+
+    <h2>1. SMS Delivery &amp; Response Metrics</h2>
+    <h3>1.1 SMS Delivery Rate</h3>
+    <div class="formula">Delivery Rate = (Messages Successfully Delivered / Messages Sent) x 100</div>
+    <p>Source: Carrier delivery receipts via GHL webhook. Track <code>status: "delivered"</code> vs <code>status: "failed"</code> / <code>"undelivered"</code>. Group by subaccount_id and timeframe. Update every 15 minutes.</p>
+
+    <h3>1.2 SMS Response Rate</h3>
+    <div class="formula">Response Rate = (Unique Leads Who Replied / Messages Delivered) x 100</div>
+    <p>Only count first reply per lead per campaign window. Exclude STOP/OPTOUT from response count (those go to Opt-Out Rate).</p>
+
+    <h3>1.3 Bookings Per 100 Leads Engaged</h3>
+    <div class="formula">Bookings / 100 = (Appointments Booked / Leads Who Received at least 1 Message) x 100</div>
+    <p>"Engaged" = lead received at least 1 outbound message in the timeframe window. Appointment booked = GHL calendar event created with status confirmed.</p>
+
+    <h2>2. Opt-Out, DNC &amp; Compliance</h2>
+    <h3>2.1 Opt-Out Rate</h3>
+    <div class="formula">Opt-Out Rate = (Opt-Out Responses / Messages Delivered) x 100</div>
+    <p>Opt-out keywords: STOP, UNSUBSCRIBE, CANCEL, END, QUIT (case-insensitive).</p>
+    <div class="note">NOTE: A response that is ONLY an opt-out keyword should NOT count toward the positive Response Rate. Separate field: <code>opt_out_as_only_response</code> tracked per lead.</div>
+
+    <h3>2.2 DNC Rate</h3>
+    <div class="formula">DNC Rate = (Leads Flagged DNC / Total Leads Messaged) x 100</div>
+    <p>DNC flags come from: (a) explicit STOP reply, (b) manual DNC flag in GHL contact, (c) federal/state DNC list match.</p>
+
+    <h2>3. AI Accuracy Scoring</h2>
+    <h3>3.1 Composite Score Formula</h3>
+    <div class="formula">AI Accuracy % = (QC Manual Score x 0.70) + (AI Self-Score x 0.30)</div>
+    <p><strong>QC Manual Score:</strong> Each conversation reviewed in QC Portal is marked Approved (100pts), Modified (60pts), or Failed (0pts). Average across all reviewed conversations in the rolling 7-day window.</p>
+    <p><strong>AI Self-Score:</strong> After each conversation closes, run a secondary Claude analysis prompt. Average those scores across all conversations in the window.</p>
+
+    <h3>3.2 Good / OK / Wrong Breakdown</h3>
+    <div class="formula">Good: AI Self-Score &gt;= 80 AND not failed in QC<br>OK: AI Self-Score 50-79 OR modified in QC<br>Wrong: AI Self-Score &lt; 50 OR failed in QC</div>
+    <div class="warn">IMPORTANT: Manual QC overrides AI self-score. If a message is manually failed in QC, it is classified as "Wrong" regardless of AI self-score.</div>
+
+    <h2>4. Time Saved Calculations</h2>
+    <h3>4.1 SMS Responded To</h3>
+    <div class="formula">Time Saved = (Total Outbound SMS Sent + Total Inbound Replies Handled by AI) x 100 seconds / 3600</div>
+    <p>Rationale: 100 seconds = estimated time for a human agent to read, compose, personalize, and send one SMS reply.</p>
+
+    <h3>4.2 Bulk Campaigns Scheduled &amp; Sent</h3>
+    <div class="formula">Time Saved = Number of Campaigns Scheduled x 8 minutes per campaign / 60</div>
+
+    <h3>4.3 Phone Calls</h3>
+    <div class="formula">Call Time Saved = Calls Routed by AI (not escalated) x 2 minutes / 60</div>
+
+    <h3>4.4 Admin (Per Contact)</h3>
+    <div class="formula">Admin Saved = Total Contacts Engaged x 15 seconds / 3600</div>
+
+    <h2>5. Cost Metrics</h2>
+    <h3>5.1 AI Token Cost</h3>
+    <div class="formula">Token Cost = (Input Tokens x Input Rate) + (Output Tokens x Output Rate)</div>
+    <p>Pull token usage from Anthropic API response headers. Store per conversation_id. Aggregate by subaccount + timeframe.</p>
+
+    <h3>5.2 SMS Carrier Cost</h3>
+    <div class="formula">Carrier Cost = Segments Sent x $0.0075 per segment</div>
+
+    <h3>5.3 Cost Per Message (Blended)</h3>
+    <div class="formula">Cost Per Message = (Total AI Cost + Total Carrier Cost) / Total Messages Sent</div>
+
+    <h3>5.4 Avg Segments Per Message</h3>
+    <div class="formula">Avg Segments = Sum of All Segment Counts / Total Messages Sent</div>
+    <div class="note">Alert threshold: if avg segments &gt; 1.6, flag for review.</div>
+
+    <h2>6. Pipeline Stage Logic</h2>
+    <p>Pipeline stages are defined in GHL as custom pipeline stages. Each lead has a <code>pipeline_stage_id</code>. Refresh every 30 minutes.</p>
+    <div class="formula">Pipeline Stages (in order):
+1. Raw Lead / Uncontacted
+2. AI Outreach Initiated
+3. First Response Received
+4. Engaged -- Qualifying
+5. Needs Identified
+6. Quote / Presentation Sent
+7. Appointment Scheduled
+8. Appointment Confirmed
+9. Appointment Completed
+10. Application Started
+11. Application Submitted
+12. Pending Underwriting
+13. Policy Issued
+14. Cross-Sell Pipeline
+15. Long-Term Nurture
+16. Aged -- Re-Engage Queue
+17. Disqualified
+18. DNC / STOP Received
+19. Lost -- No Response</div>
+
+    <h2>7. 8-Week Rolling Average</h2>
+    <div class="formula">Rolling Avg (Week N) = (Qualified Leads in Week N / Total Leads Engaged in Week N) x 100</div>
+    <p>Run this calculation independently for fresh and aged leads. Recalculate each Monday at midnight.</p>
+
+    <h2>8. Wordtrack / Message Performance</h2>
+    <p>Each message sent must carry a <code>message_id</code> and <code>message_version</code> in metadata.</p>
+    <ul>
+      <li>Response Rate: replies to that specific message / times that message was sent</li>
+      <li>Opt-Out Rate: opt-out replies to that message / sends</li>
+      <li>Booking Rate: conversations where that message was last sent before a booking occurred / sends</li>
+      <li>Transfer Rate: same but for live transfer outcome</li>
+    </ul>
+
+    <h2>9. Response Outcome Categories</h2>
+    <ul>
+      <li><strong>Booked:</strong> conversation ended with GHL appointment created</li>
+      <li><strong>Live Transfer:</strong> conversation ended with transfer flag set</li>
+      <li><strong>Opted Out:</strong> STOP/UNSUBSCRIBE received</li>
+      <li><strong>No Action (Fluff):</strong> responded but no qualifying progress</li>
+      <li><strong>Pending:</strong> conversation is open, awaiting reply</li>
+      <li><strong>No Response:</strong> no reply within 72-hour window</li>
+    </ul>
+
+    <h2>10. Sandbox Mode Architecture</h2>
+    <p>Manual mode: human types replies, system sends to production Claude endpoint. All sandbox conversations are tagged <code>environment: "sandbox"</code> and do NOT affect production metrics.</p>
+
+    <h2>11. Random Conversation Pull (QC)</h2>
+    <div class="formula">Pull Random: SELECT conversation_id FROM conversations WHERE status = 'closed' AND qc_reviewed = false ORDER BY RANDOM() LIMIT 1</div>
+    <p>Pull from last 14 days. Weight toward conversations with AI confidence score &lt; 70.</p>
+
+    <div class="note" style="margin-top:24px;">This document should be version-controlled. Treat it as the source of truth for all metric definitions.</div>
+  </div>
+</div>
+
+<!-- ====== LOGS ====== -->
+<div class="tab-content" id="tab-logs">
+  <div class="frow">
+    <input class="finput" id="log-filter" placeholder="Filter by contact_id..." style="min-width:230px;">
+    <button class="btn pri" onclick="loadLogs()">Refresh</button>
+    <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" id="log-auto" checked style="accent-color:var(--cyan);"> Auto-refresh (3s)
+    </label>
+    <select class="fsel" id="log-limit">
+      <option value="50">50 entries</option>
+      <option value="100">100 entries</option>
+      <option value="200" selected>200 entries</option>
+    </select>
+  </div>
+  <div id="log-list">
+    <div style="color:var(--muted);text-align:center;padding:60px 20px;font-size:14px;">No logs yet. Trigger a webhook to see activity.</div>
+  </div>
+</div>
+
+</main>
+
+<script>
+// ========== STATE ==========
+let subaccounts = [];
+let selectedLocationId = '';
+let currentTab = 'tab-dashboard';
+let chartInstances = {};
+let logInterval = null;
+let selectedQcConvId = null;
+let logExpandedIds = {};
+
+function getDays() { return document.getElementById('tf-global').value; }
+
+// ========== TOAST ==========
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 3500);
+}
+
+// ========== FETCH HELPER ==========
+async function api(url, opts) {
+  try {
+    const res = await fetch(url, opts);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.json();
+  } catch (e) {
+    console.error('API Error:', url, e);
+    return null;
+  }
+}
+
+// ========== ACCOUNT PICKER ==========
+async function loadSubaccounts() {
+  const data = await api('/api/subaccounts');
+  if (!data) return;
+  subaccounts = data.subaccounts || [];
+  updateAcctDisplay();
+}
+
+function updateAcctDisplay() {
+  const nd = document.getElementById('acct-name-disp');
+  const id = document.getElementById('acct-id-disp');
+  if (!selectedLocationId) {
+    nd.textContent = 'All Subaccounts (' + subaccounts.length + ')';
+    id.textContent = 'Showing all data';
+  } else {
+    const sa = subaccounts.find(s => s.ghl_location_id === selectedLocationId);
+    nd.textContent = sa ? sa.name : selectedLocationId;
+    id.textContent = selectedLocationId;
+  }
+}
+
+function renderAcctList(filter) {
+  const el = document.getElementById('acct-list-el');
+  el.innerHTML = '';
+  const f = (filter || '').toLowerCase();
+  const items = [{ghl_location_id: '', name: 'All Subaccounts'}].concat(subaccounts);
+  items.filter(a => !f || a.name.toLowerCase().includes(f) || (a.ghl_location_id || '').includes(f)).forEach(a => {
+    const d = document.createElement('div');
+    d.className = 'acct-item' + (selectedLocationId === a.ghl_location_id ? ' selected' : '');
+    d.innerHTML = '<div class="chk">' + (selectedLocationId === a.ghl_location_id ? '&#10003;' : '') + '</div><div><div class="acct-name" style="font-size:13px;">' + a.name + '</div>' + (a.ghl_location_id ? '<div class="acct-id">' + a.ghl_location_id + '</div>' : '') + '</div>';
+    d.onclick = () => { selectedLocationId = a.ghl_location_id; renderAcctList(filter); };
+    el.appendChild(d);
+  });
+}
+
+function toggleDrop() {
+  const dd = document.getElementById('acct-drop');
+  const ch = document.getElementById('acct-chev');
+  dd.classList.toggle('open');
+  ch.style.transform = dd.classList.contains('open') ? 'rotate(180deg)' : '';
+  if (dd.classList.contains('open')) renderAcctList();
+}
+
+function filterAccts(v) { renderAcctList(v); }
+function selAll() { selectedLocationId = ''; renderAcctList(); }
+function clrAll() { selectedLocationId = ''; renderAcctList(); }
+
+function applyAccts() {
+  document.getElementById('acct-drop').classList.remove('open');
+  document.getElementById('acct-chev').style.transform = '';
+  updateAcctDisplay();
+  loadCurrentTab();
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.acct-select-wrap')) {
+    document.getElementById('acct-drop').classList.remove('open');
+    document.getElementById('acct-chev').style.transform = '';
+  }
+});
+
+function onTimeframeChange() { loadCurrentTab(); }
+
+// ========== NAVIGATION ==========
+function goTab(id) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => {
+    n.classList.toggle('active', n.dataset.tab === id);
+  });
+  const prev = currentTab;
+  currentTab = id;
+  if (prev === 'tab-logs') stopLogRefresh();
+  loadCurrentTab();
+}
+
+function loadCurrentTab() {
+  switch (currentTab) {
+    case 'tab-dashboard': loadDashboard(); break;
+    case 'tab-wordtracks': loadWordtracks(); break;
+    case 'tab-pipeline': loadPipeline(); break;
+    case 'tab-qc': loadQC(); break;
+    case 'tab-review': loadReviewQueue(); break;
+    case 'tab-logs': loadLogs(); startLogRefresh(); break;
+    case 'tab-settings': loadSettingsData(); break;
+  }
+}
+
+// ========== DASHBOARD ==========
+async function loadDashboard() {
+  const params = new URLSearchParams({ days: getDays() });
+  if (selectedLocationId) params.set('location_id', selectedLocationId);
+  const data = await api('/api/dashboard?' + params);
+  if (!data) return;
+  const k = data.kpis || {};
+
+  // KPI Row 1
+  const row1 = document.getElementById('kpi-row1');
+  row1.innerHTML = kpiCard('Response Rate', fmtPct(k.response_rate), '', '') +
+    kpiCard('SMS Response Rate', fmtPct(k.response_rate), '', 'g') +
+    kpiCard('Bookings / 100', fmtNum(k.appointment_rate ? (k.appointment_rate * 100).toFixed(1) : 0), '', 'a') +
+    kpiCard('Opt-Out Rate', fmtPct(k.opt_out_rate), '', 'r') +
+    kpiCard('DNC Rate', fmtNum(k.dnc_count), 'Total DNC contacts', 'p');
+
+  // KPI Row 2
+  const row2 = document.getElementById('kpi-row2');
+  row2.innerHTML = kpiCard('Appts Booked', fmtNum(k.appointments_booked), getDays() + 'd', 'g') +
+    kpiCard('Live Transfers', fmtNum(k.human_handoffs), '', 'a') +
+    kpiCard('Msgs to Resolution', fmtNum(k.avg_messages_per_conversation, 1), 'Avg per conversation', '') +
+    kpiCard('AI Accuracy (QC)', '---', 'Placeholder', 'p') +
+    kpiCard('Time Saved', fmtNum(k.hours_saved, 0) + ' hrs', 'This period', 'g', true);
+
+  // Cost cards
+  const costEl = document.getElementById('cost-cards');
+  costEl.innerHTML =
+    '<div class="card"><div class="card-title">AI Token Cost</div><div class="card-value">$' + fmtNum(k.ai_cost, 2) + '</div><div class="card-sub">Input: ' + fmtNum(k.total_input_tokens) + ' / Output: ' + fmtNum(k.total_output_tokens) + ' tokens</div></div>' +
+    '<div class="card"><div class="card-title">Carrier Cost</div><div class="card-value">$' + fmtNum(k.carrier_cost, 2) + '</div><div class="card-sub">' + fmtNum(k.total_segments) + ' segments</div></div>' +
+    '<div class="card"><div class="card-title">Cost Per Message</div><div class="card-value">' + fmtNum(k.cost_per_message, 4) + 'c</div><div class="card-sub">Blended AI + carrier</div></div>';
+
+  // Trends chart
+  if (data.trends && data.trends.length) {
+    renderTrendsChart(data.trends);
+  }
+
+  // Response outcome doughnut
+  if (data.response_outcomes && data.response_outcomes.length) {
+    renderOutcomeChart(data.response_outcomes);
+  }
+
+  // Per-subaccount table
+  const tbody = document.getElementById('subaccount-tbody');
+  tbody.innerHTML = '';
+  (data.per_subaccount || []).forEach(s => {
+    tbody.innerHTML += '<tr><td><span class="hl">' + esc(s.subaccount_name || s.location_id || 'Unknown') + '</span></td>' +
+      '<td>' + fmtNum(s.total_conversations) + '</td>' +
+      '<td>' + fmtNum(s.appointments_booked) + '</td>' +
+      '<td>' + fmtNum(s.human_handoffs) + '</td>' +
+      '<td>' + fmtNum(s.dnc_count) + '</td>' +
+      '<td>' + fmtPct(s.opt_out_rate) + '</td>' +
+      '<td>' + fmtNum(s.avg_messages_per_conversation, 1) + '</td></tr>';
+  });
+}
+
+function kpiCard(title, value, sub, color, small) {
+  return '<div class="card kpi-l ' + (color || '') + '"><div class="card-title">' + title + '</div><div class="card-value' + (small ? ' sm' : '') + '">' + value + '</div>' + (sub ? '<div class="card-sub">' + sub + '</div>' : '') + '</div>';
+}
+
+function renderTrendsChart(trends) {
+  const labels = trends.map(t => t.date ? t.date.slice(5) : '');
+  const started = trends.map(t => t.conversations_started || 0);
+  const booked = trends.map(t => t.booked || 0);
+  const dnc = trends.map(t => t.dnc || 0);
+
+  if (chartInstances.trends) chartInstances.trends.destroy();
+  chartInstances.trends = new Chart(document.getElementById('ch-trends'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Started', data: started, borderColor: '#00d4ff', borderWidth: 1.5, pointRadius: 0, tension: .4 },
+        { label: 'Booked', data: booked, borderColor: '#10d98a', borderWidth: 1.5, pointRadius: 0, tension: .4 },
+        { label: 'DNC', data: dnc, borderColor: '#ff4560', borderWidth: 1.5, pointRadius: 0, tension: .4 }
+      ]
+    },
+    options: chartOpts()
+  });
+}
+
+function renderOutcomeChart(outcomes) {
+  const labels = outcomes.map(o => o.outcome || o.terminal_outcome || 'Unknown');
+  const vals = outcomes.map(o => o.count || 0);
+  const colors = ['#10d98a', '#f59e0b', '#ff4560', '#4a6580', '#3b82f6', '#1c2a3a', '#a78bfa', '#00d4ff'];
+
+  if (chartInstances.outcome) chartInstances.outcome.destroy();
+  chartInstances.outcome = new Chart(document.getElementById('ch-resp-outcome'), {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: vals, backgroundColor: colors.slice(0, labels.length), borderWidth: 0, hoverOffset: 6 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#4a6580', font: { family: 'JetBrains Mono', size: 9 }, boxWidth: 10 } } } }
+  });
+}
+
+function chartOpts() {
+  return {
+    responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { labels: { color: '#4a6580', font: { family: 'JetBrains Mono', size: 9 }, boxWidth: 10 } } },
+    scales: {
+      x: { grid: { color: '#1c2a3a' }, ticks: { color: '#4a6580', font: { family: 'JetBrains Mono', size: 8 } } },
+      y: { grid: { color: '#1c2a3a' }, ticks: { color: '#4a6580', font: { family: 'JetBrains Mono', size: 8 } } }
+    }
+  };
+}
+
+// ========== WORDTRACKS ==========
+async function loadWordtracks() {
+  const sortBy = document.getElementById('wt-sort').value;
+  const sortDir = document.getElementById('wt-dir').value;
+  const params = new URLSearchParams({ days: getDays(), sort_by: sortBy, sort_dir: sortDir });
+  const data = await api('/api/wordtracks?' + params);
+  if (!data) return;
+
+  const el = document.getElementById('wt-list');
+  el.innerHTML = '';
+  (data.wordtracks || []).forEach(w => {
+    const rr = parseFloat(w.reply_rate) || 0;
+    const oor = parseFloat(w.opt_out_rate) || 0;
+    const br = parseFloat(w.booking_rate) || 0;
+    const tr = parseFloat(w.transfer_rate) || 0;
+    el.innerHTML += '<div class="wt-row">' +
+      '<div class="wt-meta"><span class="pill c">' + esc(w.message_type) + '</span><span style="font-size:11px;color:var(--muted);">' + fmtNum(w.total_sent) + ' sent</span></div>' +
+      '<div class="wt-stats">' +
+        '<div class="wt-stat"><div class="v" style="color:var(--cyan)">' + fmtPct2(rr) + '</div><div class="l">Reply Rate</div></div>' +
+        '<div class="wt-stat"><div class="v" style="color:' + (oor > 3.5 ? 'var(--red)' : oor > 2.5 ? 'var(--amber)' : 'var(--green)') + '">' + fmtPct2(oor) + '</div><div class="l">Opt-Out</div></div>' +
+        '<div class="wt-stat"><div class="v" style="color:var(--green)">' + fmtPct2(br) + '</div><div class="l">Booking</div></div>' +
+        '<div class="wt-stat"><div class="v" style="color:var(--amber)">' + fmtPct2(tr) + '</div><div class="l">Transfer</div></div>' +
+        '<div class="wt-stat"><div class="v" style="color:var(--muted)">' + (w.avg_reply_time || '---') + '</div><div class="l">Avg Reply</div></div>' +
+      '</div></div>';
+  });
+  if (!el.innerHTML) el.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;">No wordtrack data available.</div>';
+}
+
+// ========== PIPELINE ==========
+async function loadPipeline() {
+  const params = new URLSearchParams({ days: getDays() });
+  const data = await api('/api/pipeline?' + params);
+  if (!data) return;
+
+  const stages = data.stages || [];
+  const stagesEl = document.getElementById('pipe-stages-el');
+  const max = Math.max(...stages.map(s => s.total || 0), 1);
+  const colorMap = { lead: 'var(--cyan)', engaged: 'var(--green)', qualified: 'var(--green)', booked: 'var(--green)', nurture: 'var(--amber)', dnc: 'var(--red)', default: 'var(--cyan)' };
+
+  stagesEl.innerHTML = stages.map(s => {
+    const pct = ((s.total / max) * 100).toFixed(1);
+    return '<div class="pipe-stage"><div class="pipe-name" style="font-size:12px;">' + esc(s.contact_stage) + '</div>' +
+      '<div class="pipe-bar"><div class="pb-wrap"><div class="pb" style="width:' + pct + '%;"></div></div></div>' +
+      '<div class="pipe-count">' + fmtNum(s.total) + '</div>' +
+      '<div class="pipe-pct">' + Math.round((s.total / max) * 100) + '%</div></div>';
+  }).join('');
+
+  // Pipeline table
+  const tbody = document.getElementById('pipe-tbody');
+  tbody.innerHTML = stages.map(s =>
+    '<tr><td>' + esc(s.contact_stage) + '</td><td>' + fmtNum(s.total) + '</td><td>' + fmtNum(s.active) + '</td><td>' + fmtNum(s.booked) + '</td><td>' + fmtNum(s.handoff) + '</td><td>' + fmtNum(s.dnc) + '</td></tr>'
+  ).join('');
+
+  // Pipeline chart
+  if (stages.length) {
+    if (chartInstances.pipeline) chartInstances.pipeline.destroy();
+    chartInstances.pipeline = new Chart(document.getElementById('ch-pipeline'), {
+      type: 'bar',
+      data: {
+        labels: stages.map(s => s.contact_stage.length > 22 ? s.contact_stage.substring(0, 22) + '...' : s.contact_stage),
+        datasets: [{ data: stages.map(s => s.total), backgroundColor: 'rgba(0,212,255,.6)', borderWidth: 0, borderRadius: 3 }]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: '#1c2a3a' }, ticks: { color: '#4a6580', font: { family: 'JetBrains Mono', size: 8 } } },
+          y: { grid: { display: false }, ticks: { color: '#c8d8e8', font: { family: 'Rajdhani', size: 10 } } }
+        }
+      }
+    });
+  }
+}
+
+// ========== QC PORTAL ==========
+async function loadQC() {
+  // Load stats
+  const stats = await api('/api/qc/stats');
+  if (stats) {
+    const card = document.getElementById('qc-stats-card');
+    card.innerHTML =
+      '<div style="text-align:center;"><div style="font-size:19px;font-weight:700;color:var(--amber);">' + fmtNum(stats.pending) + '</div><div style="font-size:9px;color:var(--muted);">Pending</div></div>' +
+      '<div style="text-align:center;"><div style="font-size:19px;font-weight:700;color:var(--green);">' + fmtNum(stats.approved) + '</div><div style="font-size:9px;color:var(--muted);">Approved</div></div>' +
+      '<div style="text-align:center;"><div style="font-size:19px;font-weight:700;color:var(--red);">' + fmtNum(stats.failed) + '</div><div style="font-size:9px;color:var(--muted);">Failed</div></div>' +
+      '<div style="text-align:center;"><div style="font-size:19px;font-weight:700;color:var(--cyan);">' + fmtNum(stats.modified) + '</div><div style="font-size:9px;color:var(--muted);">Modified</div></div>';
+    document.getElementById('qc-accuracy-display').innerHTML = 'Accuracy: <strong style="color:var(--green);">' + fmtPct(stats.accuracy) + '</strong>';
+    const badge = document.getElementById('nav-qc-badge');
+    if (stats.pending > 0) { badge.textContent = stats.pending; } else { badge.textContent = ''; }
+  }
+
+  // Load pending conversations
+  const data = await api('/api/qc/pending?page=1&limit=20');
+  if (!data) return;
+  const list = document.getElementById('qc-conv-list');
+  list.innerHTML = '';
+  document.getElementById('qc-list-header').textContent = 'Pending Review (' + (data.total || 0) + ')';
+  (data.conversations || []).forEach(c => {
+    const item = document.createElement('div');
+    item.className = 'conv-item';
+    item.innerHTML = '<div class="ci-name">' + esc(c.first_name || '') + ' ' + esc(c.last_name || '') + ' -- ' + esc(c.subaccount_name || c.product_type || '') + '</div>' +
+      '<div class="ci-meta">' + fmtNum(c.message_count) + ' msgs' + (c.terminal_outcome ? ' -- ' + c.terminal_outcome : '') + '</div>';
+    item.onclick = () => {
+      list.querySelectorAll('.conv-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+      loadConversation(c.id, c);
+    };
+    list.appendChild(item);
+  });
+}
+
+async function loadConversation(id, convMeta) {
+  selectedQcConvId = id;
+  const data = await api('/api/conversations/' + id + '/full');
+  if (!data) return;
+  const conv = data.conversation || convMeta || {};
+  document.getElementById('qc-lead-name').textContent = (conv.first_name || '') + ' ' + (conv.last_name || '');
+  document.getElementById('qc-lead-meta').textContent = (conv.product_type || '') + ' -- ' + fmtNum(conv.message_count) + ' msgs' + (conv.terminal_outcome ? ' -- ' + conv.terminal_outcome : '');
+
+  const msgsEl = document.getElementById('qc-messages');
+  msgsEl.innerHTML = '';
+  (data.messages || []).forEach(m => {
+    const d = document.createElement('div');
+    const isBot = m.direction === 'outbound';
+    d.className = 'bubble ' + (isBot ? 'bot' : 'lead');
+    const lbl = isBot ? 'AI Bot' + (m.message_type ? ' -- ' + m.message_type : '') : 'Lead';
+    d.innerHTML = '<div class="bubble-lbl">' + lbl + '</div>' + esc(m.content || '');
+    msgsEl.appendChild(d);
+  });
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+}
+
+async function qcAction(outcome) {
+  if (!selectedQcConvId) { toast('Select a conversation first.'); return; }
+  const body = { conversation_id: selectedQcConvId, reviewer: 'admin', outcome };
+  if (outcome === 'modified') {
+    const modText = document.getElementById('qc-edit-input').value.trim();
+    if (!modText) { toast('Enter a corrected response to save.'); return; }
+    body.modified_response = modText;
+  }
+  const res = await api('/api/qc/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (res) {
+    toast('QC review submitted: ' + outcome);
+    document.getElementById('qc-edit-input').value = '';
+    loadQC();
+  } else {
+    toast('Failed to submit QC review.');
+  }
+}
+
+async function pullRandomConv() {
+  const data = await api('/api/qc/pull-random', { method: 'POST' });
+  if (!data || !data.conversation) { toast('No random conversation available.'); return; }
+  selectedQcConvId = data.conversation.id;
+  const conv = data.conversation;
+  document.getElementById('qc-lead-name').textContent = (conv.first_name || '') + ' ' + (conv.last_name || '');
+  document.getElementById('qc-lead-meta').textContent = 'Random pull -- ' + (conv.product_type || '');
+
+  const msgsEl = document.getElementById('qc-messages');
+  msgsEl.innerHTML = '';
+  (data.messages || []).forEach(m => {
+    const d = document.createElement('div');
+    const isBot = m.direction === 'outbound';
+    d.className = 'bubble ' + (isBot ? 'bot' : 'lead');
+    d.innerHTML = '<div class="bubble-lbl">' + (isBot ? 'AI Bot' : 'Lead') + '</div>' + esc(m.content || '');
+    msgsEl.appendChild(d);
+  });
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+  toast('Random conversation pulled: ' + (conv.first_name || 'Unknown'));
+}
+
+// ========== AI REVIEW QUEUE ==========
+async function loadReviewQueue() {
+  const data = await api('/api/review-queue?status=pending');
+  if (!data) return;
+  const items = data.items || [];
+  const badge = document.getElementById('nav-review-badge');
+  badge.textContent = items.length > 0 ? items.length : '';
+  document.getElementById('review-banner-text').textContent = items.length + ' messages pending review. Approving updates the AI prompt or creates a developer task.';
+
+  const el = document.getElementById('review-list');
+  el.innerHTML = '';
+  items.forEach(item => {
+    const originClass = item.origin === 'workflow' ? 'origin-wf' : 'origin-ai';
+    const originLabel = item.origin === 'workflow' ? 'WORKFLOW' : 'AI-GENERATED';
+    el.innerHTML += '<div class="rv-item" id="rv-' + item.id + '">' +
+      '<div class="rv-header"><span class="pill c">' + esc(item.message_type || 'Message') + '</span>' +
+        '<span class="origin-tag ' + originClass + '">' + originLabel + '</span>' +
+        (item.ai_confidence ? '<span style="margin-left:auto;font-size:11px;color:var(--muted);">AI Confidence: ' + item.ai_confidence + '%</span>' : '') +
+      '</div>' +
+      (item.ai_reason ? '<div class="rv-reason" style="margin-top:0;margin-bottom:9px;">AI Reason: ' + esc(item.ai_reason) + '</div>' : '') +
+      '<div class="rv-body">' +
+        '<div class="rv-block"><div class="rv-block-lbl">Current</div><div class="rv-block-txt">' + esc(item.current_text || '') + '</div></div>' +
+        '<div class="rv-block"><div class="rv-block-lbl" style="color:var(--green);">Proposed</div><div class="rv-block-txt" style="color:var(--green);">' + esc(item.proposed_text || '') + '</div></div>' +
+      '</div>' +
+      '<div class="rv-acts">' +
+        '<button class="btn grn" onclick="reviewAction(' + item.id + ',\'approve\')">Approve</button>' +
+        '<button class="btn dan" onclick="reviewAction(' + item.id + ',\'deny\')">Deny</button>' +
+      '</div></div>';
+  });
+  if (!items.length) el.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;">No pending review items.</div>';
+}
+
+async function reviewAction(id, action) {
+  const res = await api('/api/review-queue/' + id + '/action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, reviewed_by: 'admin' })
+  });
+  if (res) {
+    toast('Review item ' + action + 'd successfully.');
+    const el = document.getElementById('rv-' + id);
+    if (el) el.style.opacity = '0.4';
+    setTimeout(() => loadReviewQueue(), 500);
+  } else {
+    toast('Failed to submit review action.');
+  }
+}
+
+// ========== SANDBOX ==========
+let sbMessages = [];
+
+function getSbVars() {
+  return {
+    first_name: document.getElementById('sb-first_name').value,
+    state: document.getElementById('sb-state').value,
+    offer: document.getElementById('sb-offer').value,
+    tags: document.getElementById('sb-tags').value,
+    bot_name: document.getElementById('sb-bot_name').value,
+    agent_name: document.getElementById('sb-agent_name').value,
+    contact_stage: document.getElementById('sb-contact_stage').value,
+    existing_age: document.getElementById('sb-existing_age').value,
+    existing_smoker: document.getElementById('sb-existing_smoker').value,
+    existing_health: document.getElementById('sb-existing_health').value
+  };
+}
+
+async function sbSend() {
+  const text = document.getElementById('sb-text-input').value.trim();
+  if (!text) return;
+  document.getElementById('sb-text-input').value = '';
+
+  const out = document.getElementById('sb-output');
+  // Clear placeholder if first message
+  if (sbMessages.length === 0) out.innerHTML = '';
+
+  sbMessages.push({ role: 'user', text });
+  addBubble(out, 'lead', 'You (Lead)', text);
+
+  // Show typing indicator
+  const typing = document.createElement('div');
+  typing.className = 'bubble bot';
+  typing.innerHTML = '<div class="bubble-lbl">AI Bot</div><span class="loading-spinner"></span> Thinking...';
+  out.appendChild(typing);
+  out.scrollTop = out.scrollHeight;
+
+  try {
+    const resp = await fetch('/sandbox/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ variables: getSbVars(), message: text })
+    });
+    const data = await resp.json();
+    out.removeChild(typing);
+
+    if (data.error) {
+      addBubble(out, 'bot', 'Error', data.error);
+      return;
     }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-  </script>
+    (data.messages || []).forEach(m => {
+      sbMessages.push({ role: 'bot', text: m });
+      addBubble(out, 'bot', 'AI Bot' + (data.message_type ? ' -- ' + data.message_type : ''), m);
+    });
+
+    // Show metadata
+    const meta = document.getElementById('sb-metadata');
+    const parts = [];
+    if (data.collected_data && Object.keys(data.collected_data).length) parts.push('Collected: ' + JSON.stringify(data.collected_data));
+    if (data.terminal_outcome) parts.push('Outcome: ' + data.terminal_outcome);
+    if (data.message_type) parts.push('Type: ' + data.message_type);
+    if (data.elapsed_ms) parts.push('Time: ' + data.elapsed_ms + 'ms');
+    if (parts.length) {
+      meta.style.display = 'block';
+      meta.textContent = parts.join(' | ');
+    }
+  } catch (e) {
+    out.removeChild(typing);
+    addBubble(out, 'bot', 'Error', e.message);
+  }
+  out.scrollTop = out.scrollHeight;
+}
+
+async function sbReset() {
+  await fetch('/sandbox/reset', { method: 'POST' });
+  sbMessages = [];
+  document.getElementById('sb-output').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px 20px;font-size:13px;">Cleared. Type a message and click Send to begin.</div>';
+  document.getElementById('sb-metadata').style.display = 'none';
+}
+
+function addBubble(container, role, label, text) {
+  const d = document.createElement('div');
+  d.className = 'bubble ' + role;
+  d.innerHTML = '<div class="bubble-lbl">' + esc(label) + '</div>' + esc(text);
+  container.appendChild(d);
+}
+
+// ========== SETTINGS ==========
+function switchSettings(el, id) {
+  document.querySelectorAll('.sn-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.settings-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  loadSettingsPanel(id);
+}
+
+let settingsLoaded = {};
+
+async function loadSettingsData() {
+  loadSettingsPanel('st-subaccounts');
+}
+
+async function loadSettingsPanel(panelId) {
+  if (panelId === 'st-subaccounts' && !settingsLoaded.subaccounts) {
+    settingsLoaded.subaccounts = true;
+    renderSubaccounts();
+  }
+  if (panelId === 'st-ai' && !settingsLoaded.ai) {
+    settingsLoaded.ai = true;
+    const data = await api('/api/settings/claude_config');
+    if (data && data.settings) {
+      document.getElementById('set-ai-model').value = data.settings.model || '';
+      document.getElementById('set-ai-max-tokens').value = data.settings.max_tokens || '';
+      document.getElementById('set-ai-temperature').value = data.settings.temperature || '';
+    }
+  }
+  if (panelId === 'st-kb' && !settingsLoaded.kb) {
+    settingsLoaded.kb = true;
+    const data = await api('/api/settings/knowledge_base');
+    if (data && data.settings) {
+      document.getElementById('set-kb-content').value = data.settings.content || '';
+    }
+  }
+  if (panelId === 'st-prompt' && !settingsLoaded.prompt) {
+    settingsLoaded.prompt = true;
+    const data = await api('/api/settings/system_prompt');
+    if (data && data.settings) {
+      document.getElementById('set-prompt-content').value = data.settings.base_prompt_override || '';
+    }
+  }
+  if (panelId === 'st-instructions' && !settingsLoaded.instructions) {
+    settingsLoaded.instructions = true;
+    const data = await api('/api/settings/bot_instructions');
+    if (data && data.settings) {
+      document.getElementById('set-instructions-content').value = data.settings.custom_instructions || '';
+    }
+  }
+  if (panelId === 'st-webhooks' && !settingsLoaded.webhooks) {
+    settingsLoaded.webhooks = true;
+    const data = await api('/api/settings/webhooks');
+    const el = document.getElementById('webhooks-fields');
+    el.innerHTML = '';
+    if (data && data.settings) {
+      Object.entries(data.settings).forEach(([key, val]) => {
+        el.innerHTML += '<div class="form-group"><label class="form-label">' + esc(key) + '</label><input class="form-input webhook-field" data-key="' + esc(key) + '" value="' + esc(val || '') + '"></div>';
+      });
+    }
+    if (!el.innerHTML) el.innerHTML = '<div class="form-group"><label class="form-label">Webhook URL</label><input class="form-input webhook-field" data-key="webhook_url" value=""></div>';
+  }
+  if (panelId === 'st-notifications' && !settingsLoaded.notifications) {
+    settingsLoaded.notifications = true;
+    const data = await api('/api/settings/notifications');
+    const el = document.getElementById('notifications-fields');
+    el.innerHTML = '';
+    if (data && data.settings) {
+      Object.entries(data.settings).forEach(([key, val]) => {
+        if (typeof val === 'boolean') {
+          el.innerHTML += '<label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px;"><input type="checkbox" class="notif-field" data-key="' + esc(key) + '"' + (val ? ' checked' : '') + ' style="accent-color:var(--cyan);"> <span>' + esc(key.replace(/_/g, ' ')) + '</span></label>';
+        } else {
+          el.innerHTML += '<div class="form-group"><label class="form-label">' + esc(key.replace(/_/g, ' ')) + '</label><input class="form-input notif-field" data-key="' + esc(key) + '" value="' + esc(val || '') + '"></div>';
+        }
+      });
+    }
+    if (!el.innerHTML) {
+      el.innerHTML = '<div class="form-group"><label class="form-label">Slack Webhook</label><input class="form-input notif-field" data-key="slack_webhook" value=""></div>' +
+        '<div class="form-group"><label class="form-label">Alert Emails</label><input class="form-input notif-field" data-key="alert_emails" value=""></div>';
+    }
+  }
+}
+
+async function saveSettings(section, data) {
+  const res = await api('/api/settings/' + section, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  if (res) {
+    toast('Settings saved: ' + section);
+    settingsLoaded[section] = false;
+  } else {
+    toast('Failed to save settings.');
+  }
+}
+
+async function saveWebhooks() {
+  const data = {};
+  document.querySelectorAll('.webhook-field').forEach(el => { data[el.dataset.key] = el.value; });
+  await saveSettings('webhooks', data);
+}
+
+async function saveNotifications() {
+  const data = {};
+  document.querySelectorAll('.notif-field').forEach(el => {
+    data[el.dataset.key] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  await saveSettings('notifications', data);
+}
+
+// Subaccount management
+async function renderSubaccounts() {
+  const data = await api('/api/subaccounts');
+  if (!data) return;
+  const el = document.getElementById('sub-cfg-list');
+  el.innerHTML = '';
+  (data.subaccounts || []).forEach(a => {
+    el.innerHTML += '<div class="sub-cfg-row">' +
+      '<div class="sub-cfg-header"><div><div class="sub-cfg-name">' + esc(a.name) + '</div><div class="sub-cfg-id mono">' + esc(a.ghl_location_id || '') + '</div></div>' +
+      '<div style="display:flex;gap:6px;align-items:center;"><span class="pill ' + (a.status === 'active' ? 'g' : 'a') + '">' + (a.status || 'active') + '</span>' +
+      '<button class="btn-sm dan" onclick="deleteSubaccount(' + a.id + ')">Delete</button></div></div>' +
+      '<div class="sub-cfg-fields">' +
+        '<div class="form-group"><label class="form-label" style="font-size:9px;">GHL Location ID</label><input class="api-key-input" value="' + esc(a.ghl_location_id || '') + '" disabled></div>' +
+        '<div class="form-group"><label class="form-label" style="font-size:9px;">API Key Preview</label><input class="api-key-input" value="' + esc(a.ghl_api_key_preview || '****') + '" disabled></div>' +
+      '</div></div>';
+  });
+}
+
+function showAddSubaccount() {
+  document.getElementById('add-sub-form').style.display = 'block';
+}
+
+async function createSubaccount() {
+  const body = {
+    name: document.getElementById('new-sub-name').value,
+    ghl_location_id: document.getElementById('new-sub-loc').value,
+    ghl_api_key: document.getElementById('new-sub-key').value,
+    status: document.getElementById('new-sub-status').value
+  };
+  const res = await api('/api/subaccounts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (res) {
+    toast('Subaccount created.');
+    document.getElementById('add-sub-form').style.display = 'none';
+    renderSubaccounts();
+    loadSubaccounts();
+  } else {
+    toast('Failed to create subaccount.');
+  }
+}
+
+async function deleteSubaccount(id) {
+  if (!confirm('Delete this subaccount?')) return;
+  const res = await api('/api/subaccounts/' + id, { method: 'DELETE' });
+  if (res) {
+    toast('Subaccount deleted.');
+    renderSubaccounts();
+    loadSubaccounts();
+  } else {
+    toast('Failed to delete subaccount.');
+  }
+}
+
+// ========== LOGS ==========
+async function loadLogs() {
+  const contactId = document.getElementById('log-filter').value.trim();
+  const limit = document.getElementById('log-limit').value;
+  const params = new URLSearchParams({ limit });
+  if (contactId) params.set('contact_id', contactId);
+  const data = await api('/api/logs?' + params);
+  if (!data) return;
+
+  const el = document.getElementById('log-list');
+  const logs = data.logs || [];
+  if (!logs.length) {
+    el.innerHTML = '<div style="color:var(--muted);text-align:center;padding:60px 20px;font-size:14px;">No logs yet. Trigger a webhook to see activity.</div>';
+    return;
+  }
+
+  el.innerHTML = logs.map(l => {
+    const ts = l.timestamp ? new Date(l.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+    const stageClass = (l.stage || '').replace(/[^a-z_]/gi, '').toLowerCase();
+    const levelClass = (l.level || 'info').toLowerCase();
+    const hasData = l.data && (typeof l.data === 'object' ? Object.keys(l.data).length > 0 : true);
+    const expanded = logExpandedIds[l.id];
+    return '<div class="log-entry">' +
+      '<div class="log-header">' +
+        '<span class="log-ts">' + ts + '</span>' +
+        '<span class="log-stage ' + stageClass + '">' + esc(l.stage || '') + '</span>' +
+        '<span class="log-level ' + levelClass + '"></span>' +
+        '<span class="log-cid">' + esc(l.contact_id || '') + '</span>' +
+        '<span class="log-msg">' + esc(l.message || '') + '</span>' +
+      '</div>' +
+      (hasData ? '<span class="log-toggle" onclick="toggleLogData(' + l.id + ')">' + (expanded ? '[-] Hide' : '[+] Data') + '</span>' : '') +
+      (hasData && expanded ? '<pre class="log-data-pre">' + esc(typeof l.data === 'string' ? l.data : JSON.stringify(l.data, null, 2)) + '</pre>' : '') +
+    '</div>';
+  }).join('');
+}
+
+function toggleLogData(id) {
+  logExpandedIds[id] = !logExpandedIds[id];
+  loadLogs();
+}
+
+function startLogRefresh() {
+  stopLogRefresh();
+  const cb = document.getElementById('log-auto');
+  if (cb && cb.checked) {
+    logInterval = setInterval(() => {
+      if (currentTab === 'tab-logs') loadLogs();
+    }, 3000);
+  }
+}
+
+function stopLogRefresh() {
+  if (logInterval) { clearInterval(logInterval); logInterval = null; }
+}
+
+document.addEventListener('change', e => {
+  if (e.target.id === 'log-auto') {
+    if (e.target.checked) startLogRefresh();
+    else stopLogRefresh();
+  }
+});
+
+// ========== FORMATTING HELPERS ==========
+function fmtNum(v, d) {
+  if (v === null || v === undefined || v === '' || isNaN(v)) return '---';
+  const n = Number(v);
+  if (d !== undefined) return n.toFixed(d);
+  return n.toLocaleString();
+}
+
+function fmtPct(v) {
+  if (v === null || v === undefined || v === '' || isNaN(v)) return '---';
+  return (Number(v) * 100).toFixed(1) + '%';
+}
+
+function fmtPct2(v) {
+  if (v === null || v === undefined || v === '' || isNaN(v)) return '---';
+  return Number(v).toFixed(1) + '%';
+}
+
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+// ========== INIT ==========
+(async function init() {
+  await loadSubaccounts();
+  loadDashboard();
+})();
+</script>
 </body>
 </html>

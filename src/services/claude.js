@@ -75,7 +75,10 @@ async function generateResponse(conversation, history, newUserMessage, contact_i
   const parsed = extractJson(rawText);
   const normalized = normalizeResponse(parsed);
 
-  return { ...normalized, rawAssistantContent: rawText };
+  const inputTokens = response.usage?.input_tokens || 0;
+  const outputTokens = response.usage?.output_tokens || 0;
+
+  return { ...normalized, rawAssistantContent: rawText, input_tokens: inputTokens, output_tokens: outputTokens };
 }
 
 module.exports = { generateResponse };
