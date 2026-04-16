@@ -15,10 +15,13 @@ const subaccountsRouter = require('./routes/subaccounts');
 const settingsRouter = require('./routes/settings');
 const analyzerRouter = require('./routes/analyzer');
 const testSyncRouter = require('./routes/testSync');
+const authRouter = require('./routes/auth');
+const devConsoleRouter = require('./routes/devConsole');
 const cronRoutes = require('./routes/cron');
 const conversationStore = require('./services/conversationStore');
 const ghl = require('./services/ghl');
 const logger = require('./services/logger');
+const { requireAuth } = require('./middleware/auth');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -26,7 +29,15 @@ app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
+// Webhook (GHL-facing) and auth routes stay unauthenticated.
 app.use('/webhook', webhookRouter);
+app.use('/api/auth', authRouter);
+
+// Everything else under /api/*, /sandbox/*, /cron/* requires a valid session token.
+app.use('/api', requireAuth);
+app.use('/sandbox', requireAuth);
+app.use('/cron', requireAuth);
+
 app.use('/api', analyticsRouter);
 app.use('/api', logsRouter);
 app.use('/api', dashboardRouter);
@@ -37,10 +48,12 @@ app.use('/api', reviewQueueRouter);
 app.use('/api', subaccountsRouter);
 app.use('/api', settingsRouter);
 app.use('/api/analyzer', analyzerRouter);
+app.use('/api/dev', devConsoleRouter);
 app.use('/api', testSyncRouter);
 app.use('/sandbox', sandboxRouter);
 app.use('/cron', cronRoutes.router);
 
+// Static dashboard served last; login page is also static.
 app.use('/', express.static(path.join(__dirname, '..', 'public')));
 
 app.use((err, req, res, next) => {

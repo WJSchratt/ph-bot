@@ -283,6 +283,44 @@ textarea.form-input{resize:vertical;min-height:80px;}
 .acc-bar-fill{height:100%;border-radius:4px;display:flex;align-items:center;padding-left:8px;font-size:10px;font-family:'JetBrains Mono';font-weight:700;color:#000;}
 .acc-pct{width:40px;text-align:right;font-family:'JetBrains Mono';font-size:12px;font-weight:700;}
 
+/* DEV CONSOLE */
+.dc-wrap{display:grid;grid-template-columns:320px 1fr;gap:14px;height:calc(100vh - 120px);}
+.dc-left{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:13px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;}
+.dc-right{background:var(--surface);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;min-width:0;}
+.dc-section-title{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:8px;}
+.dc-tree{font-family:'JetBrains Mono';font-size:11px;line-height:1.8;}
+.dc-tree-item{cursor:pointer;padding:1px 4px;border-radius:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted);}
+.dc-tree-item:hover{background:var(--surface2);color:var(--cyan);}
+.dc-quick{display:flex;flex-direction:column;gap:5px;}
+.dc-deploy{font-family:'JetBrains Mono';font-size:10px;color:var(--muted);line-height:1.6;}
+.dc-deploy .hash{color:var(--cyan);}
+.dc-chat-top{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:9px;background:var(--surface2);border-radius:10px 10px 0 0;flex-shrink:0;}
+.dc-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;min-height:0;}
+.dc-msg{max-width:85%;padding:10px 14px;border-radius:10px;font-size:13px;line-height:1.55;word-wrap:break-word;}
+.dc-msg.user{background:rgba(0,212,255,.10);border:1px solid rgba(0,212,255,.25);align-self:flex-end;color:#e0f0ff;border-bottom-right-radius:3px;}
+.dc-msg.ai{background:var(--surface2);border:1px solid var(--border2);align-self:flex-start;color:var(--text);border-bottom-left-radius:3px;}
+.dc-msg pre{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:9px 11px;margin:8px 0;font-family:'JetBrains Mono';font-size:11px;color:#86efac;overflow-x:auto;white-space:pre-wrap;word-break:break-word;}
+.dc-msg code{background:var(--bg);border:1px solid var(--border);padding:1px 5px;border-radius:3px;font-family:'JetBrains Mono';font-size:11px;color:#86efac;}
+.dc-msg strong{color:#fff;}
+.dc-msg h3{font-size:14px;margin:8px 0 4px;color:var(--cyan);font-weight:700;}
+.dc-msg ul{margin-left:18px;margin-top:4px;}
+.dc-input-row{display:flex;gap:7px;align-items:flex-end;padding:11px;border-top:1px solid var(--border);background:var(--surface2);border-radius:0 0 10px 10px;flex-shrink:0;}
+.dc-input{flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 11px;border-radius:7px;font-family:'Rajdhani';font-size:13px;outline:none;resize:none;min-height:42px;max-height:170px;}
+.dc-input:focus{border-color:var(--cyan);}
+.dc-changes-card{background:var(--bg);border:1px solid var(--amber);border-radius:8px;padding:12px;margin-top:8px;}
+.dc-changes-title{font-size:11px;letter-spacing:1.5px;color:var(--amber);font-weight:700;text-transform:uppercase;margin-bottom:8px;}
+.dc-change{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:9px 11px;margin-bottom:6px;}
+.dc-change-file{font-family:'JetBrains Mono';font-size:11px;color:var(--cyan);margin-bottom:4px;}
+.dc-change-desc{font-size:11px;color:var(--muted);margin-bottom:6px;}
+.dc-diff{font-family:'JetBrains Mono';font-size:10px;line-height:1.55;background:var(--bg);border-radius:4px;padding:6px 8px;max-height:240px;overflow-y:auto;white-space:pre;}
+.dc-diff .del{background:rgba(255,69,96,.12);color:#fca5a5;display:block;}
+.dc-diff .add{background:rgba(16,217,138,.12);color:#86efac;display:block;}
+.dc-commit-in{width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:5px;font-family:'JetBrains Mono';font-size:11px;outline:none;margin-top:8px;}
+.dc-commit-in:focus{border-color:var(--cyan);}
+.dc-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:500;display:flex;align-items:center;justify-content:center;}
+.dc-modal{background:var(--surface);border:1px solid var(--border2);border-radius:10px;padding:20px;max-width:80vw;max-height:80vh;overflow:auto;}
+.dc-modal pre{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;font-family:'JetBrains Mono';font-size:11px;white-space:pre-wrap;max-height:60vh;overflow:auto;color:var(--text);}
+
 /* MISC */
 .divider{height:1px;background:var(--border);margin:13px 0;}
 .dim-text{color:var(--muted);font-size:12px;}
@@ -342,7 +380,8 @@ textarea.form-input{resize:vertical;min-height:80px;}
   </div>
   <div class="header-right">
     <span class="sandbox-badge" onclick="goTab('tab-sandbox')">SANDBOX</span>
-    <div class="avatar">JR</div>
+    <button class="btn-sm" id="logout-btn" onclick="logout()" title="Sign out">Logout</button>
+    <div class="avatar" id="header-avatar">JR</div>
   </div>
 </header>
 
@@ -362,6 +401,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
   <div class="nav-item" data-tab="tab-settings" onclick="goTab('tab-settings')"><span class="nav-icon">&#9881;</span> Settings</div>
   <div class="nav-item" data-tab="tab-devnotes" onclick="goTab('tab-devnotes')"><span class="nav-icon">&#128203;</span> Dev Notes <span class="nav-badge nb-cyan">NEW</span></div>
   <div class="nav-item" data-tab="tab-logs" onclick="goTab('tab-logs')"><span class="nav-icon">&#9783;</span> Logs</div>
+  <div class="nav-item" data-tab="tab-devconsole" onclick="goTab('tab-devconsole')"><span class="nav-icon">&#9881;</span> Dev Console <span class="nav-badge nb-red">AI</span></div>
 </nav>
 
 <!-- MAIN -->
@@ -838,6 +878,43 @@ textarea.form-input{resize:vertical;min-height:80px;}
   </div>
 </div>
 
+<!-- ====== DEV CONSOLE ====== -->
+<div class="tab-content" id="tab-devconsole">
+  <div class="dc-wrap">
+    <div class="dc-left">
+      <div>
+        <div class="dc-section-title">Deploy Status</div>
+        <div class="dc-deploy" id="dc-deploy-status">Loading...</div>
+      </div>
+      <div>
+        <div class="dc-section-title">Quick Actions</div>
+        <div class="dc-quick">
+          <button class="btn-sm" onclick="dcShowSystemPrompt()">View System Prompt</button>
+          <button class="btn-sm" onclick="dcShowErrors()">View Recent Errors</button>
+          <button class="btn-sm" onclick="dcShowGitLog()">View Git Log</button>
+          <button class="btn-sm" onclick="dcShowActiveConversations()">View Active Conversations</button>
+          <button class="btn-sm" style="color:var(--red);border-color:rgba(255,69,96,.4);" onclick="dcRollback()">Rollback Last Deploy</button>
+        </div>
+      </div>
+      <div style="flex:1;min-height:0;overflow-y:auto;">
+        <div class="dc-section-title">Project Files</div>
+        <div class="dc-tree" id="dc-file-tree">Loading files...</div>
+      </div>
+    </div>
+    <div class="dc-right">
+      <div class="dc-chat-top">
+        <div><strong style="color:#fff;">Dev Console</strong> <span style="font-size:11px;color:var(--muted);margin-left:8px;">Claude-backed code assistant with deploy access</span></div>
+        <button class="btn-sm" style="margin-left:auto;" onclick="dcClearChat()">Clear</button>
+      </div>
+      <div class="dc-messages" id="dc-messages"></div>
+      <div class="dc-input-row">
+        <textarea class="dc-input" id="dc-input" rows="2" placeholder="Ask about the code, request a change, or debug an issue. Ctrl+Enter to send." onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();dcSend();}"></textarea>
+        <button class="btn pri" id="dc-send-btn" onclick="dcSend()">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 </main>
 
 <script>
@@ -861,10 +938,33 @@ function toast(msg) {
   t._timer = setTimeout(() => t.classList.remove('show'), 3500);
 }
 
+// ========== AUTH ==========
+function getAuthToken() { try { return localStorage.getItem('ph_token'); } catch { return null; } }
+
+function redirectToLogin() {
+  try { localStorage.removeItem('ph_token'); } catch {}
+  if (!/login\.html$/.test(window.location.pathname)) {
+    window.location.replace('/login.html');
+  }
+}
+
+function logout() {
+  const token = getAuthToken();
+  if (token) {
+    fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + token } }).catch(() => {});
+  }
+  redirectToLogin();
+}
+
 // ========== FETCH HELPER ==========
 async function api(url, opts) {
+  const token = getAuthToken();
+  const merged = { ...(opts || {}) };
+  merged.headers = { ...(merged.headers || {}) };
+  if (token) merged.headers['Authorization'] = 'Bearer ' + token;
   try {
-    const res = await fetch(url, opts);
+    const res = await fetch(url, merged);
+    if (res.status === 401) { redirectToLogin(); return null; }
     if (!res.ok) throw new Error('HTTP ' + res.status);
     return await res.json();
   } catch (e) {
@@ -872,6 +972,28 @@ async function api(url, opts) {
     return null;
   }
 }
+
+// Monkey-patch window.fetch so ANY direct fetch (e.g. sandbox, analyzer deep calls)
+// also carries the Bearer token and reacts to 401s.
+(function () {
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    const opts = Object.assign({}, init || {});
+    opts.headers = Object.assign({}, opts.headers || {});
+    // Don't touch cross-origin or the login request itself
+    const urlStr = typeof input === 'string' ? input : (input && input.url) || '';
+    if (urlStr && (urlStr.startsWith('/') || urlStr.startsWith(window.location.origin)) && !urlStr.includes('/api/auth/login')) {
+      const token = getAuthToken();
+      if (token && !opts.headers['Authorization']) opts.headers['Authorization'] = 'Bearer ' + token;
+    }
+    return originalFetch(input, opts).then((res) => {
+      if (res.status === 401 && urlStr.indexOf('/api/auth/login') === -1) {
+        redirectToLogin();
+      }
+      return res;
+    });
+  };
+})();
 
 // ========== ACCOUNT PICKER (MULTI-SELECT) ==========
 async function loadSubaccounts() {
@@ -984,6 +1106,7 @@ function loadCurrentTab() {
     case 'tab-logs': loadLogs(); startLogRefresh(); break;
     case 'tab-settings': loadSettingsData(); break;
     case 'tab-analyzer': loadAnalyzerAll(); break;
+    case 'tab-devconsole': loadDevConsole(); break;
   }
 }
 
@@ -1960,6 +2083,270 @@ async function analyzerRevertPrompt() {
   else toast('Failed to revert.');
 }
 
+// ========== DEV CONSOLE ==========
+let dcChatHistory = [];
+let dcFiles = [];
+
+async function loadDevConsole() {
+  dcLoadFiles();
+  dcLoadDeployStatus();
+  if (!dcChatHistory.length) {
+    const out = document.getElementById('dc-messages');
+    out.innerHTML = '<div class="dc-msg ai">Hi — I\'m the Dev Console assistant. I have full read access to the codebase, logs, conversations, and can generate code changes for you to review and deploy. Ask me about how anything works, or describe a change you want to make.</div>';
+  }
+}
+
+async function dcLoadDeployStatus() {
+  const el = document.getElementById('dc-deploy-status');
+  try {
+    const data = await api('/api/dev/git-log?limit=5');
+    if (!data || !data.log) { el.innerHTML = '<span style="color:var(--red);">Could not load</span>'; return; }
+    const head = data.log[0];
+    const prior = data.log.slice(1, 4).map(c => '<div style="opacity:.5;">' + esc(c.short) + ' ' + esc(c.subject.slice(0, 40)) + '</div>').join('');
+    el.innerHTML = '<div>HEAD: <span class="hash">' + esc(head.short) + '</span></div>' +
+      '<div style="color:var(--text);margin-top:2px;">' + esc(head.subject.slice(0, 56)) + '</div>' +
+      '<div style="margin-top:2px;">' + esc(head.date.slice(0, 16)) + ' — ' + esc(head.author_name) + '</div>' +
+      '<div style="margin-top:6px;font-size:9px;">— recent —</div>' + prior;
+  } catch (e) {
+    el.innerHTML = '<span style="color:var(--red);">Error loading</span>';
+  }
+}
+
+async function dcLoadFiles() {
+  const el = document.getElementById('dc-file-tree');
+  const data = await api('/api/dev/files');
+  if (!data) { el.textContent = 'Failed to load files.'; return; }
+  dcFiles = data.files || [];
+  const byDir = {};
+  dcFiles.forEach(f => {
+    const parts = f.path.split('/');
+    const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '.';
+    if (!byDir[dir]) byDir[dir] = [];
+    byDir[dir].push(f);
+  });
+  const dirs = Object.keys(byDir).sort();
+  el.innerHTML = dirs.map(d => {
+    const hdr = '<div style="color:var(--cyan);margin-top:6px;font-weight:700;">' + esc(d) + '/</div>';
+    const items = byDir[d].map(f => {
+      const name = f.path.split('/').pop();
+      return '<div class="dc-tree-item" title="' + esc(f.path) + '" onclick="dcShowFile(\'' + esc(f.path) + '\')">' + esc(name) + ' <span style="color:#2a3f55;">' + f.size + 'B</span></div>';
+    }).join('');
+    return hdr + items;
+  }).join('');
+}
+
+async function dcShowFile(path) {
+  const data = await api('/api/dev/file?path=' + encodeURIComponent(path));
+  if (!data || !data.content) { toast('Failed to load ' + path); return; }
+  dcModal('<div style="color:var(--cyan);font-family:\'JetBrains Mono\';margin-bottom:10px;font-size:13px;">' + esc(path) + ' <span style="color:var(--muted);">(' + data.size + 'B)</span></div><pre>' + esc(data.content) + '</pre>');
+}
+
+async function dcShowSystemPrompt() {
+  const data = await api('/api/dev/context');
+  if (!data) return;
+  dcModal('<div style="font-size:14px;font-weight:700;margin-bottom:10px;color:#fff;">System Prompt (standard)</div><pre>' + esc(data.systemPrompt || '(none)') + '</pre>');
+}
+
+async function dcShowErrors() {
+  const data = await api('/api/logs/errors?limit=20');
+  if (!data) return;
+  const rows = (data.logs || []).map(l => esc(l.timestamp) + ' [' + esc(l.stage) + '] ' + esc(l.message) + '\n' + (l.data ? esc(JSON.stringify(l.data, null, 2)) : '')).join('\n\n');
+  dcModal('<div style="font-size:14px;font-weight:700;margin-bottom:10px;color:#fff;">Recent Errors (' + (data.count || 0) + ')</div><pre>' + (rows || '(none)') + '</pre>');
+}
+
+async function dcShowGitLog() {
+  const data = await api('/api/dev/git-log?limit=20');
+  if (!data) return;
+  const rows = (data.log || []).map(c => esc(c.short) + '  ' + esc(c.date.slice(0, 16)) + '  ' + esc(c.author_name) + '\n          ' + esc(c.subject)).join('\n\n');
+  dcModal('<div style="font-size:14px;font-weight:700;margin-bottom:10px;color:#fff;">Git Log</div><pre>' + rows + '</pre>');
+}
+
+async function dcShowActiveConversations() {
+  const data = await api('/api/dev/conversations?limit=20');
+  if (!data) return;
+  const rows = (data.conversations || []).map(c => {
+    const name = (c.first_name || '') + ' ' + (c.last_name || '');
+    return esc(c.id + ' | ' + name.trim() + ' | ' + (c.terminal_outcome || 'open') + ' | active=' + c.is_active + ' | msgs=' + (c.messages ? c.messages.length : 0));
+  }).join('\n');
+  dcModal('<div style="font-size:14px;font-weight:700;margin-bottom:10px;color:#fff;">Recent Conversations</div><pre>' + (rows || '(none)') + '</pre>');
+}
+
+function dcModal(inner) {
+  const back = document.createElement('div');
+  back.className = 'dc-modal-backdrop';
+  back.innerHTML = '<div class="dc-modal">' + inner + '<div style="margin-top:12px;text-align:right;"><button class="btn pri" onclick="this.closest(\'.dc-modal-backdrop\').remove()">Close</button></div></div>';
+  back.addEventListener('click', (ev) => { if (ev.target === back) back.remove(); });
+  document.body.appendChild(back);
+}
+
+function dcClearChat() {
+  dcChatHistory = [];
+  document.getElementById('dc-messages').innerHTML = '<div class="dc-msg ai">Cleared. Ask away.</div>';
+}
+
+async function dcSend() {
+  const input = document.getElementById('dc-input');
+  const btn = document.getElementById('dc-send-btn');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  const out = document.getElementById('dc-messages');
+
+  const userBubble = document.createElement('div');
+  userBubble.className = 'dc-msg user';
+  userBubble.textContent = text;
+  out.appendChild(userBubble);
+  dcChatHistory.push({ role: 'user', content: text });
+
+  const thinking = document.createElement('div');
+  thinking.className = 'dc-msg ai';
+  thinking.innerHTML = '<span class="loading-spinner"></span> Thinking...';
+  out.appendChild(thinking);
+  out.scrollTop = out.scrollHeight;
+
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/dev/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, conversationHistory: dcChatHistory.slice(0, -1) })
+    });
+    const data = await res.json().catch(() => ({}));
+    thinking.remove();
+    if (!res.ok) {
+      const err = document.createElement('div');
+      err.className = 'dc-msg ai';
+      err.style.color = 'var(--red)';
+      err.textContent = 'Error: ' + (data.error || res.status);
+      out.appendChild(err);
+      btn.disabled = false;
+      return;
+    }
+    const bubble = document.createElement('div');
+    bubble.className = 'dc-msg ai';
+    const replyText = data.reply || '';
+    const visible = replyText.replace(/<<<CHANGES>>>[\s\S]*?<<<\/CHANGES>>>/, '').trim();
+    bubble.innerHTML = dcRenderMarkdown(visible);
+    out.appendChild(bubble);
+    dcChatHistory.push({ role: 'assistant', content: replyText });
+
+    if (data.proposed_changes && Array.isArray(data.proposed_changes.changes)) {
+      const card = dcRenderChangesCard(data.proposed_changes);
+      out.appendChild(card);
+    }
+    out.scrollTop = out.scrollHeight;
+  } catch (e) {
+    thinking.remove();
+    const err = document.createElement('div');
+    err.className = 'dc-msg ai';
+    err.style.color = 'var(--red)';
+    err.textContent = 'Network error: ' + e.message;
+    out.appendChild(err);
+  }
+  btn.disabled = false;
+  input.focus();
+}
+
+function dcRenderMarkdown(text) {
+  if (!text) return '';
+  let s = esc(text);
+  // Code fences
+  s = s.replace(/```(\w+)?\n([\s\S]*?)```/g, (_m, _lang, code) => '<pre>' + code.replace(/</g, '&lt;') + '</pre>');
+  // Inline code
+  s = s.replace(/`([^`]+?)`/g, '<code>$1</code>');
+  // Bold
+  s = s.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+  // Headings
+  s = s.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  // Bullets
+  s = s.replace(/^\s*- (.+)$/gm, '<li>$1</li>');
+  s = s.replace(/(<li>.*<\/li>)(\n<li>.*<\/li>)*/gs, (m) => '<ul>' + m + '</ul>');
+  // Line breaks
+  s = s.replace(/\n/g, '<br>');
+  return s;
+}
+
+function dcRenderChangesCard(proposal) {
+  const card = document.createElement('div');
+  card.className = 'dc-changes-card';
+  const changes = Array.isArray(proposal.changes) ? proposal.changes : [];
+  let html = '<div class="dc-changes-title">Proposed Changes (' + changes.length + ')</div>';
+  if (proposal.summary) html += '<div style="font-size:12px;color:var(--text);margin-bottom:8px;">' + esc(proposal.summary) + '</div>';
+  changes.forEach((c, i) => {
+    html += '<div class="dc-change">';
+    html += '<div class="dc-change-file">' + esc(c.type || 'modify') + ' · ' + esc(c.file) + '</div>';
+    if (c.description) html += '<div class="dc-change-desc">' + esc(c.description) + '</div>';
+    if (c.type === 'create') {
+      html += '<div class="dc-diff"><span class="add">' + esc((c.content || '').slice(0, 4000)) + '</span></div>';
+    } else {
+      const del = esc(c.original || '').split('\n').map(l => '<span class="del">- ' + l + '</span>').join('');
+      const add = esc(c.modified || '').split('\n').map(l => '<span class="add">+ ' + l + '</span>').join('');
+      html += '<div class="dc-diff">' + del + add + '</div>';
+    }
+    html += '</div>';
+  });
+  const commitMsgId = 'dc-commit-' + Math.random().toString(36).slice(2);
+  html += '<input type="text" id="' + commitMsgId + '" class="dc-commit-in" value="' + esc(proposal.commitMessage || '') + '" placeholder="Commit message...">';
+  html += '<div style="display:flex;gap:7px;margin-top:8px;">';
+  html += '<button class="btn grn" onclick="dcApplyChanges(this, ' + escAttr(JSON.stringify(changes)) + ', \'' + commitMsgId + '\')">Apply &amp; Deploy</button>';
+  html += '<button class="btn dan" onclick="this.closest(\'.dc-changes-card\').remove()">Reject</button>';
+  html += '</div>';
+  card.innerHTML = html;
+  return card;
+}
+
+function escAttr(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+}
+
+async function dcApplyChanges(btn, changesJson, commitInputId) {
+  const msg = document.getElementById(commitInputId).value.trim();
+  if (!msg) { toast('Enter a commit message.'); return; }
+  if (!confirm('This will commit and push to production. Are you sure?\n\n"' + msg + '"')) return;
+  let changes;
+  try { changes = JSON.parse(changesJson); } catch { toast('Could not parse changes'); return; }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading-spinner"></span> Deploying...';
+  try {
+    const res = await fetch('/api/dev/apply-changes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ changes, commitMessage: msg })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      toast('Deploy failed: ' + (data.error || data.reason || res.status));
+      btn.disabled = false;
+      btn.textContent = 'Apply & Deploy';
+      return;
+    }
+    toast('Deployed ' + data.commitShort + ' — Railway will redeploy shortly.');
+    btn.textContent = 'Deployed ' + data.commitShort;
+    btn.classList.remove('grn');
+    btn.style.background = 'var(--muted)';
+    dcLoadDeployStatus();
+  } catch (e) {
+    toast('Deploy error: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Apply & Deploy';
+  }
+}
+
+async function dcRollback() {
+  if (!confirm('Revert the last commit and push to production?\n\nThis creates a new "Revert" commit.')) return;
+  const res = await fetch('/api/dev/rollback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.success) {
+    toast('Rollback failed: ' + (data.error || res.status));
+    return;
+  }
+  toast('Rolled back — new commit: ' + data.short);
+  dcLoadDeployStatus();
+}
+
 // ========== FORMATTING HELPERS ==========
 function fmtNum(v, d) {
   if (v === null || v === undefined || v === '' || isNaN(v)) return '---';
@@ -1987,6 +2374,18 @@ function esc(s) {
 
 // ========== INIT ==========
 (async function init() {
+  if (!getAuthToken()) { redirectToLogin(); return; }
+  try {
+    const me = await fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + getAuthToken() } });
+    if (me.status === 401) { redirectToLogin(); return; }
+    const meData = await me.json().catch(() => ({}));
+    if (meData.username) {
+      try {
+        const avatar = document.getElementById('header-avatar');
+        if (avatar) avatar.textContent = meData.username.slice(0, 2).toUpperCase();
+      } catch {}
+    }
+  } catch {}
   await loadSubaccounts();
   loadDashboard();
 })();
