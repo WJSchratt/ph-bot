@@ -19,7 +19,7 @@ router.post('/inbound', async (req, res) => {
     const parsed = parseInboundPayload(req.body);
     contactId = parsed.contact_id || null;
 
-    logger.log('parse', 'info', contactId, 'Payload parsed', { contact_id: parsed.contact_id, location_id: parsed.location_id, messageBody: parsed.messageBody, product_type: parsed.product_type, contact_stage: parsed.contact_stage });
+    logger.log('parse', 'info', contactId, 'Payload parsed', { contact_id: parsed.contact_id, location_id: parsed.location_id, messageBody: parsed.messageBody, product_type: parsed.product_type, contact_stage: parsed.contact_stage, has_ghl_token: !!parsed.ghl_token, ghl_token_preview: parsed.ghl_token ? parsed.ghl_token.slice(0, 8) + '...' : null });
 
     if (!parsed.contact_id || !parsed.location_id) {
       return res.status(400).json({ error: 'missing contact_id or location_id' });
