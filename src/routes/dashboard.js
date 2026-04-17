@@ -368,7 +368,14 @@ router.get('/dashboard', async (req, res) => {
     const aiCost = Number(anthropicTotals.total_cost) || 0;
 
     // --- 6) Cost-per-message + time saved ---
-    const totalMessages = (mg.outbound || 0) + (mg.inbound || 0) || 1;
+    // Previous denominator (mg.outbound+inbound) came from the LOCAL `messages`
+    // table which only has Claude bot sends (~65 msgs), while totalCost
+    // includes Signal House billing for EVERY send (Botpress + GHL workflows +
+    // Claude = thousands). That mismatch produced the $0.3367 figure — ~50x
+    // too high. Correct denominator is ghl_messages (everything Signal House
+    // actually billed for), which matches the scope of carrierCost.
+    const ghlMsgTotal = (Number(ghlOut.outbound) || 0) + (Number(ghlOut.inbound) || 0);
+    const totalMessages = ghlMsgTotal || ((mg.outbound || 0) + (mg.inbound || 0)) || 1;
     const totalCost = aiCost + carrierCost;
     const costPerMessage = totalCost / totalMessages;
 
