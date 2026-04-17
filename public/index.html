@@ -509,7 +509,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
 <!-- ====== QC PORTAL ====== -->
 <div class="tab-content" id="tab-qc">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-    <div><div style="font-size:17px;font-weight:700;color:#fff;">Bot Accuracy QC Portal</div><div class="dim-text">Weekly spot-check -- Authorized reviewers only</div></div>
+    <div><div style="font-size:17px;font-weight:700;color:#fff;">Bot Accuracy QC Portal</div><div class="dim-text">Reviewer edits queue locally, then flush in one batched Claude call.</div></div>
     <div style="display:flex;gap:9px;align-items:center;">
       <div class="card" style="padding:9px 15px;display:flex;gap:18px;border-color:var(--amber);" id="qc-stats-card"></div>
       <select class="fsel" id="qc-scenario">
@@ -521,7 +521,18 @@ textarea.form-input{resize:vertical;min-height:80px;}
       </select>
       <button class="btn amb" id="qc-gen-btn" onclick="qcGenerateSamples()">Generate Sample Wordtracks</button>
       <button class="btn pri" onclick="pullRandomConv()">Pull Random Conversation</button>
+      <button class="btn" id="qc-flush-btn" onclick="qcApplyPending()" style="background:var(--amber);color:#000;display:none;">
+        <span id="qc-flush-count">0</span> edits pending — apply
+      </button>
     </div>
+  </div>
+  <div class="itabs" style="margin-bottom:12px;">
+    <div class="itab active" data-qctab="claude" onclick="setQcTab('claude', this)">Claude Bot (live)</div>
+    <div class="itab" data-qctab="botpress" onclick="setQcTab('botpress', this)">Archive / OldBot / Botpress</div>
+    <div class="itab" data-qctab="cluster" onclick="setQcTab('cluster', this)">Filter by Word Track</div>
+  </div>
+  <div id="qc-cluster-filter-row" style="display:none;margin-bottom:12px;">
+    <select class="fsel" id="qc-cluster-sel" onchange="loadQcByCluster()"><option value="">-- pick a cluster --</option></select>
   </div>
   <div class="conv-wrap">
     <div class="conv-list">
@@ -1229,7 +1240,7 @@ function loadCurrentTab() {
     case 'tab-dashboard': loadDashboard(); break;
     case 'tab-wordtracks': loadWordtracks(); break;
     case 'tab-pipeline': loadPipeline(); break;
-    case 'tab-qc': loadQC(); break;
+    case 'tab-qc': loadQC(); refreshPendingEditsCounter(); break;
     case 'tab-review': loadReviewQueue(); break;
     case 'tab-logs': loadLogs(); startLogRefresh(); break;
     case 'tab-settings': loadSettingsData(); break;
@@ -1703,19 +1714,146 @@ async function loadConversation(id, convMeta) {
 async function qcAction(outcome) {
   if (!selectedQcConvId) { toast('Select a conversation first.'); return; }
   const body = { conversation_id: selectedQcConvId, reviewer: 'admin', outcome };
-  if (outcome === 'modified') {
+  if (outcome === 'modified' || outcome === 'failed') {
     const modText = document.getElementById('qc-edit-input').value.trim();
-    if (!modText) { toast('Enter a corrected response to save.'); return; }
-    body.modified_response = modText;
+    if (outcome === 'modified' && !modText) { toast('Enter a corrected response to save.'); return; }
+    if (modText) body.modified_response = modText;
   }
   const res = await api('/api/qc/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  if (res) {
-    toast('QC review submitted: ' + outcome);
-    document.getElementById('qc-edit-input').value = '';
-    loadQC();
-  } else {
-    toast('Failed to submit QC review.');
+  if (!res) { toast('Failed to submit QC review.'); return; }
+
+  // Queue an edit for batched flush (so the reviewer can do many reviews,
+  // then click the one "apply" button to merge them all in a single Claude call).
+  if (outcome === 'failed' || outcome === 'modified') {
+    const desc = outcome === 'modified'
+      ? `Replace the flagged bot response with: "${body.modified_response}"`
+      : 'Reviewer marked the bot response failed without a replacement — revise to avoid this pattern.';
+    await api('/api/pending-changes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'qc', change_type: 'correction', description: desc, example_conversation_id: selectedQcConvId })
+    });
   }
+
+  toast('QC review submitted: ' + outcome);
+  document.getElementById('qc-edit-input').value = '';
+  loadQC();
+  refreshPendingEditsCounter();
+}
+
+async function refreshPendingEditsCounter() {
+  try {
+    const r = await api('/api/qc/pending-edits-count');
+    if (!r) return;
+    const btn = document.getElementById('qc-flush-btn');
+    const span = document.getElementById('qc-flush-count');
+    if (span) span.textContent = r.pending || 0;
+    if (btn) btn.style.display = (r.pending > 0) ? '' : 'none';
+  } catch {}
+}
+
+async function qcApplyPending() {
+  const r = await api('/api/qc/pending-edits-count');
+  if (!r || !r.pending) { toast('No pending edits.'); return; }
+  if (!confirm('Apply ' + r.pending + ' pending edit(s) in a single Claude call? This rewrites the live system prompt.')) return;
+  toast('Merging edits into system prompt...');
+  const res = await api('/api/qc/apply-pending', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dry_run: false })
+  });
+  if (!res) { toast('Apply failed.'); return; }
+  toast('Applied ' + (res.applied || 0) + ' edits. Prompt updated.');
+  refreshPendingEditsCounter();
+}
+
+// ----- Tabs within QC Portal -----
+let qcTab = 'claude';
+function setQcTab(which, el) {
+  qcTab = which;
+  document.querySelectorAll('#tab-qc .itab').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('qc-cluster-filter-row').style.display = (which === 'cluster') ? '' : 'none';
+  if (which === 'claude') loadQC();
+  else if (which === 'botpress') loadQcBotpress();
+  else if (which === 'cluster') loadQcClusterPicker();
+}
+
+async function loadQcBotpress() {
+  const data = await api('/api/qc/botpress-archive?page=1&limit=30');
+  const list = document.getElementById('qc-conv-list');
+  list.innerHTML = '';
+  document.getElementById('qc-list-header').innerHTML = '<span class="pill a">ARCHIVE</span> ' + esc(data?.archive_tag || 'Archive / OldBot / Botpress') + ' (' + ((data?.conversations || []).length) + ')';
+  (data?.conversations || []).forEach(c => {
+    const item = document.createElement('div');
+    item.className = 'conv-item';
+    item.innerHTML = '<div class="ci-name">' + esc(c.contact_name || '(no name)') + ' -- ' + esc(c.subaccount_name || c.location_id) + '</div>' +
+      '<div class="ci-meta">' + fmtNum(c.message_count) + ' msgs' + (c.terminal_outcome ? ' -- ' + c.terminal_outcome : '') + ' -- ARCHIVE</div>';
+    item.onclick = () => {
+      list.querySelectorAll('.conv-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+      loadBotpressConversation(c.ghl_conversation_id, c.location_id, c);
+    };
+    list.appendChild(item);
+  });
+}
+
+async function loadBotpressConversation(convId, locationId, meta) {
+  const data = await api('/api/qc/botpress-archive/' + encodeURIComponent(convId) + '?location_id=' + encodeURIComponent(locationId));
+  if (!data) return;
+  selectedQcConvId = null; // Botpress convs can't use the /qc/review endpoint (different table).
+  const conv = data.conversation || {};
+  document.getElementById('qc-lead-name').innerHTML = esc(conv.contact_name || '(no name)') + ' <span class="pill a" style="margin-left:6px;">' + esc(data.archive_tag) + '</span>';
+  document.getElementById('qc-lead-meta').textContent = (conv.contact_phone || '') + ' -- ' + fmtNum(conv.message_count) + ' msgs' + (conv.terminal_outcome ? ' -- ' + conv.terminal_outcome : '');
+  const msgsEl = document.getElementById('qc-messages');
+  msgsEl.innerHTML = '';
+  (data.messages || []).forEach(m => {
+    const d = document.createElement('div');
+    const isBot = m.direction === 'outbound';
+    d.className = 'bubble ' + (isBot ? 'bot' : 'lead');
+    d.innerHTML = '<div class="bubble-lbl">' + (isBot ? 'BotPress (archive)' : 'Lead') + '</div>' + esc(m.content || '');
+    msgsEl.appendChild(d);
+  });
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+}
+
+async function loadQcClusterPicker() {
+  const sel = document.getElementById('qc-cluster-sel');
+  if (sel.dataset.filled === '1') return;
+  const r = await api('/api/wordtracks/clusters?days=30');
+  if (!r) return;
+  sel.innerHTML = '<option value="">-- pick a cluster --</option>';
+  (r.clusters || []).forEach(c => {
+    const label = c.label && c.label !== 'unlabeled' ? c.label : ('cluster #' + c.id + ' (unlabeled)');
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = label + ' (' + c.sends + ' sends, ' + c.source + ')';
+    sel.appendChild(opt);
+  });
+  sel.dataset.filled = '1';
+}
+
+async function loadQcByCluster() {
+  const cid = document.getElementById('qc-cluster-sel').value;
+  if (!cid) return;
+  const r = await api('/api/qc/by-cluster/' + cid + '?limit=50');
+  if (!r) return;
+  const list = document.getElementById('qc-conv-list');
+  list.innerHTML = '';
+  document.getElementById('qc-list-header').innerHTML = 'Word track: ' + esc(r.cluster?.label || 'cluster') + ' (' + (r.samples || []).length + ' sends)';
+  (r.samples || []).forEach(s => {
+    const item = document.createElement('div');
+    item.className = 'conv-item';
+    item.innerHTML = '<div class="ci-name">' + esc(s.contact_name || '(no name)') + ' -- ' + esc(s.source || '-') + '</div>' +
+      '<div class="ci-meta">' + fmtDate(s.created_at) + (s.terminal_outcome ? ' -- ' + s.terminal_outcome : '') + '</div>';
+    item.onclick = () => {
+      list.querySelectorAll('.conv-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+      // Reuse the Botpress detail loader for uniform UI; works for any source.
+      loadBotpressConversation(s.ghl_conversation_id, s.location_id, s);
+    };
+    list.appendChild(item);
+  });
 }
 
 async function pullRandomConv() {

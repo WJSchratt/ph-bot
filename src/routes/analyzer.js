@@ -967,3 +967,5 @@ router.post('/generate-prompt-pulled', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.getCurrentPrompt = getCurrentPrompt;
+module.exports.saveCurrentPrompt = saveCurrentPrompt;

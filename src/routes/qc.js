@@ -338,4 +338,211 @@ router.post('/qc/flag-wrong', async (req, res) => {
   }
 });
 
+// ============================================================
+// Botpress archive tab — pulls from ghl_messages WHERE source='botpress'
+// AND the conversation had at least one inbound reply (not drip-into-void).
+// Tagged explicitly as archive in the UI; edits feed the same pending queue.
+// ============================================================
+router.get('/qc/botpress-archive', async (req, res) => {
+  try {
+    const { page = 1, limit = 20, location_id } = req.query;
+    const lim = Math.min(parseInt(limit, 10) || 20, 100);
+    const off = (Math.max(parseInt(page, 10) || 1, 1) - 1) * lim;
+    const params = [];
+    let locFilter = '';
+    if (location_id) { params.push(location_id); locFilter = ` AND gc.location_id = $${params.length}`; }
+    params.push(lim); params.push(off);
+
+    const q = await db.query(
+      `SELECT gc.id AS conv_pk,
+              gc.ghl_conversation_id,
+              gc.location_id,
+              gc.contact_name,
+              gc.contact_phone,
+              gc.message_count,
+              gc.terminal_outcome,
+              gc.last_message_at,
+              COALESCE(s.name, gc.location_id) AS subaccount_name
+         FROM ghl_conversations gc
+         LEFT JOIN subaccounts s ON s.ghl_location_id = gc.location_id
+        WHERE gc.source = 'botpress'
+          AND EXISTS (SELECT 1 FROM ghl_messages im
+                        WHERE im.ghl_conversation_id = gc.ghl_conversation_id
+                          AND im.location_id = gc.location_id
+                          AND im.direction = 'inbound')
+          ${locFilter}
+        ORDER BY gc.last_message_at DESC NULLS LAST
+        LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+    res.json({ conversations: q.rows, archive_tag: 'Archive / OldBot / Botpress' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/qc/botpress-archive/:ghl_conversation_id', async (req, res) => {
+  try {
+    const { ghl_conversation_id } = req.params;
+    const { location_id } = req.query;
+    if (!location_id) return res.status(400).json({ error: 'location_id required' });
+    const conv = await db.query(
+      `SELECT gc.*, COALESCE(s.name, gc.location_id) AS subaccount_name
+         FROM ghl_conversations gc
+         LEFT JOIN subaccounts s ON s.ghl_location_id = gc.location_id
+        WHERE gc.ghl_conversation_id = $1 AND gc.location_id = $2`,
+      [ghl_conversation_id, location_id]
+    );
+    if (!conv.rows[0]) return res.status(404).json({ error: 'not found' });
+    const msgs = await db.query(
+      `SELECT id, direction, content, message_type, cluster_id, created_at
+         FROM ghl_messages
+        WHERE ghl_conversation_id = $1 AND location_id = $2
+        ORDER BY created_at ASC`,
+      [ghl_conversation_id, location_id]
+    );
+    res.json({
+      conversation: conv.rows[0],
+      messages: msgs.rows,
+      archive_tag: 'Archive / OldBot / Botpress'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// Cluster filter — "show every attempt at word track X" across all
+// conversations. Pulls outbound cluster messages + their reply (if any).
+// ============================================================
+router.get('/qc/by-cluster/:cluster_id', async (req, res) => {
+  try {
+    const clusterId = parseInt(req.params.cluster_id, 10);
+    const { limit = 50, source } = req.query;
+    const lim = Math.min(parseInt(limit, 10) || 50, 200);
+    const params = [clusterId, lim];
+    let srcFilter = '';
+    if (source === 'claude' || source === 'botpress' || source === 'other') {
+      params.splice(1, 0, source);
+      srcFilter = ` AND gc.source = $2`;
+    }
+    const cluster = (await db.query(
+      `SELECT id, label, description, source, example_text, cluster_size
+         FROM word_track_clusters WHERE id = $1`,
+      [clusterId]
+    )).rows[0];
+    if (!cluster) return res.status(404).json({ error: 'cluster not found' });
+
+    const q = await db.query(
+      `SELECT m.id AS msg_id, m.ghl_conversation_id, m.location_id, m.content, m.created_at,
+              gc.contact_name, gc.contact_phone, gc.source, gc.terminal_outcome,
+              (SELECT content FROM ghl_messages im
+                 WHERE im.ghl_conversation_id = m.ghl_conversation_id
+                   AND im.location_id = m.location_id
+                   AND im.direction = 'inbound'
+                   AND im.created_at > m.created_at
+                 ORDER BY im.created_at ASC LIMIT 1) AS reply_content
+         FROM ghl_messages m
+         JOIN ghl_conversations gc ON gc.ghl_conversation_id = m.ghl_conversation_id AND gc.location_id = m.location_id
+        WHERE m.cluster_id = $1
+          AND m.direction = 'outbound'
+          ${srcFilter}
+        ORDER BY m.created_at DESC
+        LIMIT $${params.length}`,
+      params
+    );
+    res.json({ cluster, samples: q.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// BATCHED FLUSH — takes every pending_prompt_changes row, sends ONE
+// Claude call (category=qc_batch_apply) that rewrites the system prompt
+// incorporating all of them. Marks each row as 'applied'.
+//
+// This is the core "you have X edits pending → apply" flow. Do NOT call
+// this per-edit. The UI accumulates edits locally, then POSTs once.
+// ============================================================
+router.get('/qc/pending-edits-count', async (req, res) => {
+  try {
+    const q = await db.query(
+      `SELECT COUNT(*)::int AS n FROM pending_prompt_changes WHERE status = 'pending'`
+    );
+    res.json({ pending: q.rows[0]?.n || 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/qc/apply-pending', async (req, res) => {
+  try {
+    const { dry_run = false } = req.body || {};
+    const pendingQ = await db.query(
+      `SELECT id, source, change_type, description, example_conversation_id, proposed_by, created_at
+         FROM pending_prompt_changes
+        WHERE status = 'pending'
+        ORDER BY created_at ASC`
+    );
+    const pending = pendingQ.rows;
+    if (!pending.length) {
+      return res.json({ ok: true, pending_count: 0, applied: 0, message: 'No pending edits.' });
+    }
+
+    const analyzerModule = require('./analyzer');
+    const getCurrentPrompt = analyzerModule.getCurrentPrompt;
+    const saveCurrentPrompt = analyzerModule.saveCurrentPrompt;
+    const currentPrompt = await getCurrentPrompt();
+
+    const changesBlock = pending.map((p, i) => {
+      const typeTag = p.change_type ? `[${p.change_type}]` : '';
+      const source = p.source ? ` (from ${p.source})` : '';
+      return `${i + 1}. ${typeTag}${source} ${p.description}`;
+    }).join('\n');
+
+    const system = `You are a prompt engineer merging a batch of QC-reviewer corrections and improvements into an SMS bot system prompt. Apply every change precisely. Preserve the existing structure, tone rules, knowledge base content, and JSON response format contract. If two changes conflict, favor the newer one and note the conflict in a brief trailing comment block. Output ONLY the full revised prompt text with no markdown fences and no preamble.`;
+    const userContent = `CURRENT SYSTEM PROMPT:\n\n${currentPrompt}\n\n---\n\nPENDING EDITS TO APPLY (${pending.length} total):\n${changesBlock}\n\n---\n\nReturn the full updated system prompt.`;
+
+    const resp = await callAnthropic(
+      {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 10000,
+        system,
+        messages: [{ role: 'user', content: userContent }]
+      },
+      {
+        category: 'qc_batch_apply',
+        location_id: null,
+        meta: { pending_count: pending.length, dry_run: !!dry_run }
+      }
+    );
+
+    const newPrompt = (resp.content.find((b) => b.type === 'text')?.text || '').trim();
+    if (!newPrompt) {
+      return res.status(500).json({ error: 'Claude returned empty prompt' });
+    }
+
+    if (dry_run) {
+      return res.json({
+        ok: true, dry_run: true, pending_count: pending.length,
+        preview: newPrompt.slice(0, 2000),
+        applied_ids: []
+      });
+    }
+
+    await saveCurrentPrompt(newPrompt);
+    const ids = pending.map((p) => p.id);
+    await db.query(
+      `UPDATE pending_prompt_changes SET status = 'applied', resolved_at = NOW() WHERE id = ANY($1)`,
+      [ids]
+    );
+    logger.log('qc', 'info', null, 'QC batch apply completed', { count: pending.length, by: req.session?.username });
+    res.json({ ok: true, pending_count: pending.length, applied: pending.length, applied_ids: ids });
+  } catch (err) {
+    logger.log('qc', 'error', null, 'apply-pending failed', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
 module.exports = router;
