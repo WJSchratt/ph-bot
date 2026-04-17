@@ -1726,22 +1726,48 @@ async function loadQC() {
 
 async function loadConversation(id, convMeta) {
   selectedQcConvId = id;
-  const data = await api('/api/conversations/' + id + '/full');
+  // Unified thread: pulls the full ghl_messages history merged with the local
+  // Claude messages table, so the reviewer sees every message (including
+  // pre-bot Botpress drips) with source tags.
+  const data = await api('/api/qc/conversation-thread-by-local/' + id);
   if (!data) return;
   const conv = data.conversation || convMeta || {};
   document.getElementById('qc-lead-name').textContent = (conv.first_name || '') + ' ' + (conv.last_name || '');
-  document.getElementById('qc-lead-meta').textContent = (conv.product_type || '') + ' -- ' + fmtNum(conv.message_count) + ' msgs' + (conv.terminal_outcome ? ' -- ' + conv.terminal_outcome : '');
+  document.getElementById('qc-lead-meta').textContent = (conv.product_type || '') + ' -- ' + fmtNum((data.thread || []).length) + ' msgs' + (conv.terminal_outcome ? ' -- ' + conv.terminal_outcome : '') + (data.fallback === 'local_only' ? ' · local-only (not yet pulled)' : '');
+  renderQcThread(data.thread || []);
+}
 
+// Source → badge style + label.
+function qcSourceBadge(source) {
+  const map = {
+    user:         { cls: 'pill c',  label: 'Lead' },
+    claude:       { cls: 'pill b',  label: 'Claude' },
+    botpress:     { cls: 'pill a',  label: 'BotPress (archive)' },
+    ghl_workflow: { cls: 'pill g',  label: 'Workflow Drip' },
+    unknown:      { cls: 'pill',    label: 'Manual / Unknown' }
+  };
+  return map[source] || map.unknown;
+}
+
+function renderQcThread(thread) {
   const msgsEl = document.getElementById('qc-messages');
   msgsEl.innerHTML = '';
-  (data.messages || []).forEach(m => {
+  if (!thread.length) {
+    msgsEl.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;">No messages in thread.</div>';
+    return;
+  }
+  for (const m of thread) {
     const d = document.createElement('div');
-    const isBot = m.direction === 'outbound';
-    d.className = 'bubble ' + (isBot ? 'bot' : 'lead');
-    const lbl = isBot ? 'AI Bot' + (m.message_type ? ' -- ' + m.message_type : '') : 'Lead';
-    d.innerHTML = '<div class="bubble-lbl">' + lbl + '</div>' + esc(m.content || '');
+    const isOutbound = m.direction === 'outbound';
+    d.className = 'bubble ' + (isOutbound ? 'bot' : 'lead');
+    const badge = qcSourceBadge(m.source || (isOutbound ? 'unknown' : 'user'));
+    const lockIcon = isOutbound && !m.editable ? ' <span style="color:var(--muted);font-size:9px;" title="Only Claude turns are editable">[archive — read-only]</span>' : '';
+    const ts = m.created_at ? new Date(m.created_at).toLocaleString() : '';
+    d.innerHTML =
+      '<div class="bubble-lbl"><span class="' + badge.cls + '" style="margin-right:6px;">' + esc(badge.label) + '</span>' + esc(ts) + lockIcon + '</div>' +
+      esc(m.content || '');
     msgsEl.appendChild(d);
-  });
+  }
   msgsEl.scrollTop = msgsEl.scrollHeight;
 }
 
@@ -1833,22 +1859,15 @@ async function loadQcBotpress() {
 }
 
 async function loadBotpressConversation(convId, locationId, meta) {
-  const data = await api('/api/qc/botpress-archive/' + encodeURIComponent(convId) + '?location_id=' + encodeURIComponent(locationId));
+  // Use the unified thread endpoint so Botpress-era conversations also get
+  // per-message source tagging (inbound=user, outbound=botpress/workflow/etc).
+  const data = await api('/api/qc/conversation-thread/' + encodeURIComponent(convId) + '?location_id=' + encodeURIComponent(locationId));
   if (!data) return;
-  selectedQcConvId = null; // Botpress convs can't use the /qc/review endpoint (different table).
+  selectedQcConvId = null; // ghl_messages-backed convs can't flush to local qc_reviews.
   const conv = data.conversation || {};
-  document.getElementById('qc-lead-name').innerHTML = esc(conv.contact_name || '(no name)') + ' <span class="pill a" style="margin-left:6px;">' + esc(data.archive_tag) + '</span>';
-  document.getElementById('qc-lead-meta').textContent = (conv.contact_phone || '') + ' -- ' + fmtNum(conv.message_count) + ' msgs' + (conv.terminal_outcome ? ' -- ' + conv.terminal_outcome : '');
-  const msgsEl = document.getElementById('qc-messages');
-  msgsEl.innerHTML = '';
-  (data.messages || []).forEach(m => {
-    const d = document.createElement('div');
-    const isBot = m.direction === 'outbound';
-    d.className = 'bubble ' + (isBot ? 'bot' : 'lead');
-    d.innerHTML = '<div class="bubble-lbl">' + (isBot ? 'BotPress (archive)' : 'Lead') + '</div>' + esc(m.content || '');
-    msgsEl.appendChild(d);
-  });
-  msgsEl.scrollTop = msgsEl.scrollHeight;
+  document.getElementById('qc-lead-name').innerHTML = esc(conv.contact_name || '(no name)') + ' <span class="pill a" style="margin-left:6px;">ARCHIVE</span>';
+  document.getElementById('qc-lead-meta').textContent = (conv.contact_phone || '') + ' -- ' + fmtNum((data.thread || []).length) + ' msgs' + (conv.terminal_outcome ? ' -- ' + conv.terminal_outcome : '');
+  renderQcThread(data.thread || []);
 }
 
 async function loadQcClusterPicker() {

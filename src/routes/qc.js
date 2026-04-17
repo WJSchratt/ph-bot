@@ -154,6 +154,164 @@ router.post('/qc/pull-random', async (req, res) => {
   }
 });
 
+// ============================================================
+// Unified conversation view — merges ghl_messages (complete archive)
+// with local messages table (for Claude turn attribution).
+//
+// Returns every message in timestamp order, each tagged with source:
+//   user         → inbound
+//   claude       → outbound + matched in local messages table
+//   botpress     → outbound + matches Botpress content patterns
+//   ghl_workflow → outbound + first outbound of the thread (drip opener)
+//   unknown      → outbound + none of the above (likely manual agent)
+//
+// Backs the QC Portal detail view, Analyzer detail view, and Word
+// Track cluster detail view. One endpoint, one source of truth.
+// ============================================================
+const ghlConv = require('../services/ghlConversations');
+
+async function buildUnifiedThread(ghlConversationId, locationId) {
+  const msgsQ = await db.query(
+    `SELECT id, direction, content, message_type, created_at, cluster_id, ghl_message_id
+       FROM ghl_messages
+      WHERE ghl_conversation_id = $1 AND location_id = $2
+      ORDER BY created_at ASC`,
+    [ghlConversationId, locationId]
+  );
+  const ghlRows = msgsQ.rows;
+
+  // Pull local Claude bot messages by contact_id so we can match timestamps.
+  // A content/timestamp match = this outbound came from our Claude bot.
+  const convQ = await db.query(
+    `SELECT contact_id FROM ghl_conversations WHERE ghl_conversation_id = $1 AND location_id = $2`,
+    [ghlConversationId, locationId]
+  );
+  const contactId = convQ.rows[0]?.contact_id;
+
+  const claudeSet = new Set(); // content fingerprints (first 80 chars) from local msgs
+  const claudeTimestamps = []; // [{ts, content}] for fuzzy match
+  if (contactId) {
+    const localQ = await db.query(
+      `SELECT m.content, m.created_at, m.message_type
+         FROM messages m
+         JOIN conversations c ON c.id = m.conversation_id
+        WHERE c.contact_id = $1 AND c.location_id = $2 AND m.direction = 'outbound'`,
+      [contactId, locationId]
+    );
+    for (const r of localQ.rows) {
+      const fp = String(r.content || '').trim().slice(0, 80).toLowerCase();
+      if (fp) {
+        claudeSet.add(fp);
+        claudeTimestamps.push({ ts: new Date(r.created_at).getTime(), content: fp });
+      }
+    }
+  }
+
+  let firstOutboundFound = false;
+  const out = [];
+  for (const r of ghlRows) {
+    let source;
+    if (r.direction === 'inbound') {
+      source = 'user';
+    } else {
+      const fp = String(r.content || '').trim().slice(0, 80).toLowerCase();
+      const ts = r.created_at ? new Date(r.created_at).getTime() : 0;
+      // Claude match: exact-ish content or timestamp-within-2s + some content overlap.
+      const byContent = claudeSet.has(fp);
+      const byTimestamp = claudeTimestamps.some((c) => Math.abs(c.ts - ts) < 2000 && c.content.slice(0, 40) === fp.slice(0, 40));
+      if (byContent || byTimestamp) {
+        source = 'claude';
+      } else if (ghlConv.isBotpressStyleOutbound(r.content || '') || ghlConv.isClaudeJsonPayload(r.content || '')) {
+        // JSON payload in ghl_messages that didn't match local messages is a
+        // stale Claude send from before the local store existed — still Claude.
+        source = ghlConv.isClaudeJsonPayload(r.content || '') ? 'claude' : 'botpress';
+      } else if (!firstOutboundFound) {
+        source = 'ghl_workflow';
+      } else {
+        source = 'unknown';
+      }
+      firstOutboundFound = true;
+    }
+    out.push({
+      id: r.id,
+      ghl_message_id: r.ghl_message_id,
+      direction: r.direction,
+      content: r.content,
+      message_type: r.message_type,
+      created_at: r.created_at,
+      cluster_id: r.cluster_id,
+      source,
+      editable: source === 'claude'
+    });
+  }
+  return out;
+}
+
+router.get('/conversation-thread/:ghl_conversation_id', async (req, res) => {
+  try {
+    const { ghl_conversation_id } = req.params;
+    const location_id = req.query.location_id;
+    if (!location_id) return res.status(400).json({ error: 'location_id required' });
+    const meta = await db.query(
+      `SELECT gc.*, COALESCE(s.name, gc.location_id) AS subaccount_name
+         FROM ghl_conversations gc
+         LEFT JOIN subaccounts s ON s.ghl_location_id = gc.location_id
+        WHERE gc.ghl_conversation_id = $1 AND gc.location_id = $2`,
+      [ghl_conversation_id, location_id]
+    );
+    if (!meta.rows[0]) return res.status(404).json({ error: 'not found' });
+    const thread = await buildUnifiedThread(ghl_conversation_id, location_id);
+    res.json({ conversation: meta.rows[0], thread });
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
+// Lookup by local conversation id → resolve to ghl_conversation_id + render.
+router.get('/conversation-thread-by-local/:local_id', async (req, res) => {
+  try {
+    const localId = parseInt(req.params.local_id, 10);
+    const convQ = await db.query(
+      `SELECT c.*, COALESCE(s.name, c.location_id) AS subaccount_name
+         FROM conversations c
+         LEFT JOIN subaccounts s ON s.ghl_location_id = c.location_id
+        WHERE c.id = $1`,
+      [localId]
+    );
+    const conv = convQ.rows[0];
+    if (!conv) return res.status(404).json({ error: 'not found' });
+    // Find the matching ghl_conversations row.
+    const ghlQ = await db.query(
+      `SELECT ghl_conversation_id FROM ghl_conversations
+        WHERE contact_id = $1 AND location_id = $2
+        ORDER BY last_message_at DESC LIMIT 1`,
+      [conv.contact_id, conv.location_id]
+    );
+    const ghlId = ghlQ.rows[0]?.ghl_conversation_id;
+    if (!ghlId) {
+      // Fallback: build from local messages only.
+      const msgs = await db.query(
+        `SELECT id, direction, content, message_type, created_at
+           FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC`,
+        [localId]
+      );
+      return res.json({
+        conversation: conv,
+        thread: msgs.rows.map((m) => ({
+          ...m,
+          source: m.direction === 'inbound' ? 'user' : 'claude',
+          editable: m.direction === 'outbound'
+        })),
+        fallback: 'local_only'
+      });
+    }
+    const thread = await buildUnifiedThread(ghlId, conv.location_id);
+    res.json({ conversation: conv, thread, ghl_conversation_id: ghlId });
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
 // Get full conversation by ID (for QC panel)
 router.get('/conversations/:id/full', async (req, res) => {
   try {
