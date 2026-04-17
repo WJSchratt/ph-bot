@@ -233,6 +233,30 @@ tr:last-child td{border-bottom:none;}
   .qc-hero-row{grid-template-columns:repeat(2,1fr);}
 }
 
+/* Analyzer Performance Overview cards — hero number per source, */
+/* supporting metrics below, single accent color per card. */
+.an-stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.an-source-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:22px;}
+.an-source-card.claude{border-color:rgba(59,130,246,.3);}
+.an-source-card.botpress{border-color:rgba(245,158,11,.3);}
+.an-source-card.other{border-color:var(--border2);}
+.an-source-card.combined{border-color:rgba(16,217,138,.3);margin-bottom:14px;}
+.an-source-hdr{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.an-source-name{font-size:14px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:1px;}
+.an-hero-row{display:flex;align-items:baseline;gap:8px;margin:4px 0 14px;}
+.an-hero-num{font-size:32px;font-weight:700;color:#fff;line-height:1;}
+.an-source-card.claude .an-hero-num{color:var(--blue);}
+.an-source-card.botpress .an-hero-num{color:var(--amber);}
+.an-source-card.combined .an-hero-num{color:var(--green);}
+.an-source-card.other .an-hero-num{color:var(--muted);}
+.an-hero-lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+.an-stat-line{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);padding:4px 0;}
+.an-stat-line strong{color:#fff;font-weight:600;}
+.an-outcome-lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;margin:14px 0 6px;font-weight:600;}
+@media (max-width:760px){
+  .an-stats-grid{grid-template-columns:1fr;}
+}
+
 /* REVIEW ITEMS */
 .rv-item{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:15px;margin-bottom:11px;}
 .rv-header{display:flex;align-items:center;gap:9px;margin-bottom:11px;flex-wrap:wrap;}
@@ -756,16 +780,16 @@ textarea.form-input{resize:vertical;min-height:80px;}
     </div>
   </div>
 
-  <!-- Source filter -->
-  <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px;flex-wrap:wrap;">
-    <div class="itabs">
-      <div class="itab active" data-src="all" onclick="analyzerSetSource('all', this)">All (Combined)</div>
+  <!-- Source filter — pill tabs, consistent with QC Portal -->
+  <div style="display:flex;align-items:center;gap:16px;margin-bottom:18px;flex-wrap:wrap;">
+    <div class="qc-tabs-row">
+      <div class="itab active" data-src="all" onclick="analyzerSetSource('all', this)">All</div>
       <div class="itab" data-src="claude" onclick="analyzerSetSource('claude', this)">Claude Bot</div>
       <div class="itab" data-src="botpress" onclick="analyzerSetSource('botpress', this)">BotPress</div>
       <div class="itab" data-src="other" onclick="analyzerSetSource('other', this)">Other</div>
     </div>
-    <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;">
-      <input type="checkbox" id="an-replied-only" onchange="analyzerLoadConversations()"> Only show conversations where the user actually replied
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" id="an-replied-only" onchange="analyzerLoadConversations()"> Only show conversations where the user replied
     </label>
   </div>
 
@@ -782,18 +806,21 @@ textarea.form-input{resize:vertical;min-height:80px;}
     <div class="sh"><span class="sh-title">Conversation Review</span><div class="sh-line"></div>
       <input class="finput" id="an-search" placeholder="Search by name/phone..." oninput="analyzerRenderConvs()" style="min-width:220px;">
     </div>
-    <div class="conv-wrap" style="height:440px;">
+    <div class="conv-wrap">
       <div class="conv-list">
         <div class="conv-list-header" id="an-list-header">Conversations</div>
-        <div id="an-conv-list"></div>
+        <div id="an-conv-list" class="conv-list-scroll"></div>
       </div>
       <div class="conv-panel">
         <div class="conv-top">
-          <div><strong id="an-conv-name">Select a conversation</strong><span style="font-size:11px;color:var(--muted);margin-left:10px;" id="an-conv-meta"></span></div>
-          <span class="pill c" id="an-conv-source-pill" style="margin-left:auto;display:none;"></span>
+          <div style="flex:1;">
+            <strong id="an-conv-name">Select a conversation</strong>
+            <span id="an-conv-meta" style="display:block;font-size:13px;color:var(--muted);margin-top:4px;"></span>
+          </div>
+          <span class="pill c" id="an-conv-source-pill" style="display:none;"></span>
         </div>
         <div class="conv-messages" id="an-messages">
-          <div style="color:var(--muted);text-align:center;padding:40px;">Select a conversation from the left panel.</div>
+          <div style="color:var(--muted);text-align:center;padding:60px 20px;font-size:14px;">Select a conversation from the left panel.</div>
         </div>
       </div>
     </div>
@@ -3283,37 +3310,39 @@ async function analyzerLoadStats() {
     return;
   }
   const s = data.stats;
-  const renderCard = (label, color, stats) => {
+  // Hero-number per card (conversation count = the headline). Supporting
+  // metrics as a neutral stat list below. One accent color per card.
+  const renderCard = (label, sourceClass, stats) => {
     const topOutcomes = Object.entries(stats.outcomes || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
-    const outcomesHtml = topOutcomes.map(([o, c]) => '<div style="font-size:11px;color:var(--muted);">' + esc(o) + ': <strong style="color:var(--cyan);">' + fmtNum(c) + '</strong></div>').join('') || '<div style="font-size:11px;color:var(--muted);">(no outcomes)</div>';
-    return '<div class="card kpi-l ' + color + '" style="padding:13px;">' +
-      '<div class="card-title">' + label + '</div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;">' +
-        '<div><div class="card-value sm">' + fmtNum(stats.count) + '</div><div class="card-sub">Conversations</div></div>' +
-        '<div><div class="card-value sm" style="color:var(--green);">' + fmtPct(stats.completion_rate) + '</div><div class="card-sub">Completion</div></div>' +
-        '<div><div class="card-value sm" style="color:var(--amber);">' + fmtNum(stats.avg_messages, 1) + '</div><div class="card-sub">Avg msgs</div></div>' +
-        '<div><div class="card-value sm" style="color:var(--cyan);">' + fmtNum(stats.completed) + '</div><div class="card-sub">Completed</div></div>' +
+    const outcomesHtml = topOutcomes.length
+      ? topOutcomes.map(([o, c]) => '<div class="an-stat-line"><span>' + esc(o) + '</span><strong>' + fmtNum(c) + '</strong></div>').join('')
+      : '<div style="font-size:12px;color:var(--muted);font-style:italic;">(no outcomes yet)</div>';
+    return '<div class="an-source-card ' + sourceClass + '">' +
+      '<div class="an-source-hdr"><span class="an-source-name">' + esc(label) + '</span></div>' +
+      '<div class="an-hero-row">' +
+        '<span class="an-hero-num">' + fmtNum(stats.count) + '</span>' +
+        '<span class="an-hero-lbl">Conversations</span>' +
       '</div>' +
-      '<div class="divider"></div>' +
-      '<div style="font-size:10px;letter-spacing:1px;color:var(--muted);margin-bottom:4px;">TOP OUTCOMES</div>' +
+      '<div class="an-stat-line"><span>Completed</span><strong>' + fmtNum(stats.completed) + ' · ' + fmtPct(stats.completion_rate) + '</strong></div>' +
+      '<div class="an-stat-line"><span>Avg messages</span><strong>' + fmtNum(stats.avg_messages, 1) + '</strong></div>' +
+      '<div class="an-outcome-lbl">Top Outcomes</div>' +
       outcomesHtml +
     '</div>';
   };
 
   if (analyzerSource === 'all') {
-    el.innerHTML = renderCard('Combined (All Sources)', 'g', s.combined) +
-      '<div class="divider"></div>' +
-      '<div class="grid c3" style="margin-top:10px;">' +
-        renderCard('Claude Bot', '', s.claude) +
-        renderCard('BotPress', 'p', s.botpress) +
-        renderCard('Other', 'a', s.other) +
+    el.innerHTML = renderCard('Combined (All Sources)', 'combined', s.combined) +
+      '<div class="an-stats-grid">' +
+        renderCard('Claude Bot', 'claude', s.claude) +
+        renderCard('BotPress', 'botpress', s.botpress) +
+        renderCard('Other', 'other', s.other) +
       '</div>';
   } else if (analyzerSource === 'claude') {
-    el.innerHTML = renderCard('Claude Bot', '', s.claude);
+    el.innerHTML = renderCard('Claude Bot', 'claude', s.claude);
   } else if (analyzerSource === 'botpress') {
-    el.innerHTML = renderCard('BotPress', 'p', s.botpress);
+    el.innerHTML = renderCard('BotPress', 'botpress', s.botpress);
   } else {
-    el.innerHTML = renderCard('Other', 'a', s.other);
+    el.innerHTML = renderCard('Other', 'other', s.other);
   }
 }
 
