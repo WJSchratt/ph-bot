@@ -669,11 +669,16 @@ textarea.form-input{resize:vertical;min-height:80px;}
   </div>
 
   <!-- Source filter -->
-  <div class="itabs" style="margin-bottom:12px;">
-    <div class="itab active" data-src="all" onclick="analyzerSetSource('all', this)">All (Combined)</div>
-    <div class="itab" data-src="claude" onclick="analyzerSetSource('claude', this)">Claude Bot</div>
-    <div class="itab" data-src="botpress" onclick="analyzerSetSource('botpress', this)">BotPress</div>
-    <div class="itab" data-src="other" onclick="analyzerSetSource('other', this)">Other</div>
+  <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px;flex-wrap:wrap;">
+    <div class="itabs">
+      <div class="itab active" data-src="all" onclick="analyzerSetSource('all', this)">All (Combined)</div>
+      <div class="itab" data-src="claude" onclick="analyzerSetSource('claude', this)">Claude Bot</div>
+      <div class="itab" data-src="botpress" onclick="analyzerSetSource('botpress', this)">BotPress</div>
+      <div class="itab" data-src="other" onclick="analyzerSetSource('other', this)">Other</div>
+    </div>
+    <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" id="an-replied-only" onchange="analyzerLoadConversations()"> Only show conversations where the user actually replied
+    </label>
   </div>
 
   <!-- Section 1: Performance Overview -->
@@ -2766,6 +2771,7 @@ async function analyzerLoadStats() {
 async function analyzerLoadConversations() {
   if (!analyzerLocationId) return;
   const params = new URLSearchParams({ locationId: analyzerLocationId, source: analyzerSource, limit: '500' });
+  if (document.getElementById('an-replied-only')?.checked) params.set('replied', '1');
   const data = await api('/api/analyzer/pulled-conversations?' + params);
   if (!data) return;
   analyzerConvs = data.conversations || [];

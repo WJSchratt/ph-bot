@@ -713,6 +713,9 @@ router.get('/pulled-conversations', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
     const offset = parseInt(req.query.offset, 10) || 0;
     const search = req.query.search ? `%${req.query.search.toLowerCase()}%` : null;
+    // replied=1 filters to conversations where the contact actually replied
+    // (inbound message exists). Lets reviewers skip drip-into-void threads.
+    const repliedOnly = req.query.replied === '1' || req.query.replied === 'true';
 
     const where = ['location_id = $1'];
     const params = [locationId];
@@ -723,6 +726,12 @@ router.get('/pulled-conversations', async (req, res) => {
     if (search) {
       params.push(search);
       where.push(`(LOWER(COALESCE(contact_name, '')) LIKE $${params.length} OR COALESCE(contact_phone, '') LIKE $${params.length})`);
+    }
+    if (repliedOnly) {
+      where.push(`EXISTS (SELECT 1 FROM ghl_messages im
+                           WHERE im.ghl_conversation_id = ghl_conversations.ghl_conversation_id
+                             AND im.location_id = ghl_conversations.location_id
+                             AND im.direction = 'inbound')`);
     }
     const totalQ = await db.query(
       `SELECT COUNT(*)::int AS total FROM ghl_conversations WHERE ${where.join(' AND ')}`,
