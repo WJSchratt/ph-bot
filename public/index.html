@@ -935,9 +935,9 @@ textarea.form-input{resize:vertical;min-height:80px;}
     <div class="formula">cost_usd = (input x $3 + output x $15 + cache_write x $3.75 + cache_read x $0.30) / 1,000,000</div>
     <p>Every Claude call goes through <code>src/services/anthropic.js</code> which logs to <code>anthropic_usage_log</code> tagged with a category (bot_response, qc_sim_score, analyzer_analysis, dev_console, etc.). Dashboard aggregates SUM(cost_usd) by category and by location_id.</p>
 
-    <h3>5.2 Signal House SMS (prorated base + overage + MMS)</h3>
-    <div class="formula">base = (days_in_range / 30) x $50 · overage = max(0, sms_segments - prorated_included) x $0.01 · mms = mms_segments x $0.04</div>
-    <p>Base plan: $50/mo for 7,500 segments. Overage $0.01/seg. MMS $0.04/seg. GHL does not bill us separately — Signal House is the only carrier.</p>
+    <h3>5.2 Signal House SMS (per-segment, agency-wide tiered pool)</h3>
+    <div class="formula">first 7,500 agency segs/mo @ $0.00667 · overage @ $0.01 · MMS @ $0.04</div>
+    <p>Pool is agency-wide per calendar month. Per-sub cost allocated pro-rata by each sub's share of the month's agency volume. No base line item — per-message only. GHL does not bill us separately; Signal House is the only carrier.</p>
 
     <h3>5.3 Cost Per Message (Blended)</h3>
     <div class="formula">Cost Per Message = (Anthropic Total + Signal House Total) / Total Messages Sent</div>
