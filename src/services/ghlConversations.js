@@ -6,9 +6,14 @@ const GHL_BASE = 'https://services.leadconnectorhq.com';
 const VERSION = '2021-04-15';
 const CONV_PAGE_SIZE = 50;
 const MSG_PAGE_SIZE = 100;
-const MSG_RATE_SLEEP_MS = 50;
-const MSG_PARALLEL = 5;
-const CONV_RATE_SLEEP_MS = 100;
+// GHL's burst limit is ~10 req/s/location. Previous settings (5 parallel +
+// 50ms sleep) ran ~100 req/s and triggered 429s that were silently swallowed
+// — wiping every affected conversation's messages. New settings keep us well
+// under the limit with retry on 429/5xx.
+const MSG_RATE_SLEEP_MS = 250;
+const MSG_PARALLEL = 2;
+const MSG_RETRY_MAX = 4;
+const CONV_RATE_SLEEP_MS = 150;
 const MAX_CONVERSATIONS = 10000;
 
 function authHeaders(token) {
@@ -77,6 +82,36 @@ async function pullAllConversations(ghlToken, locationId, onProgress) {
   return out;
 }
 
+/**
+ * Fetch messages with retry on 429/5xx. Returns { ok, messages, error }.
+ * Callers MUST check ok before treating messages as authoritative — a failed
+ * fetch used to get silently swallowed into an empty array, then the caller
+ * would DELETE the conversation's stored messages and insert nothing, wiping
+ * the thread.
+ */
+async function pullMessagesWithRetry(ghlToken, conversationId, { maxAttempts = MSG_RETRY_MAX } = {}) {
+  let lastErr;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const msgs = await pullMessages(ghlToken, conversationId);
+      return { ok: true, messages: msgs, attempts: attempt };
+    } catch (err) {
+      lastErr = err;
+      const status = err.response?.status;
+      const transient = status === 429 || status === 408 || (status >= 500 && status < 600) || !status;
+      if (!transient || attempt === maxAttempts) {
+        return { ok: false, error: err.message, status, attempts: attempt };
+      }
+      // Exponential backoff: 500, 1000, 2000, 4000 ms. Plus respect
+      // Retry-After if GHL sends one.
+      const retryAfter = parseInt(err.response?.headers?.['retry-after'], 10);
+      const delay = Number.isFinite(retryAfter) ? retryAfter * 1000 : 500 * Math.pow(2, attempt - 1);
+      await sleep(delay);
+    }
+  }
+  return { ok: false, error: lastErr?.message || 'unknown', attempts: maxAttempts };
+}
+
 async function pullMessages(ghlToken, conversationId) {
   const out = [];
   let lastMessageId = null;
@@ -120,6 +155,9 @@ async function pullMessages(ghlToken, conversationId) {
     const newLastId = body.lastMessageId || msgs[msgs.length - 1]?.id;
     if (!newLastId || newLastId === lastMessageId) break;
     lastMessageId = newLastId;
+    // Gentle inter-page sleep so a single very-long conversation doesn't
+    // burst its own way into a 429.
+    await sleep(100);
   }
 
   out.sort((a, b) => {
@@ -493,25 +531,43 @@ async function pullAndStore(ghlToken, locationId, progressCallback, options = {}
 
   const localClaudeIds = await loadLocalClaudeContactIds(locationId);
 
-  // --- Fetch messages in parallel (5 at a time), classify, store ---
+  // --- Fetch messages per conversation (gentle concurrency + retry) ---
   let messagesFetched = 0;
+  let succeeded = 0;
+  let failedCount = 0;
+  const failures = []; // up to first 50 recorded for the job result
   const total = toFetch.length;
   progress({ phase: 'messages', fetched: 0, total });
 
-  const BATCH = 250;
+  const BATCH = 100;
   for (let start = 0; start < toFetch.length; start += BATCH) {
     const batch = toFetch.slice(start, start + BATCH);
     await processInParallel(batch, MSG_PARALLEL, async (ghlConvId) => {
-      let msgs = [];
-      try {
-        msgs = await pullMessages(ghlToken, ghlConvId);
-      } catch {
-        msgs = [];
+      const result = await pullMessagesWithRetry(ghlToken, ghlConvId);
+
+      if (!result.ok) {
+        // IMPORTANT: on failure, DO NOT touch stored messages. Previous bug
+        // was to swallow the error and then DELETE+INSERT empty, wiping the
+        // thread. Leave existing rows intact so retries can succeed later
+        // without data loss.
+        failedCount++;
+        if (failures.length < 50) {
+          failures.push({ conversation_id: ghlConvId, status: result.status || null, error: result.error });
+        }
+        logger.log('analyzer', 'warn', null, 'pullMessages retries exhausted', {
+          locationId, conversation_id: ghlConvId, status: result.status, error: result.error, attempts: result.attempts
+        });
+        messagesFetched++;
+        if (messagesFetched % 10 === 0 || messagesFetched === total) {
+          progress({ phase: 'messages', fetched: messagesFetched, total, failed: failedCount });
+        }
+        if (MSG_RATE_SLEEP_MS) await sleep(MSG_RATE_SLEEP_MS);
+        return;
       }
-      const filtered = msgs.filter(isSmsMessage);
+
+      const filtered = result.messages.filter(isSmsMessage);
       await replaceMessagesForConversation(ghlConvId, locationId, filtered);
 
-      // Classify
       const contactIdOfConv = await db.query(
         `SELECT contact_id FROM ghl_conversations WHERE ghl_conversation_id = $1 AND location_id = $2`,
         [ghlConvId, locationId]
@@ -536,19 +592,29 @@ async function pullAndStore(ghlToken, locationId, progressCallback, options = {}
         );
       }
 
+      succeeded++;
       messagesFetched++;
       if (messagesFetched % 10 === 0 || messagesFetched === total) {
-        progress({ phase: 'messages', fetched: messagesFetched, total });
+        progress({ phase: 'messages', fetched: messagesFetched, total, succeeded, failed: failedCount });
       }
       if (MSG_RATE_SLEEP_MS) await sleep(MSG_RATE_SLEEP_MS);
     });
   }
 
   logger.log('analyzer', 'info', null, 'pullAndStore complete', {
-    locationId, total_conversations: totalFetched, messages_fetched_for: toFetch.length
+    locationId, total_conversations: totalFetched,
+    messages_fetched_for: toFetch.length,
+    succeeded, failed: failedCount
   });
 
-  return { total_conversations: totalFetched, messages_fetched_for: toFetch.length, incremental: isIncremental };
+  return {
+    total_conversations: totalFetched,
+    messages_fetched_for: toFetch.length,
+    succeeded,
+    failed: failedCount,
+    failure_samples: failures,
+    incremental: isIncremental
+  };
 }
 
 module.exports = {
