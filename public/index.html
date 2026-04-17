@@ -461,25 +461,66 @@ textarea.form-input{resize:vertical;min-height:80px;}
 <!-- ====== WORDTRACKS ====== -->
 <div class="tab-content" id="tab-wordtracks">
   <div class="sh"><span class="sh-title">Workflows &amp; Word Tracks</span><div class="sh-line"></div>
-    <div style="font-size:11px;color:var(--muted);">Workflow identity from conversation openers. Drill in for per-position word tracks.</div>
+    <div style="font-size:12px;color:var(--muted);">Each workflow card expands to show its paths, then the per-position word tracks within each path.</div>
   </div>
-  <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-    <div id="wt-breadcrumb" style="font-size:12px;color:var(--muted);"></div>
-    <div style="flex:1;"></div>
-    <label style="font-size:11px;color:var(--muted);">Window (days):
-      <input id="wt-window" type="number" min="1" max="60" value="7" style="width:60px;background:var(--panel);border:1px solid var(--border);color:#fff;padding:4px 6px;border-radius:4px;" onchange="loadWordtracks()">
+  <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
+    <input id="wt-search" type="search" placeholder="Search workflows &amp; word tracks…" oninput="renderWtCards()" style="flex:1;min-width:240px;background:var(--panel);border:1px solid var(--border);color:#fff;padding:10px 14px;border-radius:8px;font-size:14px;outline:none;">
+    <label style="font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px;">Window:
+      <input id="wt-window" type="number" min="1" max="60" value="7" style="width:64px;background:var(--panel);border:1px solid var(--border);color:#fff;padding:8px 10px;border-radius:6px;" onchange="loadWordtracks()">
+      <span style="font-size:12px;">days</span>
     </label>
-    <button class="btn-sm" id="wt-recluster-btn" onclick="reclusterWordTracks()">Recluster now</button>
+    <button class="btn" id="wt-recluster-btn" onclick="reclusterWordTracks()">Recluster</button>
   </div>
-  <div class="card">
-    <table id="wt-stages-table">
-      <thead id="wt-stages-thead"><tr><th>Workflow</th><th>Convs</th><th>Sends</th><th>Replies</th><th>Reply %</th><th>Avg Reply</th><th>Bookings</th><th>Booking %</th><th>Opt-Outs</th><th>Opt-Out %</th><th>Drop-Off %</th></tr></thead>
-      <tbody id="wt-stages-tbody"></tbody>
-    </table>
-    <div id="wt-pagination"></div>
-  </div>
-  <div id="wt-stage-detail" style="margin-top:14px;"></div>
+  <div id="wt-cards-container"></div>
+  <div id="wt-pagination" style="margin-top:16px;"></div>
+  <div id="wt-stage-detail" style="margin-top:20px;"></div>
 </div>
+
+<style>
+/* WordTracks card redesign — progressive disclosure. */
+.wt-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 22px; margin-bottom: 18px; transition: border-color 160ms ease; }
+.wt-card:hover { border-color: var(--border2); }
+.wt-card-hdr { display: flex; align-items: flex-start; gap: 16px; cursor: pointer; }
+.wt-card-title { font-size: 18px; font-weight: 700; color: #fff; line-height: 1.3; margin: 0; flex: 1; }
+.wt-card-title .wt-unmapped { font-size: 11px; font-weight: 600; color: var(--amber); background: rgba(255,181,71,0.1); padding: 2px 8px; border-radius: 4px; margin-right: 8px; vertical-align: middle; }
+.wt-card-hero { text-align: right; }
+.wt-hero-num { font-size: 26px; font-weight: 700; color: var(--cyan); line-height: 1; }
+.wt-hero-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+.wt-card-meta { display: flex; gap: 16px; font-size: 13px; color: var(--muted); margin-top: 10px; flex-wrap: wrap; align-items: center; }
+.wt-card-meta .wt-meta-item { display: flex; align-items: center; gap: 6px; }
+.wt-card-meta strong { color: #fff; font-weight: 600; }
+.wt-card-badges { display: flex; gap: 4px; flex-wrap: wrap; }
+.wt-card-badge { font-size: 10px; padding: 2px 7px; border-radius: 4px; background: rgba(0,212,255,0.1); color: var(--cyan); border: 1px solid rgba(0,212,255,0.3); }
+.wt-caret { font-size: 12px; color: var(--muted); transition: transform 180ms ease; display: inline-block; }
+.wt-caret.open { transform: rotate(90deg); }
+.wt-card-body { max-height: 0; overflow: hidden; transition: max-height 260ms ease; }
+.wt-card-body.open { max-height: 12000px; }
+.wt-card-body-inner { padding-top: 18px; border-top: 1px solid var(--border); margin-top: 18px; }
+.wt-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px 20px; font-size: 13px; margin-top: 4px; }
+.wt-detail-item .wt-detail-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; }
+.wt-detail-item .wt-detail-val { font-size: 16px; font-weight: 600; color: #fff; margin-top: 3px; }
+.wt-example { font-size: 13px; color: var(--muted); font-style: italic; background: var(--panel); padding: 12px 14px; border-radius: 6px; border-left: 3px solid var(--cyan); margin-top: 14px; line-height: 1.5; white-space: pre-wrap; }
+.wt-path-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-top: 14px; }
+.wt-path-card:first-child { margin-top: 6px; }
+.wt-path-card .wt-card-title { font-size: 15px; }
+.wt-path-card .wt-hero-num { font-size: 22px; }
+.wt-position-group { margin-top: 14px; }
+.wt-position-hdr { font-size: 12px; font-weight: 700; color: var(--cyan); letter-spacing: 0.5px; text-transform: uppercase; padding: 6px 0; }
+.wt-wt-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 8px; }
+.wt-wt-card .wt-card-title { font-size: 14px; }
+.wt-wt-card .wt-hero-num { font-size: 18px; }
+.wt-empty { text-align: center; padding: 40px; color: var(--muted); font-size: 14px; }
+.wt-empty a { color: var(--cyan); }
+.wt-pager { display: flex; gap: 12px; align-items: center; justify-content: center; padding: 14px 8px; font-size: 14px; color: var(--muted); }
+.wt-pager button { background: var(--panel); border: 1px solid var(--border); color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 14px; cursor: pointer; transition: background 120ms; }
+.wt-pager button:hover:not(:disabled) { background: var(--surface2); border-color: var(--border2); }
+.wt-pager button:disabled { opacity: 0.35; cursor: not-allowed; }
+@media (max-width: 760px) {
+  .wt-card { padding: 16px; }
+  .wt-card-hdr { flex-direction: column; }
+  .wt-card-hero { text-align: left; }
+}
+</style>
 
 <!-- ====== PIPELINE ====== -->
 <div class="tab-content" id="tab-pipeline">
@@ -1555,9 +1596,20 @@ function chartOpts() {
   };
 }
 
-// ========== WORDTRACKS (two-layer: workflows → positions → clusters) ==========
-let wtView = { level: 'workflows', workflowId: null, workflowLabel: null, page: 1 };
+// ========== WORDTRACKS (cards view — workflow → path → position clusters) ==========
+// State: fetched workflow list (cached in memory), expanded card IDs, path
+// aggregates (lazy-loaded on first expand), current page, search query.
 const WT_PAGE_SIZE = 10;
+let wtState = {
+  workflows: [],            // raw list from /api/wordtracks/workflows
+  grouped: [],              // [{name, paths:[{path,clusters:[]}]}] derived from workflows
+  expandedGroups: new Set(),
+  expandedPaths: new Set(), // keyed "name::path"
+  pathCache: new Map(),     // name::path → positions[]
+  pathLoading: new Set(),
+  page: 1,
+  search: ''
+};
 
 // Render-time humanization of kebab-case cluster labels. Keep the slug in
 // the DB for stability; this is cosmetic only.
@@ -1585,32 +1637,93 @@ function displayLabel(rawLabel, fallbackId, kind) {
   return humanizeLabel(rawLabel);
 }
 
-function loadWordtracks() {
-  wtView = { level: 'workflows', workflowId: null, workflowLabel: null, page: 1 };
-  renderWtView();
+async function loadWordtracks() {
+  wtState.page = 1;
+  wtState.expandedGroups = new Set();
+  wtState.expandedPaths = new Set();
+  wtState.pathCache = new Map();
+  const windowDays = parseInt(document.getElementById('wt-window')?.value, 10) || 7;
+  const params = new URLSearchParams({ days: getDays(), window_days: windowDays });
+  const data = await api('/api/wordtracks/workflows?' + params);
+  if (!data) return;
+  wtState.workflows = data.workflows || [];
+  wtState.grouped = groupWorkflowsForCards(wtState.workflows);
+  renderWtCards();
 }
 
-async function renderWtView() {
-  if (wtView.level === 'workflows') return renderWtWorkflows();
-  if (wtView.level === 'workflow') return renderWtWorkflowDetail(wtView.workflowId);
+/**
+ * Collapse the flat workflow_clusters list into:
+ *   [{ name, display_name, paths: [{ path, display_name, clusters: [...] }] }]
+ *
+ * Mapped clusters group under their real GHL workflow name. Unmapped ones
+ * each become their own "group" so nothing is lost (but they carry the
+ * [unmapped] marker).
+ */
+function groupWorkflowsForCards(workflows) {
+  const byName = new Map();
+  for (const w of workflows) {
+    const name = w.ghl_workflow_name || '[unmapped] ' + humanizeLabel(w.label || 'unlabeled');
+    const path = w.ghl_workflow_path || null;
+    if (!byName.has(name)) byName.set(name, { name, mapped: !!w.ghl_workflow_name, paths: new Map() });
+    const g = byName.get(name);
+    const pk = path || '__no_path__';
+    if (!g.paths.has(pk)) g.paths.set(pk, { path, clusters: [] });
+    g.paths.get(pk).clusters.push(w);
+  }
+  const groups = [];
+  for (const g of byName.values()) {
+    const paths = Array.from(g.paths.values()).map(p => ({
+      path: p.path,
+      clusters: p.clusters,
+      agg: aggregateWorkflowRows(p.clusters)
+    })).sort((a, b) => b.agg.sends - a.agg.sends);
+    const agg = aggregateWorkflowRows(g.paths.size === 1 ? [...g.paths.values()][0].clusters : [].concat(...paths.map(p => p.clusters)));
+    groups.push({ name: g.name, mapped: g.mapped, paths, agg });
+  }
+  return groups.sort((a, b) => b.agg.unique_conversations - a.agg.unique_conversations);
 }
 
-// Simple prev/next pagination controls. Renders into a target <div>.
-function renderWtPagination(targetId, page, totalPages, onPageChange) {
-  const el = document.getElementById(targetId);
-  if (!el) return;
-  if (totalPages <= 1) { el.innerHTML = ''; return; }
-  const prevDisabled = page <= 1;
-  const nextDisabled = page >= totalPages;
-  el.innerHTML =
-    '<div style="display:flex;gap:10px;align-items:center;justify-content:center;padding:12px 8px;font-size:12px;color:var(--muted);">' +
-      '<button class="btn-sm" ' + (prevDisabled ? 'disabled style="opacity:0.4;cursor:not-allowed;"' : 'onclick="' + onPageChange + '(' + (page - 1) + ')"') + '>&laquo; Prev</button>' +
-      '<span>Page <strong style="color:var(--cyan);">' + page + '</strong> of ' + totalPages + '</span>' +
-      '<button class="btn-sm" ' + (nextDisabled ? 'disabled style="opacity:0.4;cursor:not-allowed;"' : 'onclick="' + onPageChange + '(' + (page + 1) + ')"') + '>Next &raquo;</button>' +
-    '</div>';
+/**
+ * Merge a list of workflow_cluster rows into one aggregated row.
+ * Sums simple counters, MAXes timestamps, UNIONs subaccounts, weight-averages
+ * reply rate by sends.
+ */
+function aggregateWorkflowRows(rows) {
+  const out = {
+    sends: 0, replies: 0, bookings: 0, opt_outs: 0,
+    drop_offs: 0, unique_conversations: 0,
+    last_send_at: null, last_reply_at: null,
+    subaccount_locations: new Set(),
+    reply_seconds_weighted: 0, reply_seconds_weight: 0,
+    conversation_count: 0
+  };
+  for (const r of rows) {
+    out.sends += r.sends || 0;
+    out.replies += r.replies || 0;
+    out.bookings += r.bookings || 0;
+    out.opt_outs += r.opt_outs || 0;
+    out.drop_offs += r.drop_offs || 0;
+    out.unique_conversations += r.unique_conversations || 0;
+    out.conversation_count += r.conversation_count || 0;
+    if (r.avg_reply_seconds && r.replies) {
+      out.reply_seconds_weighted += r.avg_reply_seconds * r.replies;
+      out.reply_seconds_weight += r.replies;
+    }
+    if (r.last_send_at && (!out.last_send_at || new Date(r.last_send_at) > new Date(out.last_send_at))) out.last_send_at = r.last_send_at;
+    if (r.last_reply_at && (!out.last_reply_at || new Date(r.last_reply_at) > new Date(out.last_reply_at))) out.last_reply_at = r.last_reply_at;
+    for (const loc of (r.subaccount_locations || [])) out.subaccount_locations.add(loc);
+  }
+  out.subaccount_locations = Array.from(out.subaccount_locations);
+  out.reply_rate = out.sends ? out.replies / out.sends : 0;
+  out.booking_rate = out.unique_conversations ? out.bookings / out.unique_conversations : 0;
+  out.opt_out_rate = out.unique_conversations ? out.opt_outs / out.unique_conversations : 0;
+  out.drop_off_rate = out.sends ? out.drop_offs / out.sends : 0;
+  out.avg_reply_seconds = out.reply_seconds_weight ? out.reply_seconds_weighted / out.reply_seconds_weight : 0;
+  return out;
 }
-function wtGotoWorkflowPage(p) { wtView.page = p; renderWtWorkflows(); }
-function wtGotoWorkflowDetailPage(p) { wtView.page = p; renderWtWorkflowDetail(wtView.workflowId); }
+
+function wtGotoWorkflowPage(p) { wtState.page = p; renderWtCards(); }
+function wtGotoWorkflowDetailPage(p) { wtState.page = p; renderWtCards(); }
 
 // Short relative-time: "3m ago" / "2h ago" / "4d ago". null if no timestamp.
 function shortAgo(ts) {
@@ -1652,124 +1765,204 @@ function lastActivityLine(lastSend, lastReply) {
   return '<div style="font-size:9px;color:var(--muted);margin-top:3px;">' + parts.join(' · ') + '</div>';
 }
 
-async function renderWtWorkflows() {
-  document.getElementById('wt-breadcrumb').innerHTML = '<strong>All Workflows</strong>';
-  const thead = document.getElementById('wt-stages-thead');
-  thead.innerHTML = '<tr><th>Workflow</th><th>Convs</th><th>Sends</th><th>Replies</th><th>Reply %</th><th>Avg Reply</th><th>Bookings</th><th>Booking %</th><th>Opt-Outs</th><th>Opt-Out %</th><th>Drop-Off %</th></tr>';
-  const windowDays = parseInt(document.getElementById('wt-window')?.value, 10) || 7;
-  const params = new URLSearchParams({ days: getDays(), window_days: windowDays });
-  const data = await api('/api/wordtracks/workflows?' + params);
-  const tbody = document.getElementById('wt-stages-tbody');
-  tbody.innerHTML = '';
-  const pagerEl = document.getElementById('wt-pagination');
-  if (pagerEl) pagerEl.innerHTML = '';
-  if (!data || !(data.workflows || []).length) {
-    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:30px;color:var(--muted);">No workflows clustered yet — click "Recluster now" or <a href="javascript:showWtDiag()" style="color:var(--cyan);">see diagnostic</a>.</td></tr>';
-    const det = document.getElementById('wt-stage-detail');
-    if (det) det.innerHTML = '';
+// ===== Card renderer — level 1 (workflows) with progressive disclosure =====
+
+function renderWtCards() {
+  const search = (document.getElementById('wt-search')?.value || '').trim().toLowerCase();
+  wtState.search = search;
+
+  let groups = wtState.grouped;
+  if (search) {
+    groups = groups.filter(g => {
+      if (g.name.toLowerCase().includes(search)) return true;
+      return g.paths.some(p =>
+        (p.path || '').toLowerCase().includes(search) ||
+        p.clusters.some(c => (c.label || '').toLowerCase().includes(search) || (c.example_opener || '').toLowerCase().includes(search))
+      );
+    });
+  }
+
+  const container = document.getElementById('wt-cards-container');
+  if (!container) return;
+  if (!groups.length) {
+    container.innerHTML = search
+      ? '<div class="wt-empty">No matches for "' + esc(search) + '".</div>'
+      : '<div class="wt-empty">No workflows clustered yet — click <strong>Recluster</strong>, or <a href="javascript:showWtDiag()">see diagnostic</a>.</div>';
+    document.getElementById('wt-pagination').innerHTML = '';
+    const det = document.getElementById('wt-stage-detail'); if (det) det.innerHTML = '';
     return;
   }
-  const all = data.workflows || [];
-  const totalPages = Math.max(1, Math.ceil(all.length / WT_PAGE_SIZE));
-  if (wtView.page > totalPages) wtView.page = totalPages;
-  const startIdx = (wtView.page - 1) * WT_PAGE_SIZE;
-  const pageRows = all.slice(startIdx, startIdx + WT_PAGE_SIZE);
 
-  pageRows.forEach(w => {
-    const rawLabel = w.label || 'unlabeled';
-    const label = displayLabel(rawLabel, w.id, 'Workflow');
-    const avg = w.avg_reply_seconds ? (Math.round(w.avg_reply_seconds) + 's') : '---';
-    const badges = subaccountBadges(w.subaccount_locations);
-    const activity = lastActivityLine(w.last_send_at, w.last_reply_at);
-    const fullExample = (w.example_opener || '').trim();
-    const rowTitle = fullExample ? esc(fullExample.slice(0, 400)) : '';
-    tbody.innerHTML += '<tr style="cursor:pointer;" onclick="drillWtWorkflow(' + w.id + ', ' + JSON.stringify(label).replace(/"/g, '&quot;') + ')" title="' + rowTitle + '">' +
-      '<td><div style="font-weight:600;">' + badges + esc(label) + '</div>' +
-        (w.description ? '<div style="font-size:10px;color:var(--muted);margin-top:2px;">' + esc(w.description) + '</div>' : '') +
-        '<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic;">"' + esc((w.example_opener || '').slice(0, 120)) + '"</div>' +
-        activity + '</td>' +
-      '<td>' + fmtNum(w.unique_conversations) + '</td>' +
-      '<td>' + fmtNum(w.sends) + '</td>' +
-      '<td>' + fmtNum(w.replies) + '</td>' +
-      '<td style="color:var(--cyan);">' + fmtPct(w.reply_rate) + '</td>' +
-      '<td>' + avg + '</td>' +
-      '<td>' + fmtNum(w.bookings) + '</td>' +
-      '<td style="color:var(--green);">' + fmtPct(w.booking_rate) + '</td>' +
-      '<td>' + fmtNum(w.opt_outs) + '</td>' +
-      '<td style="color:' + (w.opt_out_rate > 0.035 ? 'var(--red)' : 'var(--muted)') + ';">' + fmtPct(w.opt_out_rate) + '</td>' +
-      '<td style="color:var(--amber);">' + fmtPct(w.drop_off_rate) + '</td>' +
-    '</tr>';
-  });
-  renderWtPagination('wt-pagination', wtView.page, totalPages, 'wtGotoWorkflowPage');
-  const det = document.getElementById('wt-stage-detail');
-  if (det) det.innerHTML = '';
+  const totalPages = Math.max(1, Math.ceil(groups.length / WT_PAGE_SIZE));
+  if (wtState.page > totalPages) wtState.page = totalPages;
+  const pageGroups = groups.slice((wtState.page - 1) * WT_PAGE_SIZE, wtState.page * WT_PAGE_SIZE);
+
+  container.innerHTML = pageGroups.map(g => renderWorkflowCard(g)).join('');
+  renderWtBigPager(wtState.page, totalPages);
+  const det = document.getElementById('wt-stage-detail'); if (det) det.innerHTML = '';
 }
 
-async function drillWtWorkflow(id, label) {
-  wtView = { level: 'workflow', workflowId: id, workflowLabel: label, page: 1 };
-  renderWtWorkflowDetail(id);
+function renderWorkflowCard(group) {
+  const key = group.name;
+  const open = wtState.expandedGroups.has(key);
+  const agg = group.agg;
+  const badges = subaccountBadges(agg.subaccount_locations);
+  const activity = lastActivityLine(agg.last_send_at, agg.last_reply_at) || '';
+  const unmappedTag = group.mapped ? '' : '<span class="wt-unmapped">UNMAPPED</span>';
+  const pathsHtml = open ? group.paths.map(p => renderPathCard(group, p)).join('') : '';
+  return '<div class="wt-card">' +
+    '<div class="wt-card-hdr" onclick="toggleWtGroup(' + JSON.stringify(key).replace(/"/g, '&quot;') + ')">' +
+      '<span class="wt-caret' + (open ? ' open' : '') + '">&rsaquo;</span>' +
+      '<div style="flex:1;">' +
+        '<div class="wt-card-title">' + unmappedTag + esc(group.name) + '</div>' +
+        '<div class="wt-card-meta">' +
+          '<div class="wt-meta-item"><strong>' + fmtNum(agg.unique_conversations) + '</strong> contacts</div>' +
+          '<div class="wt-meta-item"><strong>' + fmtNum(agg.sends) + '</strong> sends</div>' +
+          (group.paths.length > 1 ? '<div class="wt-meta-item">' + group.paths.length + ' paths</div>' : '') +
+          (badges ? '<div class="wt-card-badges">' + badges + '</div>' : '') +
+          (activity ? '<div class="wt-meta-item" style="color:var(--muted);">' + activity.replace(/^<div[^>]*>|<\/div>$/g, '') + '</div>' : '') +
+        '</div>' +
+      '</div>' +
+      '<div class="wt-card-hero">' +
+        '<div class="wt-hero-num">' + fmtPct(agg.reply_rate) + '</div>' +
+        '<div class="wt-hero-lbl">Reply Rate</div>' +
+      '</div>' +
+    '</div>' +
+    (open ? '<div class="wt-card-body open"><div class="wt-card-body-inner">' + renderWorkflowExpandedBody(group) + pathsHtml + '</div></div>' : '') +
+  '</div>';
 }
 
-function backToWorkflows() {
-  wtView = { level: 'workflows', workflowId: null, workflowLabel: null, page: 1 };
-  renderWtView();
+function renderWorkflowExpandedBody(group) {
+  const a = group.agg;
+  return '<div class="wt-detail-grid">' +
+    detailItem('Sends', fmtNum(a.sends)) +
+    detailItem('Replies', fmtNum(a.replies), 'cyan') +
+    detailItem('Avg Reply', a.avg_reply_seconds ? (Math.round(a.avg_reply_seconds) + 's') : '---') +
+    detailItem('Bookings', fmtNum(a.bookings), 'green') +
+    detailItem('Booking %', fmtPct(a.booking_rate), 'green') +
+    detailItem('Opt-Outs', fmtNum(a.opt_outs), a.opt_out_rate > 0.035 ? 'red' : '') +
+    detailItem('Opt-Out %', fmtPct(a.opt_out_rate), a.opt_out_rate > 0.035 ? 'red' : '') +
+    detailItem('Drop-Off %', fmtPct(a.drop_off_rate), 'amber') +
+    detailItem('Convs Assigned', fmtNum(a.conversation_count)) +
+  '</div>';
 }
 
-async function renderWtWorkflowDetail(wfId) {
-  document.getElementById('wt-breadcrumb').innerHTML =
-    '<a href="javascript:backToWorkflows()" style="color:var(--cyan);">All Workflows</a> &rsaquo; <strong>' + esc(wtView.workflowLabel || ('workflow #' + wfId)) + '</strong>';
-  const thead = document.getElementById('wt-stages-thead');
-  thead.innerHTML = '<tr><th>Position / Cluster</th><th>Sends</th><th>Replies</th><th>Reply %</th><th>Avg Reply</th><th>Bookings</th><th>Booking %</th><th>Opt-Outs</th><th>Opt-Out %</th><th>Drop-Off %</th><th>Convs</th></tr>';
-  const windowDays = parseInt(document.getElementById('wt-window')?.value, 10) || 7;
-  const params = new URLSearchParams({ days: getDays(), window_days: windowDays });
-  const data = await api('/api/wordtracks/workflow/' + wfId + '?' + params);
-  const tbody = document.getElementById('wt-stages-tbody');
-  tbody.innerHTML = '';
-  const pagerEl = document.getElementById('wt-pagination');
-  if (pagerEl) pagerEl.innerHTML = '';
-  if (!data) return;
+function detailItem(label, value, color) {
+  const c = color === 'cyan' ? 'var(--cyan)' : color === 'green' ? 'var(--green)' : color === 'red' ? 'var(--red)' : color === 'amber' ? 'var(--amber)' : '#fff';
+  return '<div class="wt-detail-item"><div class="wt-detail-lbl">' + esc(label) + '</div><div class="wt-detail-val" style="color:' + c + ';">' + value + '</div></div>';
+}
 
-  // Paginate at the position level — 10 positions per page is more natural
-  // than 10 clusters, since positions group together visually.
-  const positions = data.positions || [];
-  const totalPages = Math.max(1, Math.ceil(positions.length / WT_PAGE_SIZE));
-  if (wtView.page > totalPages) wtView.page = totalPages;
-  const startIdx = (wtView.page - 1) * WT_PAGE_SIZE;
-  const pagePositions = positions.slice(startIdx, startIdx + WT_PAGE_SIZE);
+function renderPathCard(group, path) {
+  const pathKey = group.name + '::' + (path.path || '__no_path__');
+  const open = wtState.expandedPaths.has(pathKey);
+  const agg = path.agg;
+  const title = path.path ? path.path : (group.paths.length > 1 ? '(no path)' : 'Default');
+  const badges = subaccountBadges(agg.subaccount_locations);
+  const activity = lastActivityLine(agg.last_send_at, agg.last_reply_at);
+  return '<div class="wt-path-card">' +
+    '<div class="wt-card-hdr" onclick="toggleWtPath(' + JSON.stringify(group.name).replace(/"/g, '&quot;') + ', ' + JSON.stringify(path.path).replace(/"/g, '&quot;') + ')">' +
+      '<span class="wt-caret' + (open ? ' open' : '') + '">&rsaquo;</span>' +
+      '<div style="flex:1;">' +
+        '<div class="wt-card-title">' + esc(title) + '</div>' +
+        '<div class="wt-card-meta">' +
+          '<div class="wt-meta-item"><strong>' + fmtNum(agg.unique_conversations) + '</strong> contacts</div>' +
+          '<div class="wt-meta-item"><strong>' + fmtNum(agg.sends) + '</strong> sends</div>' +
+          (badges ? '<div class="wt-card-badges">' + badges + '</div>' : '') +
+          (activity ? '<div class="wt-meta-item" style="color:var(--muted);">' + activity.replace(/^<div[^>]*>|<\/div>$/g, '') + '</div>' : '') +
+        '</div>' +
+      '</div>' +
+      '<div class="wt-card-hero">' +
+        '<div class="wt-hero-num">' + fmtPct(agg.reply_rate) + '</div>' +
+        '<div class="wt-hero-lbl">Reply Rate</div>' +
+      '</div>' +
+    '</div>' +
+    (open ? '<div class="wt-card-body open"><div class="wt-card-body-inner" id="path-body-' + cssSafe(pathKey) + '">' + renderPathBodyPlaceholder(pathKey) + '</div></div>' : '') +
+  '</div>';
+}
 
-  for (const posBlock of pagePositions) {
-    tbody.innerHTML += '<tr><td colspan="11" style="background:rgba(0,212,255,0.06);font-weight:700;padding:8px 10px;color:var(--cyan);">Message Position ' + posBlock.position + (posBlock.position === 1 ? ' (opener)' : '') + '</td></tr>';
-    for (const c of posBlock.clusters) {
-      const label = displayLabel(c.label || 'unlabeled', c.id, 'Cluster');
-      const avg = c.avg_reply_seconds ? (Math.round(c.avg_reply_seconds) + 's') : '---';
-      const badges = subaccountBadges(c.subaccount_locations);
-      const activity = lastActivityLine(c.last_send_at, c.last_reply_at);
-      const fullExample = (c.example_text || '').trim();
-      const rowTitle = fullExample ? esc(fullExample.slice(0, 400)) : '';
-      tbody.innerHTML += '<tr style="cursor:pointer;" onclick="expandWtCluster(' + c.id + ')" title="' + rowTitle + '">' +
-        '<td style="padding-left:24px;"><div style="font-weight:600;">' + badges + esc(label) + '</div>' +
-          (c.description ? '<div style="font-size:10px;color:var(--muted);margin-top:2px;">' + esc(c.description) + '</div>' : '') +
-          '<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic;">"' + esc((c.example_text || '').slice(0, 120)) + '"</div>' +
-          activity + '</td>' +
-        '<td>' + fmtNum(c.sends) + '</td>' +
-        '<td>' + fmtNum(c.replies) + '</td>' +
-        '<td style="color:var(--cyan);">' + fmtPct(c.reply_rate) + '</td>' +
-        '<td>' + avg + '</td>' +
-        '<td>' + fmtNum(c.bookings) + '</td>' +
-        '<td style="color:var(--green);">' + fmtPct(c.booking_rate) + '</td>' +
-        '<td>' + fmtNum(c.opt_outs) + '</td>' +
-        '<td style="color:' + (c.opt_out_rate > 0.035 ? 'var(--red)' : 'var(--muted)') + ';">' + fmtPct(c.opt_out_rate) + '</td>' +
-        '<td style="color:var(--amber);">' + fmtPct(c.drop_off_rate) + '</td>' +
-        '<td>' + fmtNum(c.unique_conversations) + '</td>' +
-      '</tr>';
+function cssSafe(s) { return String(s).replace(/[^a-z0-9]/gi, '_'); }
+function renderPathBodyPlaceholder(pathKey) {
+  const cached = wtState.pathCache.get(pathKey);
+  if (cached) return renderPathPositions(cached);
+  return '<div style="color:var(--muted);font-size:13px;">Loading word tracks…</div>';
+}
+
+function renderPathPositions(positions) {
+  if (!positions || !positions.length) return '<div style="color:var(--muted);font-size:13px;">No word tracks in this path yet.</div>';
+  return positions.map(pos => {
+    const header = '<div class="wt-position-hdr">Message Position ' + pos.position + (pos.position === 1 ? ' (opener)' : '') + '</div>';
+    const cards = pos.clusters.map(c => renderWordTrackCard(c, pos.position)).join('');
+    return '<div class="wt-position-group">' + header + cards + '</div>';
+  }).join('');
+}
+
+function renderWordTrackCard(c, position) {
+  const label = displayLabel(c.label || 'unlabeled', c.id, 'Cluster');
+  const badges = subaccountBadges(c.subaccount_locations);
+  const activity = lastActivityLine(c.last_send_at, c.last_reply_at);
+  const example = (c.example_text || '').trim();
+  const desc = c.description ? ('<div style="font-size:12px;color:var(--muted);margin-top:6px;">' + esc(c.description) + '</div>') : '';
+  return '<div class="wt-wt-card" style="cursor:pointer;" onclick="expandWtCluster(' + c.id + ')" title="' + esc(example.slice(0, 400)) + '">' +
+    '<div class="wt-card-hdr" style="cursor:pointer;">' +
+      '<div style="flex:1;">' +
+        '<div class="wt-card-title">' + esc(label) + '</div>' +
+        desc +
+        '<div class="wt-card-meta">' +
+          '<div class="wt-meta-item"><strong>' + fmtNum(c.sends) + '</strong> sends</div>' +
+          '<div class="wt-meta-item"><strong>' + fmtNum(c.unique_conversations) + '</strong> contacts</div>' +
+          (badges ? '<div class="wt-card-badges">' + badges + '</div>' : '') +
+          (activity ? '<div class="wt-meta-item" style="color:var(--muted);">' + activity.replace(/^<div[^>]*>|<\/div>$/g, '') + '</div>' : '') +
+        '</div>' +
+        (example ? '<div class="wt-example">' + esc(example.slice(0, 220)) + (example.length > 220 ? '…' : '') + '</div>' : '') +
+      '</div>' +
+      '<div class="wt-card-hero">' +
+        '<div class="wt-hero-num">' + fmtPct(c.reply_rate) + '</div>' +
+        '<div class="wt-hero-lbl">Reply Rate</div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+function renderWtBigPager(page, totalPages) {
+  const el = document.getElementById('wt-pagination');
+  if (!el) return;
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+  el.innerHTML =
+    '<div class="wt-pager">' +
+      '<button ' + (page <= 1 ? 'disabled' : 'onclick="wtGotoWorkflowPage(' + (page - 1) + ')"') + '>&laquo; Previous</button>' +
+      '<span>Page <strong style="color:var(--cyan);">' + page + '</strong> of ' + totalPages + '</span>' +
+      '<button ' + (page >= totalPages ? 'disabled' : 'onclick="wtGotoWorkflowPage(' + (page + 1) + ')"') + '>Next &raquo;</button>' +
+    '</div>';
+}
+
+function toggleWtGroup(name) {
+  if (wtState.expandedGroups.has(name)) wtState.expandedGroups.delete(name);
+  else wtState.expandedGroups.add(name);
+  renderWtCards();
+}
+
+async function toggleWtPath(name, path) {
+  const pathKey = name + '::' + (path || '__no_path__');
+  if (wtState.expandedPaths.has(pathKey)) {
+    wtState.expandedPaths.delete(pathKey);
+    renderWtCards();
+    return;
+  }
+  wtState.expandedPaths.add(pathKey);
+  // Render once with the placeholder, then fetch + re-render when data arrives.
+  renderWtCards();
+  if (!wtState.pathCache.has(pathKey) && !wtState.pathLoading.has(pathKey)) {
+    wtState.pathLoading.add(pathKey);
+    const windowDays = parseInt(document.getElementById('wt-window')?.value, 10) || 7;
+    const qp = new URLSearchParams({ workflow_name: name, days: getDays(), window_days: windowDays });
+    if (path) qp.set('path', path);
+    const data = await api('/api/wordtracks/path?' + qp);
+    wtState.pathLoading.delete(pathKey);
+    if (data && Array.isArray(data.positions)) {
+      wtState.pathCache.set(pathKey, data.positions);
+      renderWtCards();
     }
   }
-  if (!tbody.innerHTML) {
-    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:30px;color:var(--muted);">No messages attached to clusters in this window yet.</td></tr>';
-  }
-  renderWtPagination('wt-pagination', wtView.page, totalPages, 'wtGotoWorkflowDetailPage');
-  const det = document.getElementById('wt-stage-detail');
-  if (det) det.innerHTML = '';
 }
 
 async function expandWtCluster(id) {

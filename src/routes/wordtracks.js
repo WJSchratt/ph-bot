@@ -277,6 +277,136 @@ router.get('/wordtracks/workflow/:id', async (req, res) => {
 });
 
 // ────────────────────────────────────────────────────────────────────────
+// PATH AGGREGATE: all word tracks across every workflow_cluster that maps
+// to the same (ghl_workflow_name, ghl_workflow_path). Used by the Level 3
+// (path expanded) view in the card UI.
+// ────────────────────────────────────────────────────────────────────────
+
+router.get('/wordtracks/path', async (req, res) => {
+  try {
+    const name = (req.query.workflow_name || '').trim();
+    const path = req.query.path == null ? null : String(req.query.path).trim() || null;
+    const locationId = (req.query.location_id || '').trim();
+    if (!name) return res.status(400).json({ error: 'workflow_name required' });
+    const daysInt = parseInt(req.query.days, 10) || 30;
+    const winDays = parseInt(req.query.window_days, 10) || (await getAttributionWindowDays());
+
+    const params = [name, daysInt, winDays, BOOKED_OUTCOMES, OPTOUT_OUTCOMES];
+    let pathFilter = 'AND map.ghl_workflow_path IS NULL';
+    if (path) { params.push(path); pathFilter = `AND map.ghl_workflow_path = $${params.length}`; }
+    let locFilter = '';
+    if (locationId) { params.push(locationId); locFilter = `AND map.location_id = $${params.length}`; }
+
+    const q = await db.query(
+      `WITH path_clusters AS (
+         SELECT map.cluster_id AS workflow_cluster_id
+           FROM workflow_cluster_mapping map
+          WHERE map.ghl_workflow_name = $1
+            ${pathFilter}
+            ${locFilter}
+       ),
+       scoped AS (
+         SELECT m.id AS msg_id, m.ghl_conversation_id, m.location_id,
+                m.created_at, m.cluster_id, wtc.position
+           FROM ghl_messages m
+           JOIN word_track_clusters wtc ON wtc.id = m.cluster_id
+           JOIN path_clusters pc ON pc.workflow_cluster_id = wtc.workflow_cluster_id
+          WHERE m.direction = 'outbound'
+            AND m.created_at >= NOW() - ($2 || ' days')::interval
+       ),
+       next_inbound AS (
+         SELECT s.cluster_id, s.ghl_conversation_id, s.location_id, s.created_at AS out_at,
+                (SELECT MIN(created_at) FROM ghl_messages im
+                   WHERE im.ghl_conversation_id = s.ghl_conversation_id
+                     AND im.location_id = s.location_id
+                     AND im.direction = 'inbound'
+                     AND im.created_at > s.created_at
+                     AND im.created_at <= s.created_at + ($3 || ' days')::interval) AS in_at
+           FROM scoped s
+       ),
+       credited AS (
+         SELECT DISTINCT ON (s.ghl_conversation_id, s.location_id)
+                s.cluster_id, s.ghl_conversation_id, s.location_id, gc.terminal_outcome
+           FROM scoped s
+           LEFT JOIN ghl_conversations gc ON gc.ghl_conversation_id = s.ghl_conversation_id AND gc.location_id = s.location_id
+          ORDER BY s.ghl_conversation_id, s.location_id, s.created_at DESC
+       )
+       SELECT wtc.id, wtc.label, wtc.description, wtc.example_text, wtc.position, wtc.cluster_size, wtc.labeled_at,
+              COALESCE(m.sends, 0) AS sends,
+              COALESCE(m.replies, 0) AS replies,
+              COALESCE(m.avg_reply_seconds, 0) AS avg_reply_seconds,
+              COALESCE(m.drop_offs, 0) AS drop_offs,
+              COALESCE(m.unique_convs, 0) AS unique_convs,
+              m.last_send_at, m.last_reply_at, m.subaccount_locations,
+              COALESCE(c.bookings, 0) AS bookings,
+              COALESCE(c.opt_outs, 0) AS opt_outs
+         FROM word_track_clusters wtc
+         JOIN path_clusters pc ON pc.workflow_cluster_id = wtc.workflow_cluster_id
+         LEFT JOIN (
+           SELECT cluster_id,
+                  COUNT(*)::int AS sends,
+                  COUNT(*) FILTER (WHERE in_at IS NOT NULL)::int AS replies,
+                  COALESCE(AVG(EXTRACT(EPOCH FROM (in_at - out_at))) FILTER (WHERE in_at IS NOT NULL), 0)::float AS avg_reply_seconds,
+                  COUNT(*) FILTER (WHERE in_at IS NULL)::int AS drop_offs,
+                  COUNT(DISTINCT ghl_conversation_id)::int AS unique_convs,
+                  MAX(out_at) AS last_send_at,
+                  MAX(in_at) AS last_reply_at,
+                  ARRAY_AGG(DISTINCT location_id) AS subaccount_locations
+             FROM next_inbound GROUP BY cluster_id
+         ) m ON m.cluster_id = wtc.id
+         LEFT JOIN (
+           SELECT cluster_id,
+                  COUNT(*) FILTER (WHERE terminal_outcome = ANY($4))::int AS bookings,
+                  COUNT(*) FILTER (WHERE terminal_outcome = ANY($5))::int AS opt_outs
+             FROM credited GROUP BY cluster_id
+         ) c ON c.cluster_id = wtc.id
+        ORDER BY wtc.position ASC, sends DESC`,
+      params
+    );
+
+    // Group by position for UI consumption.
+    const byPos = new Map();
+    for (const r of q.rows) {
+      if (!byPos.has(r.position)) byPos.set(r.position, []);
+      const sends = Number(r.sends) || 0;
+      const replies = Number(r.replies) || 0;
+      const uniqueConvs = Number(r.unique_convs) || 0;
+      byPos.get(r.position).push({
+        id: r.id, label: r.label, description: r.description,
+        example_text: r.example_text, cluster_size: Number(r.cluster_size) || 0,
+        position: r.position, labeled: !!r.labeled_at,
+        sends, replies,
+        reply_rate: sends ? replies / sends : 0,
+        avg_reply_seconds: Number(r.avg_reply_seconds) || 0,
+        drop_offs: Number(r.drop_offs) || 0,
+        drop_off_rate: sends ? (Number(r.drop_offs) || 0) / sends : 0,
+        unique_conversations: uniqueConvs,
+        bookings: Number(r.bookings) || 0,
+        booking_rate: uniqueConvs ? (Number(r.bookings) || 0) / uniqueConvs : 0,
+        opt_outs: Number(r.opt_outs) || 0,
+        opt_out_rate: uniqueConvs ? (Number(r.opt_outs) || 0) / uniqueConvs : 0,
+        last_send_at: r.last_send_at,
+        last_reply_at: r.last_reply_at,
+        subaccount_locations: Array.isArray(r.subaccount_locations) ? r.subaccount_locations.filter(Boolean) : []
+      });
+    }
+    const positions = Array.from(byPos.keys()).sort((a, b) => a - b).map((pos) => ({
+      position: pos,
+      clusters: byPos.get(pos)
+    }));
+
+    res.json({
+      workflow_name: name,
+      workflow_path: path,
+      attribution_window_days: winDays,
+      positions
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────
 // CLUSTER DETAIL: all sends of a single (workflow, position, cluster).
 // ────────────────────────────────────────────────────────────────────────
 
