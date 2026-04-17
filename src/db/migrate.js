@@ -354,6 +354,87 @@ async function applyMigrations() {
       CREATE UNIQUE INDEX IF NOT EXISTS uq_wtclusters_wf_pos_hash ON word_track_clusters(workflow_cluster_id, position, normalized_hash) WHERE workflow_cluster_id IS NOT NULL;
     `);
     console.log('[migrate] two-layer clustering schema ensured');
+
+    // Workflow cluster → real GHL workflow name mapping. Manual assignments
+    // (no /executions API from GHL — see Iteration probe findings), stored
+    // once so wordtracks endpoints can render display names like
+    // "A4 - Aged Mortgage Protection Lead Drip · Path D".
+    //
+    // Note: cluster_id references workflow_clusters.id — but we intentionally
+    // don't add a FK constraint. A full recluster wipes workflow_clusters,
+    // reassigning new IDs; we don't want to cascade-delete these manual
+    // mappings. Stale mappings (non-existent cluster_id) simply don't match
+    // in the LEFT JOIN and are cleaned up opportunistically later.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS workflow_cluster_mapping (
+        cluster_id INTEGER PRIMARY KEY,
+        ghl_workflow_name TEXT NOT NULL,
+        ghl_workflow_path TEXT,
+        location_id TEXT NOT NULL,
+        mapped_at TIMESTAMPTZ DEFAULT NOW(),
+        mapped_by TEXT DEFAULT 'manual'
+      );
+      CREATE INDEX IF NOT EXISTS idx_wf_map_location ON workflow_cluster_mapping(location_id);
+    `);
+
+    // Idempotent seed — Walt + Claude manually identified 31 clusters for
+    // Veronica's sub-account (Nb8CYlsFaRFQchJBOvo1). A2 drip has no paths,
+    // A4 drip has 4 paths. Any new mappings added later go through the app.
+    const VERONICA_LOC = 'Nb8CYlsFaRFQchJBOvo1';
+    const VERONICA_MAPPINGS = [
+      // A2 - Fresh Mortgage Protection Lead Drip (no paths)
+      [27, 'A2 - Fresh Mortgage Protection Lead Drip', null],
+      [30, 'A2 - Fresh Mortgage Protection Lead Drip', null],
+      // A4 - Aged Mortgage Protection Lead Drip · Path A
+      [23, 'A4 - Aged Mortgage Protection Lead Drip', 'Path A'],
+      [28, 'A4 - Aged Mortgage Protection Lead Drip', 'Path A'],
+      [40, 'A4 - Aged Mortgage Protection Lead Drip', 'Path A'],
+      [48, 'A4 - Aged Mortgage Protection Lead Drip', 'Path A'],
+      // A4 · Path B
+      [25, 'A4 - Aged Mortgage Protection Lead Drip', 'Path B'],
+      [29, 'A4 - Aged Mortgage Protection Lead Drip', 'Path B'],
+      // A4 · Path C
+      [26, 'A4 - Aged Mortgage Protection Lead Drip', 'Path C'],
+      [32, 'A4 - Aged Mortgage Protection Lead Drip', 'Path C'],
+      // A4 · Path D
+      [24, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [31, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [33, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [34, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [35, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [36, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [37, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [38, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [39, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [41, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [42, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [43, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [44, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [45, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [46, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [47, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [49, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [50, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [51, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [52, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D'],
+      [53, 'A4 - Aged Mortgage Protection Lead Drip', 'Path D']
+    ];
+    // Upsert each row; ON CONFLICT DO NOTHING preserves any later manual edits
+    // the app might have written between deploys.
+    const values = [];
+    const params = [];
+    let p = 1;
+    for (const [cid, name, path] of VERONICA_MAPPINGS) {
+      values.push(`($${p++}, $${p++}, $${p++}, $${p++})`);
+      params.push(cid, name, path, VERONICA_LOC);
+    }
+    await pool.query(
+      `INSERT INTO workflow_cluster_mapping (cluster_id, ghl_workflow_name, ghl_workflow_path, location_id)
+       VALUES ${values.join(', ')}
+       ON CONFLICT (cluster_id) DO NOTHING`,
+      params
+    );
+    console.log('[migrate] workflow_cluster_mapping ensured + 31 Veronica mappings seeded');
 }
 
 // CLI entry point — when run as `node src/db/migrate.js` or `npm run migrate`.

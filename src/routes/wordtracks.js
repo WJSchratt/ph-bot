@@ -17,6 +17,17 @@ async function getAttributionWindowDays() {
   }
 }
 
+// Compose the display_name used by the UI:
+//   mapped + has path  → "A4 - Aged Mortgage Protection Lead Drip · Path D"
+//   mapped, no path    → "A2 - Fresh Mortgage Protection Lead Drip"
+//   unmapped           → "[unmapped] <original_label>" (humanize happens client-side)
+function formatDisplayName(ghlName, ghlPath, rawLabel) {
+  if (ghlName) {
+    return ghlPath ? `${ghlName} · ${ghlPath}` : ghlName;
+  }
+  return `[unmapped] ${rawLabel || 'unlabeled'}`;
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // TOP LEVEL: list workflows with aggregate stats.
 // ────────────────────────────────────────────────────────────────────────
@@ -62,6 +73,7 @@ router.get('/wordtracks/workflows', async (req, res) => {
           ORDER BY sm.ghl_conversation_id, sm.location_id, sm.created_at DESC
        )
        SELECT wf.id, wf.label, wf.description, wf.conversation_count, wf.labeled_at, wf.example_opener,
+              map.ghl_workflow_name, map.ghl_workflow_path,
               COALESCE(m.sends, 0) AS sends,
               COALESCE(m.replies, 0) AS replies,
               COALESCE(m.avg_reply_seconds, 0) AS avg_reply_seconds,
@@ -91,6 +103,7 @@ router.get('/wordtracks/workflows', async (req, res) => {
                   COUNT(*) FILTER (WHERE terminal_outcome = ANY($4))::int AS opt_outs
              FROM last_out_per_conv GROUP BY workflow_cluster_id
          ) c ON c.workflow_cluster_id = wf.id
+         LEFT JOIN workflow_cluster_mapping map ON map.cluster_id = wf.id
         ORDER BY sends DESC, wf.conversation_count DESC`,
       [daysInt, winDays, BOOKED_OUTCOMES, OPTOUT_OUTCOMES]
     );
@@ -119,7 +132,10 @@ router.get('/wordtracks/workflows', async (req, res) => {
         opt_out_rate: uniqueConvs ? (Number(r.opt_outs) || 0) / uniqueConvs : 0,
         last_send_at: r.last_send_at,
         last_reply_at: r.last_reply_at,
-        subaccount_locations: Array.isArray(r.subaccount_locations) ? r.subaccount_locations.filter(Boolean) : []
+        subaccount_locations: Array.isArray(r.subaccount_locations) ? r.subaccount_locations.filter(Boolean) : [],
+        ghl_workflow_name: r.ghl_workflow_name || null,
+        ghl_workflow_path: r.ghl_workflow_path || null,
+        display_name: formatDisplayName(r.ghl_workflow_name, r.ghl_workflow_path, r.label)
       };
     });
 
@@ -140,12 +156,19 @@ router.get('/wordtracks/workflow/:id', async (req, res) => {
     const winDays = parseInt(req.query.window_days, 10) || (await getAttributionWindowDays());
 
     const wfQ = await db.query(
-      `SELECT id, label, description, conversation_count, example_opener, labeled_at
-         FROM workflow_clusters WHERE id = $1`,
+      `SELECT wf.id, wf.label, wf.description, wf.conversation_count, wf.example_opener, wf.labeled_at,
+              map.ghl_workflow_name, map.ghl_workflow_path
+         FROM workflow_clusters wf
+         LEFT JOIN workflow_cluster_mapping map ON map.cluster_id = wf.id
+        WHERE wf.id = $1`,
       [wfId]
     );
-    const workflow = wfQ.rows[0];
-    if (!workflow) return res.status(404).json({ error: 'workflow not found' });
+    const row = wfQ.rows[0];
+    if (!row) return res.status(404).json({ error: 'workflow not found' });
+    const workflow = {
+      ...row,
+      display_name: formatDisplayName(row.ghl_workflow_name, row.ghl_workflow_path, row.label)
+    };
 
     const clustersQ = await db.query(
       `WITH scoped AS (
