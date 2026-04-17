@@ -31,25 +31,44 @@ async function runSafeQuery(sql) {
     return { error: 'blocked: only a single SELECT (or WITH…SELECT) is allowed — no INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE/CREATE.' };
   }
   const statementTimeoutMs = 8000;
+  const { pool } = require('../db');
+  let c;
+  let txOpen = false;
+  let sawError = false;
   try {
-    const { pool } = require('../db');
-    const c = await pool.connect();
-    try {
-      await c.query('BEGIN READ ONLY');
-      await c.query(`SET LOCAL statement_timeout = ${statementTimeoutMs}`);
-      const r = await c.query(sql);
-      await c.query('COMMIT');
-      return {
-        columns: r.fields.map((f) => f.name),
-        rows: r.rows.slice(0, 200),
-        truncated: r.rows.length > 200,
-        row_count: r.rowCount
-      };
-    } finally {
-      c.release();
-    }
+    c = await pool.connect();
+    await c.query('BEGIN READ ONLY');
+    txOpen = true;
+    await c.query(`SET LOCAL statement_timeout = ${statementTimeoutMs}`);
+    const r = await c.query(sql);
+    await c.query('COMMIT');
+    txOpen = false;
+    return {
+      columns: r.fields.map((f) => f.name),
+      rows: r.rows.slice(0, 200),
+      truncated: r.rows.length > 200,
+      row_count: r.rowCount
+    };
   } catch (err) {
+    sawError = true;
+    // CRITICAL: if a query failed mid-transaction, we MUST rollback before
+    // releasing. Without this, the connection goes back to the pool with an
+    // aborted-tx state, and every subsequent query that happens to grab it
+    // (logUsage, bot_response writes, anything) fails with
+    // "current transaction is aborted, commands ignored until end of transaction block".
+    // That's exactly how Anthropic usage-log INSERTs got dropped for hours.
+    if (c && txOpen) {
+      try { await c.query('ROLLBACK'); } catch { /* best-effort */ }
+    }
     return { error: err.message };
+  } finally {
+    if (c) {
+      // release(true) destroys the connection instead of returning it to the
+      // pool. Cheap insurance on top of the ROLLBACK above — if anything we
+      // missed leaves the connection in a bad state, it's discarded, not
+      // handed to the next caller.
+      try { c.release(sawError ? true : undefined); } catch { /* ignore */ }
+    }
   }
 }
 

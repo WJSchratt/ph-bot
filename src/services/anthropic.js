@@ -59,29 +59,67 @@ function computeCost(usage, pricing) {
   );
 }
 
-async function logUsage({ category, model, location_id, usage, duration_ms, meta }) {
-  const pricing = await getPricing();
-  const cost = computeCost(usage || {}, pricing);
+// In-memory counters for the /api/admin/usage-log-stats diagnostic.
+const _usageStats = { attempted: 0, logged: 0, failed: 0, retried: 0, lastError: null, byCategory: {} };
+
+async function _runInsert(params) {
   await db.query(
     `INSERT INTO anthropic_usage_log
      (category, model, location_id, input_tokens, output_tokens,
       cache_creation_input_tokens, cache_read_input_tokens,
       cost_usd, duration_ms, meta)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [
-      category,
-      model,
-      location_id || null,
-      usage?.input_tokens || 0,
-      usage?.output_tokens || 0,
-      usage?.cache_creation_input_tokens || 0,
-      usage?.cache_read_input_tokens || 0,
-      cost,
-      duration_ms || null,
-      meta ? JSON.stringify(meta) : null
-    ]
+    params
   );
 }
+
+async function logUsage({ category, model, location_id, usage, duration_ms, meta }) {
+  _usageStats.attempted++;
+  _usageStats.byCategory[category] = _usageStats.byCategory[category] || { attempted: 0, logged: 0, failed: 0 };
+  _usageStats.byCategory[category].attempted++;
+  const pricing = await getPricing();
+  const cost = computeCost(usage || {}, pricing);
+  const params = [
+    category, model, location_id || null,
+    usage?.input_tokens || 0, usage?.output_tokens || 0,
+    usage?.cache_creation_input_tokens || 0, usage?.cache_read_input_tokens || 0,
+    cost, duration_ms || null, meta ? JSON.stringify(meta) : null
+  ];
+
+  try {
+    await _runInsert(params);
+    _usageStats.logged++;
+    _usageStats.byCategory[category].logged++;
+    return;
+  } catch (err) {
+    // Common poisoning: a sibling query (e.g. Dev Console runSafeQuery)
+    // left an aborted transaction on a pooled connection. Retry once —
+    // the pool either hands us a healthy connection this time, or the
+    // error repeats and we report it loudly.
+    const transient = /transaction is aborted|connection terminated|reset by peer|read ECONN/i.test(err.message || '');
+    if (transient) {
+      _usageStats.retried++;
+      await new Promise((r) => setTimeout(r, 250));
+      try {
+        await _runInsert(params);
+        _usageStats.logged++;
+        _usageStats.byCategory[category].logged++;
+        return;
+      } catch (retryErr) {
+        _usageStats.failed++;
+        _usageStats.byCategory[category].failed++;
+        _usageStats.lastError = { message: retryErr.message, at: new Date().toISOString(), category };
+        throw retryErr;
+      }
+    }
+    _usageStats.failed++;
+    _usageStats.byCategory[category].failed++;
+    _usageStats.lastError = { message: err.message, at: new Date().toISOString(), category };
+    throw err;
+  }
+}
+
+function getUsageStats() { return JSON.parse(JSON.stringify(_usageStats)); }
 
 /**
  * Shared wrapper for all Anthropic calls. Forwards params to
@@ -126,5 +164,6 @@ module.exports = {
   callAnthropic,
   client,
   ALLOWED_CATEGORIES: Array.from(ALLOWED_CATEGORIES),
+  getUsageStats,
   _internal: { getPricing, computeCost }
 };
