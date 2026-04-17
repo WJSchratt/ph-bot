@@ -247,7 +247,7 @@ async function buildUnifiedThread(ghlConversationId, locationId) {
   return out;
 }
 
-router.get('/conversation-thread/:ghl_conversation_id', async (req, res) => {
+router.get('/qc/conversation-thread/:ghl_conversation_id', async (req, res) => {
   try {
     const { ghl_conversation_id } = req.params;
     const location_id = req.query.location_id;
@@ -268,7 +268,7 @@ router.get('/conversation-thread/:ghl_conversation_id', async (req, res) => {
 });
 
 // Lookup by local conversation id → resolve to ghl_conversation_id + render.
-router.get('/conversation-thread-by-local/:local_id', async (req, res) => {
+router.get('/qc/conversation-thread-by-local/:local_id', async (req, res) => {
   try {
     const localId = parseInt(req.params.local_id, 10);
     const convQ = await db.query(
