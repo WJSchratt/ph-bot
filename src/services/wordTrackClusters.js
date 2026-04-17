@@ -201,7 +201,7 @@ async function buildPerPositionClusters(reporter) {
         `INSERT INTO word_track_clusters
            (label, source, example_text, normalized_hash, cluster_size, first_seen_at, last_seen_at, workflow_cluster_id, position)
          VALUES ('unlabeled', 'mixed', $1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (workflow_cluster_id, position, normalized_hash)
+         ON CONFLICT (workflow_cluster_id, position, normalized_hash) WHERE workflow_cluster_id IS NOT NULL
          DO UPDATE SET cluster_size = word_track_clusters.cluster_size + EXCLUDED.cluster_size,
                        last_seen_at = GREATEST(word_track_clusters.last_seen_at, EXCLUDED.last_seen_at),
                        updated_at = NOW()
