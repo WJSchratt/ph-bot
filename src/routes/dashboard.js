@@ -207,46 +207,76 @@ router.get('/dashboard', async (req, res) => {
       usageWhere += ` AND location_id = ANY($${usageParams.length})`;
     }
 
-    const anthropicTotalsRes = await db.query(
-      `SELECT
-         COALESCE(SUM(cost_usd), 0)::numeric AS total_cost,
-         COALESCE(SUM(input_tokens), 0)::bigint AS total_input,
-         COALESCE(SUM(output_tokens), 0)::bigint AS total_output,
-         COALESCE(SUM(cache_creation_input_tokens), 0)::bigint AS total_cache_write,
-         COALESCE(SUM(cache_read_input_tokens), 0)::bigint AS total_cache_read,
-         COUNT(*)::int AS call_count
-       FROM anthropic_usage_log
-       WHERE ${usageWhere}`,
-      usageParams
-    );
-    const anthropicTotals = anthropicTotalsRes.rows[0] || {};
+    // Diagnostic first: does the table even exist? If the migration hasn't
+    // run, every INSERT in callAnthropic() fails silently, which is how
+    // Bug 2 happened (dashboard fell back to stale conversations tokens).
+    let anthropicLogStatus = { table_exists: false, row_count_total: 0, newest_row_at: null, oldest_row_at: null };
+    try {
+      const statusQ = await db.query(
+        `SELECT to_regclass('anthropic_usage_log') AS t,
+                (SELECT COUNT(*) FROM anthropic_usage_log) AS total,
+                (SELECT MAX(created_at) FROM anthropic_usage_log) AS newest,
+                (SELECT MIN(created_at) FROM anthropic_usage_log) AS oldest`
+      );
+      anthropicLogStatus = {
+        table_exists: !!statusQ.rows[0]?.t,
+        row_count_total: Number(statusQ.rows[0]?.total) || 0,
+        newest_row_at: statusQ.rows[0]?.newest || null,
+        oldest_row_at: statusQ.rows[0]?.oldest || null
+      };
+    } catch (err) {
+      // to_regclass returns null when the table is missing, so this path
+      // usually only fires if the DB itself is unreachable.
+      anthropicLogStatus.error = err.message;
+    }
 
-    const anthropicByCatRes = await db.query(
-      `SELECT category,
-              COUNT(*)::int AS call_count,
-              COALESCE(SUM(cost_usd), 0)::numeric AS cost_usd,
-              COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
-              COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
-              COALESCE(SUM(cache_creation_input_tokens), 0)::bigint AS cache_write_tokens,
-              COALESCE(SUM(cache_read_input_tokens), 0)::bigint AS cache_read_tokens,
-              COALESCE(AVG(duration_ms), 0)::int AS avg_ms
-       FROM anthropic_usage_log
-       WHERE ${usageWhere}
-       GROUP BY category
-       ORDER BY cost_usd DESC`,
-      usageParams
-    );
+    let anthropicTotals = {};
+    if (anthropicLogStatus.table_exists) {
+      const anthropicTotalsRes = await db.query(
+        `SELECT
+           COALESCE(SUM(cost_usd), 0)::numeric AS total_cost,
+           COALESCE(SUM(input_tokens), 0)::bigint AS total_input,
+           COALESCE(SUM(output_tokens), 0)::bigint AS total_output,
+           COALESCE(SUM(cache_creation_input_tokens), 0)::bigint AS total_cache_write,
+           COALESCE(SUM(cache_read_input_tokens), 0)::bigint AS total_cache_read,
+           COUNT(*)::int AS call_count
+         FROM anthropic_usage_log
+         WHERE ${usageWhere}`,
+        usageParams
+      );
+      anthropicTotals = anthropicTotalsRes.rows[0] || {};
+    }
 
-    const anthropicDailyRes = await db.query(
-      `SELECT created_at::date AS date,
-              category,
-              COALESCE(SUM(cost_usd), 0)::numeric AS cost_usd
-       FROM anthropic_usage_log
-       WHERE ${usageWhere}
-       GROUP BY 1, 2
-       ORDER BY 1 ASC`,
-      usageParams
-    );
+    let anthropicByCatRes = { rows: [] };
+    let anthropicDailyRes = { rows: [] };
+    if (anthropicLogStatus.table_exists) {
+      anthropicByCatRes = await db.query(
+        `SELECT category,
+                COUNT(*)::int AS call_count,
+                COALESCE(SUM(cost_usd), 0)::numeric AS cost_usd,
+                COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
+                COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
+                COALESCE(SUM(cache_creation_input_tokens), 0)::bigint AS cache_write_tokens,
+                COALESCE(SUM(cache_read_input_tokens), 0)::bigint AS cache_read_tokens,
+                COALESCE(AVG(duration_ms), 0)::int AS avg_ms
+         FROM anthropic_usage_log
+         WHERE ${usageWhere}
+         GROUP BY category
+         ORDER BY cost_usd DESC`,
+        usageParams
+      );
+
+      anthropicDailyRes = await db.query(
+        `SELECT created_at::date AS date,
+                category,
+                COALESCE(SUM(cost_usd), 0)::numeric AS cost_usd
+         FROM anthropic_usage_log
+         WHERE ${usageWhere}
+         GROUP BY 1, 2
+         ORDER BY 1 ASC`,
+        usageParams
+      );
+    }
 
     const aiCost = Number(anthropicTotals.total_cost) || 0;
 
@@ -420,8 +450,12 @@ router.get('/dashboard', async (req, res) => {
         avg_response_time_seconds: mg.avg_response_time || 0,
         total_inbound: mg.inbound || 0,
         total_outbound: mg.outbound || 0,
-        total_input_tokens: Number(anthropicTotals.total_input) || Number(botKpi.input_tokens) || 0,
-        total_output_tokens: Number(anthropicTotals.total_output) || Number(botKpi.output_tokens) || 0,
+        // Tokens come from anthropic_usage_log only — no fallback to the old
+        // conversations.input_tokens column, since that fallback masked Bug 2
+        // (the log table was missing in prod and $0/0 calls got hidden by
+        // stale per-conversation counts).
+        total_input_tokens: Number(anthropicTotals.total_input) || 0,
+        total_output_tokens: Number(anthropicTotals.total_output) || 0,
         total_cache_write_tokens: Number(anthropicTotals.total_cache_write) || 0,
         total_cache_read_tokens: Number(anthropicTotals.total_cache_read) || 0,
         ai_cost: Math.round(aiCost * 100) / 100,
@@ -448,6 +482,7 @@ router.get('/dashboard', async (req, res) => {
         }
       },
       anthropic_breakdown: {
+        log_status: anthropicLogStatus,
         total_cost: Math.round(aiCost * 10000) / 10000,
         call_count: Number(anthropicTotals.call_count) || 0,
         by_category: anthropicByCatRes.rows.map((r) => ({

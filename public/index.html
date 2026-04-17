@@ -1380,6 +1380,18 @@ const CATEGORY_LABELS = {
 
 function renderAnthropicBreakdown(bd) {
   const el = document.getElementById('anthropic-breakdown');
+  const ls = bd.log_status || {};
+  let banner = '';
+  if (!ls.table_exists) {
+    banner = '<div style="background:rgba(255,69,96,.1);border:1px solid var(--red);border-radius:4px;padding:8px 10px;margin-bottom:10px;font-size:11px;color:var(--red);">' +
+      '<strong>anthropic_usage_log table missing.</strong> Migrations should auto-run at boot — redeploy. Every Claude call is failing silently to log.</div>';
+  } else if ((ls.row_count_total || 0) === 0) {
+    banner = '<div style="background:rgba(255,181,71,.1);border:1px solid var(--amber);border-radius:4px;padding:8px 10px;margin-bottom:10px;font-size:11px;color:var(--amber);">' +
+      '<strong>Usage log is empty.</strong> No Claude calls have been logged yet since the migration ran. Fire any bot call (send a test SMS, hit Dev Console, etc.) — a row should appear immediately.</div>';
+  } else if ((bd.call_count || 0) === 0) {
+    banner = '<div style="background:rgba(74,101,128,.1);border:1px solid var(--border);border-radius:4px;padding:6px 10px;margin-bottom:10px;font-size:11px;color:var(--muted);">' +
+      'Log has ' + fmtNum(ls.row_count_total) + ' total rows, but 0 in this date range. Expand the date window.</div>';
+  }
   if (el) {
     const total = bd.total_cost || 0;
     const rows = (bd.by_category || []).map(r => {
@@ -1394,7 +1406,7 @@ function renderAnthropicBreakdown(bd) {
         '<span style="color:var(--muted);min-width:42px;text-align:right;">' + pct.toFixed(1) + '%</span>' +
       '</div>';
     }).join('');
-    el.innerHTML = rows || '<div style="color:var(--muted);font-size:12px;">No Anthropic calls logged in this window yet.</div>';
+    el.innerHTML = banner + (rows || '<div style="color:var(--muted);font-size:12px;">No Anthropic calls logged in this window yet.</div>');
   }
 
   renderAnthropicDailyChart(bd.daily || []);

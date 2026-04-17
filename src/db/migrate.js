@@ -3,9 +3,13 @@ const fs = require('fs');
 const path = require('path');
 const { pool } = require('./index');
 
-async function migrate() {
+/**
+ * Apply every schema + column migration. Fully idempotent — safe to call on
+ * every server boot (see server.js). CLI usage (`npm run migrate`) still
+ * works: the bottom of the file runs this when invoked directly.
+ */
+async function applyMigrations() {
   const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
-  try {
     await pool.query(sql);
     console.log('[migrate] schema applied');
 
@@ -257,6 +261,13 @@ async function migrate() {
       ON CONFLICT (section, key) DO NOTHING;
     `);
     console.log('[migrate] word_track_clusters + ghl_messages.cluster_id ensured');
+}
+
+// CLI entry point — when run as `node src/db/migrate.js` or `npm run migrate`.
+async function cliRun() {
+  try {
+    await applyMigrations();
+    console.log('[migrate] all migrations applied');
   } catch (err) {
     console.error('[migrate] failed', err);
     process.exit(1);
@@ -265,4 +276,8 @@ async function migrate() {
   }
 }
 
-migrate();
+if (require.main === module) {
+  cliRun();
+}
+
+module.exports = { applyMigrations };

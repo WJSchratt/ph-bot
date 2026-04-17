@@ -107,6 +107,16 @@ app.use((err, req, res, next) => {
 const port = parseInt(process.env.PORT, 10) || 3000;
 app.listen(port, () => {
   console.log(`[server] listening on :${port}`);
+  // Auto-apply migrations on every boot (idempotent). Railway runs `npm start`
+  // only, so without this the new tables (anthropic_usage_log, word_track_clusters)
+  // never get created in prod — which is why Bug 2 happened.
+  const { applyMigrations } = require('./db/migrate');
+  applyMigrations()
+    .then(() => console.log('[server] migrations applied on boot'))
+    .catch((err) => {
+      console.error('[server] MIGRATION FAILED ON BOOT:', err.message);
+      logger.log('server', 'error', null, 'boot migration failed', { error: err.message, stack: err.stack });
+    });
   // Seed default users if not already present (idempotent).
   authService.seedUsersIfMissing().catch((err) => {
     logger.log('auth', 'error', null, 'User seeding failed at startup', { error: err.message });

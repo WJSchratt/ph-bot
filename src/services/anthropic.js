@@ -106,9 +106,16 @@ async function callAnthropic(params, ctx) {
     duration_ms,
     meta: ctx.meta || null
   }).catch((err) => {
+    // Loud failure: write to stderr (shows in Railway logs) in addition to the
+    // in-memory logger. Silent failures here caused Bug 2 — the dashboard fell
+    // back to stale conversations.input_tokens and showed $0.00 · 0 calls.
+    console.error('[anthropic_usage] INSERT FAILED:', category, err.message);
     logger.log('anthropic_usage', 'error', null, 'usage log insert failed', {
       category,
-      error: err.message
+      error: err.message,
+      hint: /relation .* does not exist/i.test(err.message)
+        ? 'run `npm run migrate` — anthropic_usage_log table missing'
+        : undefined
     });
   });
 
