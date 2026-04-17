@@ -23,6 +23,7 @@ const kbRouter = require('./routes/kb');
 const weeklySummaryModule = require('./routes/weeklySummary');
 const weeklySummaryRouter = weeklySummaryModule.router;
 const cronRoutes = require('./routes/cron');
+const jobsRouter = require('./routes/jobs');
 const conversationStore = require('./services/conversationStore');
 const ghl = require('./services/ghl');
 const logger = require('./services/logger');
@@ -93,6 +94,7 @@ app.use('/api', pendingChangesRouter);
 app.use('/api', kbRouter);
 app.use('/api', weeklySummaryRouter);
 app.use('/api', testSyncRouter);
+app.use('/api', jobsRouter);
 app.use('/sandbox', sandboxRouter);
 app.use('/cron', cronRoutes.router);
 

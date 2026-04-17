@@ -261,6 +261,45 @@ async function applyMigrations() {
       ON CONFLICT (section, key) DO NOTHING;
     `);
     console.log('[migrate] word_track_clusters + ghl_messages.cluster_id ensured');
+
+    // Jobs table — tracks long-running async operations (repull, recluster,
+    // QC batch apply, analyzer analyze, etc.) so the UI can poll for progress
+    // instead of hanging on the HTTP request.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS jobs (
+        id BIGSERIAL PRIMARY KEY,
+        job_type VARCHAR(50) NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'queued',
+        progress_current INTEGER DEFAULT 0,
+        progress_total INTEGER,
+        progress_message TEXT,
+        params JSONB,
+        result JSONB,
+        error TEXT,
+        started_by VARCHAR(100),
+        started_at TIMESTAMPTZ,
+        completed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+      CREATE INDEX IF NOT EXISTS idx_jobs_type_created ON jobs(job_type, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_jobs_active ON jobs(status) WHERE status IN ('queued', 'running');
+    `);
+    console.log('[migrate] jobs table ensured');
+
+    // ghl_message_id — lets us reference GHL's own message ID for future
+    // idempotency and cross-referencing. Not unique-constrained because we
+    // rebuild per-conversation on each pull (DELETE + INSERT).
+    await pool.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ghl_messages' AND column_name='ghl_message_id') THEN
+          ALTER TABLE ghl_messages ADD COLUMN ghl_message_id TEXT;
+        END IF;
+      END $$;
+      CREATE INDEX IF NOT EXISTS idx_ghl_messages_msg_id ON ghl_messages(ghl_message_id) WHERE ghl_message_id IS NOT NULL;
+    `);
+    console.log('[migrate] ghl_messages.ghl_message_id ensured');
 }
 
 // CLI entry point — when run as `node src/db/migrate.js` or `npm run migrate`.

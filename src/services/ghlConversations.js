@@ -81,8 +81,11 @@ async function pullMessages(ghlToken, conversationId) {
   const out = [];
   let lastMessageId = null;
   let iterations = 0;
+  // 200 iters × 100/page = up to 20,000 messages/conversation. Realistic
+  // conversations are far smaller; this is a safety cap.
+  const MAX_ITERS = 200;
 
-  while (iterations < 50) {
+  while (iterations < MAX_ITERS) {
     iterations++;
     const params = { limit: MSG_PAGE_SIZE };
     if (lastMessageId) params.lastMessageId = lastMessageId;
@@ -97,6 +100,7 @@ async function pullMessages(ghlToken, conversationId) {
     } catch (err) {
       logger.log('analyzer', 'error', null, 'GHL messages fetch failed', {
         conversation_id: conversationId,
+        iteration: iterations,
         status: err.response?.status,
         error: err.response?.data || err.message
       });
@@ -108,9 +112,13 @@ async function pullMessages(ghlToken, conversationId) {
     if (!msgs.length) break;
     for (const m of msgs) out.push(m);
 
-    const nextPage = body.nextPage === true || body.hasMore === true;
+    // Previous version trusted body.nextPage/hasMore, but GHL omits these or
+    // returns them as false even mid-stream — which truncated every >100-msg
+    // conversation. Instead: paginate until we get a short page or the cursor
+    // stops advancing.
+    if (msgs.length < MSG_PAGE_SIZE) break;
     const newLastId = body.lastMessageId || msgs[msgs.length - 1]?.id;
-    if (!nextPage || !newLastId || newLastId === lastMessageId) break;
+    if (!newLastId || newLastId === lastMessageId) break;
     lastMessageId = newLastId;
   }
 
@@ -221,10 +229,17 @@ function tsOrNull(v) {
   return d.toISOString();
 }
 
+// Include SMS + MMS; exclude everything else (email, call, voicemail, facebook,
+// instagram, webchat, etc.). Previous version only checked for "SMS" which
+// silently dropped every MMS message from ghl_messages.
+const NON_SMS_TYPE_MARKERS = ['EMAIL', 'CALL', 'VOICEMAIL', 'FACEBOOK', 'INSTAGRAM', 'WEBCHAT', 'LIVE_CHAT', 'REVIEW', 'GMB', 'ACTIVITY', 'CUSTOM_EMAIL'];
 function isSmsMessage(m) {
   const mt = String(m.messageType || m.type || '').toUpperCase();
   if (!mt) return true;
-  return mt.includes('SMS') || mt === '1' || mt === '2';
+  if (mt.includes('SMS') || mt.includes('MMS') || mt === '1' || mt === '2') return true;
+  for (const marker of NON_SMS_TYPE_MARKERS) if (mt.includes(marker)) return false;
+  // Unknown type — include by default (don't silently drop like we used to).
+  return true;
 }
 
 function messageText(m) {
@@ -263,6 +278,11 @@ async function upsertGhlConversation(row) {
 }
 
 async function replaceMessagesForConversation(ghlConversationId, locationId, messages) {
+  // Nuke + reinsert all messages for this conversation. Safe because GHL
+  // gives us an authoritative view of the full thread on every pull.
+  // After the Bug 3 pipeline fix, this is also the idempotent way to rebuild
+  // truncated threads — whatever's in the DB gets replaced with the complete
+  // set from GHL.
   await db.query(
     `DELETE FROM ghl_messages WHERE ghl_conversation_id = $1 AND location_id = $2`,
     [ghlConversationId, locationId]
@@ -273,18 +293,19 @@ async function replaceMessagesForConversation(ghlConversationId, locationId, mes
   const params = [];
   let p = 1;
   for (const m of messages) {
-    values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+    values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
     params.push(
       ghlConversationId,
       locationId,
       m.direction || null,
       messageText(m) || null,
       m.messageType || m.type || null,
-      tsOrNull(m.dateAdded || m.created)
+      tsOrNull(m.dateAdded || m.created),
+      m.id || null
     );
   }
   await db.query(
-    `INSERT INTO ghl_messages (ghl_conversation_id, location_id, direction, content, message_type, created_at) VALUES ${values.join(', ')}`,
+    `INSERT INTO ghl_messages (ghl_conversation_id, location_id, direction, content, message_type, created_at, ghl_message_id) VALUES ${values.join(', ')}`,
     params
   );
 }
@@ -350,10 +371,13 @@ async function processInParallel(items, concurrency, workerFn) {
   await Promise.all(runners);
 }
 
-async function pullAndStore(ghlToken, locationId, progressCallback) {
+async function pullAndStore(ghlToken, locationId, progressCallback, options = {}) {
   const progress = (p) => { if (typeof progressCallback === 'function') progressCallback(p); };
+  const fullRepull = !!options.fullRepull;
 
-  const cursorMs = await getIncrementalCursorMs(locationId);
+  // Full repull: ignore the incremental cursor and re-fetch every conversation
+  // GHL will give us. Used after pipeline fixes to rebuild a complete dataset.
+  const cursorMs = fullRepull ? null : await getIncrementalCursorMs(locationId);
   const isIncremental = cursorMs !== null;
 
   logger.log('analyzer', 'info', null, 'pullAndStore started', {
@@ -449,7 +473,13 @@ async function pullAndStore(ghlToken, locationId, progressCallback) {
 
   const toFetch = [];
   for (const id of fetchedIds) {
-    // If we just saw a newer ghl_date_updated than DB had, fetch messages.
+    if (fullRepull) {
+      // Re-fetch messages for every conversation — pipeline bugs (truncation
+      // at 100 msgs, MMS dropped) mean every stored thread is potentially
+      // incomplete and must be rebuilt.
+      toFetch.push(id);
+      continue;
+    }
     const dbUpdated = knownUpdated.get(id) || 0;
     const ghlUpdated = updatedByGhl.get(id) || 0;
     if (!dbUpdated || ghlUpdated > dbUpdated || emptyIds.has(id)) {

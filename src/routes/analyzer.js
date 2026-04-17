@@ -520,13 +520,14 @@ function summarizeConversation(conv, msgs, classification) {
   };
 }
 
-async function runPullJob(locationId, ghlToken) {
+async function runPullJob(locationId, ghlToken, options = {}) {
   pullProgress[locationId] = {
     status: 'pulling',
     stage: 'conversations',
     fetched: 0,
     total: 0,
     messages_fetched: 0,
+    full_repull: !!options.fullRepull,
     started_at: new Date().toISOString(),
     error: null
   };
@@ -540,7 +541,7 @@ async function runPullJob(locationId, ghlToken) {
         pullProgress[locationId].total = p.total;
         pullProgress[locationId].messages_fetched = p.fetched;
       }
-    });
+    }, options);
 
     const counts = await dbCountsForLocation(locationId);
     pullProgress[locationId] = {
@@ -596,6 +597,7 @@ router.post('/pull', async (req, res) => {
   try {
     const locationId = req.body?.locationId;
     if (!locationId) return res.status(400).json({ error: 'locationId is required' });
+    const fullRepull = !!req.body?.fullRepull;
 
     let token = req.body?.ghlToken || null;
     if (!token) token = await findGhlTokenForLocation(locationId);
@@ -607,11 +609,58 @@ router.post('/pull', async (req, res) => {
       return res.json({ status: 'pulling', locationId, progress: pullProgress[locationId] });
     }
 
-    runPullJob(locationId, token).catch((err) => {
-      logger.log('analyzer', 'error', null, 'runPullJob unhandled', { locationId, error: err.message, stack: err.stack });
+    // Also create a jobs row so the unified /api/jobs UI polls work.
+    const jobs = require('../services/jobs');
+    const jobId = await jobs.createJob({
+      type: fullRepull ? 'ghl_full_repull' : 'ghl_incremental_pull',
+      params: { locationId, fullRepull },
+      startedBy: req.session?.username || null
     });
 
-    res.json({ status: 'pulling', locationId, startedAt: new Date().toISOString() });
+    jobs.spawn(jobId, async (reporter) => {
+      // Clear any stale in-memory progress for this location so the old
+      // /pull-status endpoint doesn't return ghost data.
+      pullProgress[locationId] = {
+        status: 'pulling', stage: 'conversations', fetched: 0, total: 0,
+        messages_fetched: 0, full_repull: fullRepull,
+        started_at: new Date().toISOString(), error: null
+      };
+      reporter.report({ message: 'Fetching conversations…' });
+
+      try {
+        const result = await ghlConv.pullAndStore(token, locationId, (p) => {
+          if (p.phase === 'conversations') {
+            pullProgress[locationId].fetched = p.fetched;
+            reporter.report({ current: p.fetched, message: `Fetching conversations… page ${p.page}` });
+          } else {
+            pullProgress[locationId].total = p.total;
+            pullProgress[locationId].messages_fetched = p.fetched;
+            reporter.report({ current: p.fetched, total: p.total, message: `Fetching messages… ${p.fetched}/${p.total}` });
+          }
+          pullProgress[locationId].stage = p.phase;
+        }, { fullRepull });
+
+        const counts = await dbCountsForLocation(locationId);
+        pullProgress[locationId] = {
+          status: 'complete', stage: 'done',
+          fetched: counts.total, total: counts.total,
+          messages_fetched: result.messages_fetched_for,
+          started_at: pullProgress[locationId].started_at,
+          completed_at: new Date().toISOString(),
+          full_repull: fullRepull, incremental: result.incremental, counts
+        };
+        reporter.report({ current: counts.total, total: counts.total, message: 'done' });
+        return { locationId, ...result, counts };
+      } catch (err) {
+        pullProgress[locationId] = {
+          ...(pullProgress[locationId] || {}),
+          status: 'error', error: err.message, completed_at: new Date().toISOString()
+        };
+        throw err;
+      }
+    });
+
+    res.json({ status: 'pulling', locationId, jobId, fullRepull, startedAt: new Date().toISOString() });
   } catch (err) {
     logger.log('analyzer', 'error', null, 'pull dispatch failed', { error: err.message, stack: err.stack });
     res.status(500).json({ error: err.message, stack: err.stack });
