@@ -334,6 +334,8 @@ textarea.form-input{resize:vertical;min-height:80px;}
 .confirm-banner p{font-size:13px;color:var(--cyan);}
 .toast{position:fixed;bottom:20px;right:20px;background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:12px 18px;font-size:13px;z-index:999;display:none;box-shadow:0 8px 30px rgba(0,0,0,.5);max-width:380px;white-space:pre-line;}
 .toast.show{display:block;}
+.toast.err{border-color:var(--red);color:#ff8ea0;}
+.toast.ok{border-color:var(--green);color:#7bf0c0;}
 .loading-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--cyan);border-radius:50%;animation:spin .6s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg);}}
 ::-webkit-scrollbar{width:4px;height:4px;}
@@ -458,24 +460,20 @@ textarea.form-input{resize:vertical;min-height:80px;}
 
 <!-- ====== WORDTRACKS ====== -->
 <div class="tab-content" id="tab-wordtracks">
-  <div class="sh"><span class="sh-title">Word Track Clusters</span><div class="sh-line"></div>
-    <div style="font-size:11px;color:var(--muted);">Attribution is temporal: each inbound reply / booking / opt-out is credited to the most recent outbound cluster message within the window.</div>
+  <div class="sh"><span class="sh-title">Workflows &amp; Word Tracks</span><div class="sh-line"></div>
+    <div style="font-size:11px;color:var(--muted);">Workflow identity from conversation openers. Drill in for per-position word tracks.</div>
   </div>
   <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-    <div class="itabs">
-      <div class="itab active" data-wbt="all" onclick="setWtSource('all', this)">All</div>
-      <div class="itab" data-wbt="claude" onclick="setWtSource('claude', this)">Claude Bot</div>
-      <div class="itab" data-wbt="botpress" onclick="setWtSource('botpress', this)">BotPress</div>
-      <div class="itab" data-wbt="other" onclick="setWtSource('other', this)">Other</div>
-    </div>
+    <div id="wt-breadcrumb" style="font-size:12px;color:var(--muted);"></div>
+    <div style="flex:1;"></div>
     <label style="font-size:11px;color:var(--muted);">Window (days):
       <input id="wt-window" type="number" min="1" max="60" value="7" style="width:60px;background:var(--panel);border:1px solid var(--border);color:#fff;padding:4px 6px;border-radius:4px;" onchange="loadWordtracks()">
     </label>
-    <button class="btn-sm" onclick="reclusterWordTracks()">Recluster now</button>
+    <button class="btn-sm" id="wt-recluster-btn" onclick="reclusterWordTracks()">Recluster now</button>
   </div>
   <div class="card">
     <table id="wt-stages-table">
-      <thead><tr><th>Cluster Label</th><th>Source</th><th>Sends</th><th>Replies</th><th>Reply %</th><th>Avg Reply</th><th>Bookings</th><th>Booking %</th><th>Opt-Outs</th><th>Opt-Out %</th><th>Drop-Off %</th><th>Convs</th></tr></thead>
+      <thead id="wt-stages-thead"><tr><th>Workflow</th><th>Convs</th><th>Sends</th><th>Replies</th><th>Reply %</th><th>Avg Reply</th><th>Bookings</th><th>Booking %</th><th>Opt-Outs</th><th>Opt-Out %</th><th>Drop-Off %</th></tr></thead>
       <tbody id="wt-stages-tbody"></tbody>
     </table>
   </div>
@@ -659,7 +657,8 @@ textarea.form-input{resize:vertical;min-height:80px;}
         <option value="">-- Select a subaccount --</option>
       </select>
       <input class="finput" id="an-token-override" placeholder="GHL token (optional override)" style="min-width:260px;">
-      <button class="btn pri" id="an-pull-btn" onclick="analyzerPull()">Pull Conversations</button>
+      <button class="btn pri" id="an-pull-btn" onclick="analyzerPull(false)">Pull (incremental)</button>
+      <button class="btn amb" id="an-repull-btn" onclick="analyzerPull(true)" title="Drops incremental cursor and re-fetches every conversation's full message history. Use after pipeline fixes.">Full Repull</button>
       <span id="an-pulled-meta" style="font-size:12px;color:var(--muted);margin-left:6px;"></span>
     </div>
     <div id="an-progress-wrap" style="display:none;margin-top:10px;">
@@ -1074,12 +1073,72 @@ let logExpandedIds = {};
 function getDays() { return document.getElementById('tf-global').value; }
 
 // ========== TOAST ==========
-function toast(msg) {
+function toast(msg, variant) {
   const t = document.getElementById('toast');
   t.textContent = msg;
+  t.classList.remove('err', 'ok');
+  if (variant === 'err') t.classList.add('err');
+  if (variant === 'ok') t.classList.add('ok');
   t.classList.add('show');
   clearTimeout(t._timer);
-  t._timer = setTimeout(() => t.classList.remove('show'), 3500);
+  t._timer = setTimeout(() => t.classList.remove('show'), variant === 'err' ? 6000 : 3500);
+}
+
+// ========== LONG-OP PROGRESS (Bug 7) ==========
+// Poll a job row by id. Drive a button's label + disabled state from the
+// job's status. On completion call onDone(job) with the final row; on
+// failure toast the error.
+//
+// Usage:
+//   const r = await api('/api/.../start', { method: 'POST', ... });
+//   trackJob(r.jobId, { button: myButton, label: 'Run', labelRunning: 'Running...', onDone: (job) => ... });
+const JOB_POLLERS = {};
+async function trackJob(jobId, opts = {}) {
+  const { button, label, labelRunning, onDone, onError, pollMs = 1500 } = opts;
+  const origLabel = button ? (label || button.textContent) : null;
+  const startedAt = Date.now();
+  if (button) { button.disabled = true; button.dataset._origLabel = origLabel; }
+  if (JOB_POLLERS[jobId]) clearInterval(JOB_POLLERS[jobId]);
+
+  const render = (job) => {
+    if (!button) return;
+    const elapsed = Math.round((Date.now() - startedAt) / 1000);
+    const pct = (job.progress_total && job.progress_current != null)
+      ? Math.min(100, Math.floor((job.progress_current / job.progress_total) * 100))
+      : null;
+    let status = labelRunning || (label ? label + '…' : 'Running…');
+    if (job.progress_message) status = job.progress_message;
+    if (pct != null) status = pct + '% · ' + status;
+    status += ' · ' + elapsed + 's';
+    button.textContent = status;
+  };
+
+  const poll = async () => {
+    try {
+      const r = await api('/api/jobs/' + jobId);
+      if (!r || !r.job) return;
+      const job = r.job;
+      render(job);
+      if (job.status === 'completed' || job.status === 'failed') {
+        clearInterval(JOB_POLLERS[jobId]);
+        delete JOB_POLLERS[jobId];
+        if (button) {
+          button.disabled = false;
+          button.textContent = origLabel || button.dataset._origLabel || 'Run';
+        }
+        if (job.status === 'completed') {
+          if (typeof onDone === 'function') onDone(job);
+        } else {
+          toast('Job failed: ' + (job.error || 'unknown error'), 'err');
+          if (typeof onError === 'function') onError(job);
+        }
+      }
+    } catch (err) {
+      // Network blips: don't clear the poller, just wait for next tick.
+    }
+  };
+  JOB_POLLERS[jobId] = setInterval(poll, pollMs);
+  poll();
 }
 
 // ========== AUTH ==========
@@ -1495,63 +1554,107 @@ function chartOpts() {
   };
 }
 
-// ========== WORDTRACKS (cluster-based) ==========
-let wtSource = 'all';
-function setWtSource(src, el) {
-  wtSource = src;
-  document.querySelectorAll('#tab-wordtracks .itab').forEach(i => i.classList.remove('active'));
-  el.classList.add('active');
-  loadWordtracks();
+// ========== WORDTRACKS (two-layer: workflows → positions → clusters) ==========
+let wtView = { level: 'workflows', workflowId: null, workflowLabel: null };
+
+function loadWordtracks() {
+  wtView = { level: 'workflows', workflowId: null, workflowLabel: null };
+  renderWtView();
 }
-async function loadWordtracks() {
+
+async function renderWtView() {
+  if (wtView.level === 'workflows') return renderWtWorkflows();
+  if (wtView.level === 'workflow') return renderWtWorkflowDetail(wtView.workflowId);
+}
+
+async function renderWtWorkflows() {
+  document.getElementById('wt-breadcrumb').innerHTML = '<strong>All Workflows</strong>';
+  const thead = document.getElementById('wt-stages-thead');
+  thead.innerHTML = '<tr><th>Workflow</th><th>Convs</th><th>Sends</th><th>Replies</th><th>Reply %</th><th>Avg Reply</th><th>Bookings</th><th>Booking %</th><th>Opt-Outs</th><th>Opt-Out %</th><th>Drop-Off %</th></tr>';
   const windowDays = parseInt(document.getElementById('wt-window')?.value, 10) || 7;
-  const params = new URLSearchParams({ days: getDays(), source: wtSource, window_days: windowDays });
-  const locParam = getLocationParam();
-  const data = await api('/api/wordtracks/clusters?' + params + (locParam ? '&' + locParam : ''));
-  if (!data) return;
+  const params = new URLSearchParams({ days: getDays(), window_days: windowDays });
+  const data = await api('/api/wordtracks/workflows?' + params);
   const tbody = document.getElementById('wt-stages-tbody');
   tbody.innerHTML = '';
-  (data.clusters || []).forEach(c => {
-    const replyRate = parseFloat(c.reply_rate) || 0;
-    const bookingRate = parseFloat(c.booking_rate) || 0;
-    const optOutRate = parseFloat(c.opt_out_rate) || 0;
-    const dropRate = parseFloat(c.drop_off_rate) || 0;
-    const avg = c.avg_reply_seconds ? (Math.round(c.avg_reply_seconds) + 's') : '---';
-    const srcColor = c.source === 'claude' ? 'c' : (c.source === 'botpress' ? 'a' : 'g');
-    const label = c.label && c.label !== 'unlabeled' ? c.label : ('cluster #' + c.id + ' (unlabeled)');
-    tbody.innerHTML += '<tr style="cursor:pointer;" onclick="expandWtCluster(' + c.id + ')">' +
+  if (!data || !(data.workflows || []).length) {
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:30px;color:var(--muted);">No workflows clustered yet — click "Recluster now" or <a href="javascript:showWtDiag()" style="color:var(--cyan);">see diagnostic</a>.</td></tr>';
+    const det = document.getElementById('wt-stage-detail');
+    if (det) det.innerHTML = '';
+    return;
+  }
+  (data.workflows || []).forEach(w => {
+    const label = w.label && w.label !== 'unlabeled' ? w.label : ('workflow #' + w.id + ' (unlabeled)');
+    const avg = w.avg_reply_seconds ? (Math.round(w.avg_reply_seconds) + 's') : '---';
+    tbody.innerHTML += '<tr style="cursor:pointer;" onclick="drillWtWorkflow(' + w.id + ', ' + JSON.stringify(label).replace(/"/g, '&quot;') + ')">' +
       '<td><div style="font-weight:600;">' + esc(label) + '</div>' +
-        (c.description ? '<div style="font-size:10px;color:var(--muted);margin-top:2px;">' + esc(c.description) + '</div>' : '') +
-        '<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic;">"' + esc((c.example_text || '').slice(0, 120)) + '"</div></td>' +
-      '<td><span class="pill ' + srcColor + '">' + esc(c.source || '-') + '</span></td>' +
-      '<td>' + fmtNum(c.sends) + '</td>' +
-      '<td>' + fmtNum(c.replies) + '</td>' +
-      '<td style="color:var(--cyan);">' + fmtPct(replyRate) + '</td>' +
+        (w.description ? '<div style="font-size:10px;color:var(--muted);margin-top:2px;">' + esc(w.description) + '</div>' : '') +
+        '<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic;">"' + esc((w.example_opener || '').slice(0, 120)) + '"</div></td>' +
+      '<td>' + fmtNum(w.unique_conversations) + '</td>' +
+      '<td>' + fmtNum(w.sends) + '</td>' +
+      '<td>' + fmtNum(w.replies) + '</td>' +
+      '<td style="color:var(--cyan);">' + fmtPct(w.reply_rate) + '</td>' +
       '<td>' + avg + '</td>' +
-      '<td>' + fmtNum(c.bookings) + '</td>' +
-      '<td style="color:var(--green);">' + fmtPct(bookingRate) + '</td>' +
-      '<td>' + fmtNum(c.opt_outs) + '</td>' +
-      '<td style="color:' + (optOutRate > 0.035 ? 'var(--red)' : 'var(--muted)') + ';">' + fmtPct(optOutRate) + '</td>' +
-      '<td style="color:var(--amber);">' + fmtPct(dropRate) + '</td>' +
-      '<td>' + fmtNum(c.unique_conversations) + '</td>' +
+      '<td>' + fmtNum(w.bookings) + '</td>' +
+      '<td style="color:var(--green);">' + fmtPct(w.booking_rate) + '</td>' +
+      '<td>' + fmtNum(w.opt_outs) + '</td>' +
+      '<td style="color:' + (w.opt_out_rate > 0.035 ? 'var(--red)' : 'var(--muted)') + ';">' + fmtPct(w.opt_out_rate) + '</td>' +
+      '<td style="color:var(--amber);">' + fmtPct(w.drop_off_rate) + '</td>' +
     '</tr>';
   });
+  const det = document.getElementById('wt-stage-detail');
+  if (det) det.innerHTML = '';
+}
+
+async function drillWtWorkflow(id, label) {
+  wtView = { level: 'workflow', workflowId: id, workflowLabel: label };
+  renderWtWorkflowDetail(id);
+}
+
+function backToWorkflows() {
+  wtView = { level: 'workflows', workflowId: null, workflowLabel: null };
+  renderWtView();
+}
+
+async function renderWtWorkflowDetail(wfId) {
+  document.getElementById('wt-breadcrumb').innerHTML =
+    '<a href="javascript:backToWorkflows()" style="color:var(--cyan);">All Workflows</a> &rsaquo; <strong>' + esc(wtView.workflowLabel || ('workflow #' + wfId)) + '</strong>';
+  const thead = document.getElementById('wt-stages-thead');
+  thead.innerHTML = '<tr><th>Position / Cluster</th><th>Sends</th><th>Replies</th><th>Reply %</th><th>Avg Reply</th><th>Bookings</th><th>Booking %</th><th>Opt-Outs</th><th>Opt-Out %</th><th>Drop-Off %</th><th>Convs</th></tr>';
+  const windowDays = parseInt(document.getElementById('wt-window')?.value, 10) || 7;
+  const params = new URLSearchParams({ days: getDays(), window_days: windowDays });
+  const data = await api('/api/wordtracks/workflow/' + wfId + '?' + params);
+  const tbody = document.getElementById('wt-stages-tbody');
+  tbody.innerHTML = '';
+  if (!data) return;
+  for (const posBlock of (data.positions || [])) {
+    tbody.innerHTML += '<tr><td colspan="11" style="background:rgba(0,212,255,0.06);font-weight:700;padding:8px 10px;color:var(--cyan);">Message Position ' + posBlock.position + (posBlock.position === 1 ? ' (opener)' : '') + '</td></tr>';
+    for (const c of posBlock.clusters) {
+      const label = c.label && c.label !== 'unlabeled' ? c.label : ('cluster #' + c.id + ' (unlabeled)');
+      const avg = c.avg_reply_seconds ? (Math.round(c.avg_reply_seconds) + 's') : '---';
+      tbody.innerHTML += '<tr style="cursor:pointer;" onclick="expandWtCluster(' + c.id + ')">' +
+        '<td style="padding-left:24px;"><div style="font-weight:600;">' + esc(label) + '</div>' +
+          (c.description ? '<div style="font-size:10px;color:var(--muted);margin-top:2px;">' + esc(c.description) + '</div>' : '') +
+          '<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic;">"' + esc((c.example_text || '').slice(0, 120)) + '"</div></td>' +
+        '<td>' + fmtNum(c.sends) + '</td>' +
+        '<td>' + fmtNum(c.replies) + '</td>' +
+        '<td style="color:var(--cyan);">' + fmtPct(c.reply_rate) + '</td>' +
+        '<td>' + avg + '</td>' +
+        '<td>' + fmtNum(c.bookings) + '</td>' +
+        '<td style="color:var(--green);">' + fmtPct(c.booking_rate) + '</td>' +
+        '<td>' + fmtNum(c.opt_outs) + '</td>' +
+        '<td style="color:' + (c.opt_out_rate > 0.035 ? 'var(--red)' : 'var(--muted)') + ';">' + fmtPct(c.opt_out_rate) + '</td>' +
+        '<td style="color:var(--amber);">' + fmtPct(c.drop_off_rate) + '</td>' +
+        '<td>' + fmtNum(c.unique_conversations) + '</td>' +
+      '</tr>';
+    }
+  }
   if (!tbody.innerHTML) {
-    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:30px;color:var(--muted);">No cluster data yet — run clustering first (click "Recluster now") or <a href="javascript:showWtDiag()" style="color:var(--cyan);">see diagnostic</a>.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:30px;color:var(--muted);">No messages attached to clusters in this window yet.</td></tr>';
   }
   const det = document.getElementById('wt-stage-detail');
   if (det) det.innerHTML = '';
 }
-async function showWtDiag() {
-  const r = await api('/api/wordtracks/diag');
-  if (!r) return;
-  const el = document.getElementById('wt-stage-detail');
-  if (!el) return;
-  el.innerHTML = '<div class="card"><div class="card-title">WordTracks Diagnostic</div>' +
-    (r.hint ? '<div style="padding:8px 10px;background:rgba(255,181,71,.1);border:1px solid var(--amber);border-radius:4px;margin-bottom:10px;font-size:12px;color:var(--amber);">' + esc(r.hint) + '</div>' : '') +
-    '<pre style="background:var(--panel);padding:10px;border-radius:4px;overflow:auto;font-size:11px;">' + esc(JSON.stringify(r.diag, null, 2)) + '</pre>' +
-    '</div>';
-}
+
 async function expandWtCluster(id) {
   const el = document.getElementById('wt-stage-detail');
   if (!el) return;
@@ -1563,7 +1666,7 @@ async function expandWtCluster(id) {
   const c = data.cluster;
   const label = c.label && c.label !== 'unlabeled' ? c.label : ('cluster #' + c.id + ' (unlabeled)');
   el.innerHTML = '<div class="card">' +
-    '<div class="card-title">' + esc(label) + ' — ' + (data.samples || []).length + ' samples</div>' +
+    '<div class="card-title">' + esc(label) + (c.workflow_label ? ' <span style="font-size:11px;color:var(--muted);">in ' + esc(c.workflow_label) + ' · position ' + c.position + '</span>' : '') + ' — ' + (data.samples || []).length + ' samples</div>' +
     (c.description ? '<div style="font-size:11px;color:var(--muted);margin-bottom:10px;">' + esc(c.description) + '</div>' : '') +
     (data.samples || []).map(s => {
       const negFlag = s.negative_flag ? '<span class="pill r" style="margin-left:6px;">NEG</span>' : '';
@@ -1577,12 +1680,33 @@ async function expandWtCluster(id) {
     }).join('') +
   '</div>';
 }
+
+async function showWtDiag() {
+  const r = await api('/api/wordtracks/diag');
+  if (!r) return;
+  const el = document.getElementById('wt-stage-detail');
+  if (!el) return;
+  el.innerHTML = '<div class="card"><div class="card-title">WordTracks Diagnostic</div>' +
+    (r.hint ? '<div style="padding:8px 10px;background:rgba(255,181,71,.1);border:1px solid var(--amber);border-radius:4px;margin-bottom:10px;font-size:12px;color:var(--amber);">' + esc(r.hint) + '</div>' : '') +
+    '<pre style="background:var(--panel);padding:10px;border-radius:4px;overflow:auto;font-size:11px;">' + esc(JSON.stringify(r.diag, null, 2)) + '</pre>' +
+    '</div>';
+}
+
+// Recluster now uses the jobs table (Bug 7) for live progress.
 async function reclusterWordTracks() {
-  toast('Clustering + labeling in progress…');
+  const btn = document.getElementById('wt-recluster-btn');
   const res = await api('/api/wordtracks/recluster', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-  if (!res) { toast('Reclustering failed.'); return; }
-  toast('Clustered: ' + (res.created_clusters || 0) + ' new · ' + (res.attached_messages || 0) + ' msgs · ' + (res.labeled || 0) + ' labeled');
-  loadWordtracks();
+  if (!res || !res.jobId) { toast('Failed to start reclustering.'); return; }
+  trackJob(res.jobId, {
+    button: btn,
+    label: 'Recluster now',
+    labelRunning: 'Reclustering…',
+    onDone: (job) => {
+      const r = job.result || {};
+      toast('Reclustered: ' + (r.workflows_created || 0) + ' workflows · ' + (r.clusters_created || 0) + ' word tracks · ' + ((r.workflows_labeled || 0) + (r.word_tracks_labeled || 0)) + ' labeled');
+      loadWordtracks();
+    }
+  });
 }
 
 // ========== PIPELINE ==========
@@ -1816,14 +1940,17 @@ async function qcApplyPending() {
   const r = await api('/api/qc/pending-edits-count');
   if (!r || !r.pending) { toast('No pending edits.'); return; }
   if (!confirm('Apply ' + r.pending + ' pending edit(s) in a single Claude call? This rewrites the live system prompt.')) return;
-  toast('Merging edits into system prompt...');
+  const btn = document.getElementById('qc-flush-btn');
+  const origLabel = btn ? btn.innerHTML : null;
+  if (btn) { btn.disabled = true; btn.textContent = 'Merging edits…'; }
   const res = await api('/api/qc/apply-pending', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dry_run: false })
   });
-  if (!res) { toast('Apply failed.'); return; }
-  toast('Applied ' + (res.applied || 0) + ' edits. Prompt updated.');
+  if (btn) { btn.disabled = false; btn.innerHTML = origLabel; }
+  if (!res) { toast('Apply failed.', 'err'); return; }
+  toast('Applied ' + (res.applied || 0) + ' edits. Prompt updated.', 'ok');
   refreshPendingEditsCounter();
 }
 
@@ -2741,27 +2868,45 @@ function hideAnalyzerProgress() {
   document.getElementById('an-progress-wrap').style.display = 'none';
 }
 
-async function analyzerPull() {
+async function analyzerPull(fullRepull) {
   if (!analyzerLocationId) { toast('Select a subaccount first.'); return; }
+  if (fullRepull && !confirm('Full repull: this re-fetches every conversation\'s complete message history from GHL for this sub-account. It can take several minutes for large locations. Continue?')) return;
   const token = document.getElementById('an-token-override').value.trim();
-  const btn = document.getElementById('an-pull-btn');
+  const btnId = fullRepull ? 'an-repull-btn' : 'an-pull-btn';
+  const btn = document.getElementById(btnId);
+  const origLabel = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Starting...';
+  btn.textContent = 'Starting…';
   const res = await fetch('/api/analyzer/pull', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ locationId: analyzerLocationId, ghlToken: token || undefined })
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (getAuthToken() || '') },
+    body: JSON.stringify({ locationId: analyzerLocationId, ghlToken: token || undefined, fullRepull: !!fullRepull })
   });
   const data = await res.json().catch(() => null);
-  btn.disabled = false;
-  btn.textContent = 'Pull Conversations';
   if (!res.ok || !data) {
-    toast('Pull failed: ' + (data?.error || 'unknown'));
+    btn.disabled = false; btn.textContent = origLabel;
+    toast('Pull failed: ' + (data?.error || 'unknown'), 'err');
     document.getElementById('an-pulled-meta').textContent = 'Pull failed: ' + (data?.error || 'unknown');
     return;
   }
   showAnalyzerProgress({ stage: 'conversations', fetched: 0, total: 0, messages_fetched: 0 });
   if (!analyzerPollTimer) analyzerPollTimer = setInterval(() => analyzerRefreshStatus(false), 2000);
+  // Drive the button label off the jobs table.
+  if (data.jobId) {
+    trackJob(data.jobId, {
+      button: btn,
+      label: origLabel,
+      labelRunning: fullRepull ? 'Repulling…' : 'Pulling…',
+      onDone: (job) => {
+        toast((fullRepull ? 'Full repull complete' : 'Pull complete') + ': ' + fmtNum(job.result?.counts?.total || 0) + ' conversations', 'ok');
+        analyzerRefreshStatus(true);
+        analyzerLoadStats();
+        analyzerLoadConversations();
+      }
+    });
+  } else {
+    btn.disabled = false; btn.textContent = origLabel;
+  }
 }
 
 function analyzerSetSource(src, el) {

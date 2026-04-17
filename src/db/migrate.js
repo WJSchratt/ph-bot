@@ -300,6 +300,60 @@ async function applyMigrations() {
       CREATE INDEX IF NOT EXISTS idx_ghl_messages_msg_id ON ghl_messages(ghl_message_id) WHERE ghl_message_id IS NOT NULL;
     `);
     console.log('[migrate] ghl_messages.ghl_message_id ensured');
+
+    // Two-layer word track model (Bug 5):
+    //   workflow_clusters = cluster of conversation openers → workflow identity
+    //   conversation_workflow_assignment = each conversation → its workflow
+    //   word_track_clusters extended with (workflow_cluster_id, position) to
+    //     group per-position variants within a workflow.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS workflow_clusters (
+        id SERIAL PRIMARY KEY,
+        label VARCHAR(200) NOT NULL DEFAULT 'unlabeled',
+        description TEXT,
+        normalized_opener TEXT NOT NULL,
+        opener_hash VARCHAR(64) UNIQUE,
+        example_opener TEXT NOT NULL,
+        conversation_count INTEGER DEFAULT 0,
+        first_seen_at TIMESTAMPTZ,
+        last_seen_at TIMESTAMPTZ,
+        labeled_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_wf_clusters_label ON workflow_clusters(label);
+
+      CREATE TABLE IF NOT EXISTS conversation_workflow_assignment (
+        id SERIAL PRIMARY KEY,
+        ghl_conversation_id TEXT NOT NULL,
+        location_id TEXT NOT NULL,
+        workflow_cluster_id INTEGER REFERENCES workflow_clusters(id) ON DELETE SET NULL,
+        opener_message_id BIGINT,
+        assigned_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(ghl_conversation_id, location_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_conv_wf_workflow ON conversation_workflow_assignment(workflow_cluster_id);
+      CREATE INDEX IF NOT EXISTS idx_conv_wf_loc ON conversation_workflow_assignment(location_id);
+
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='word_track_clusters' AND column_name='workflow_cluster_id') THEN
+          ALTER TABLE word_track_clusters ADD COLUMN workflow_cluster_id INTEGER REFERENCES workflow_clusters(id) ON DELETE SET NULL;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='word_track_clusters' AND column_name='position') THEN
+          ALTER TABLE word_track_clusters ADD COLUMN position INTEGER;
+        END IF;
+      END $$;
+
+      -- The old flat-model unique constraint on normalized_hash conflicts
+      -- with the two-layer model where the same template can legitimately
+      -- appear at different (workflow, position) pairs.
+      ALTER TABLE word_track_clusters DROP CONSTRAINT IF EXISTS word_track_clusters_normalized_hash_key;
+
+      CREATE INDEX IF NOT EXISTS idx_wtclusters_workflow ON word_track_clusters(workflow_cluster_id);
+      CREATE INDEX IF NOT EXISTS idx_wtclusters_position ON word_track_clusters(workflow_cluster_id, position);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_wtclusters_wf_pos_hash ON word_track_clusters(workflow_cluster_id, position, normalized_hash) WHERE workflow_cluster_id IS NOT NULL;
+    `);
+    console.log('[migrate] two-layer clustering schema ensured');
 }
 
 // CLI entry point — when run as `node src/db/migrate.js` or `npm run migrate`.

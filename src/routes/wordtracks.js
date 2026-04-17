@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const wtClusters = require('../services/wordTrackClusters');
+const jobs = require('../services/jobs');
 const router = express.Router();
 
 const NEGATIVE_RE = /\b(stop|unsubscribe|remove me|fuck|shit|damn|bitch|leave me alone|take me off|not interested|fuck off|asshole|pissed)\b/i;
@@ -16,161 +17,228 @@ async function getAttributionWindowDays() {
   }
 }
 
-function buildSourceFilter(source) {
-  const s = String(source || 'all').toLowerCase();
-  if (s === 'claude') return `AND gc.source = 'claude'`;
-  if (s === 'botpress') return `AND gc.source = 'botpress'`;
-  if (s === 'other') return `AND gc.source = 'other'`;
-  return '';
-}
+// ────────────────────────────────────────────────────────────────────────
+// TOP LEVEL: list workflows with aggregate stats.
+// ────────────────────────────────────────────────────────────────────────
 
-/**
- * Main cluster stats endpoint. Attribution is temporal: for each outbound
- * cluster message we look ahead in the same ghl_conversation within the
- * attribution window for the very next inbound message. The cluster gets
- * credited with that reply's time + the conversation's terminal outcome
- * (booking / opt-out) only if the credited outbound is the LAST outbound
- * before the outcome.
- */
-router.get('/wordtracks/clusters', async (req, res) => {
+router.get('/wordtracks/workflows', async (req, res) => {
   try {
-    const { location_id, location_ids, source = 'all', days = 30, window_days } = req.query;
-    const daysInt = parseInt(days, 10) || 30;
-    const winDays = parseInt(window_days, 10) || (await getAttributionWindowDays());
-    const locIds = location_ids ? location_ids.split(',').map((s) => s.trim()).filter(Boolean) : (location_id ? [location_id] : []);
+    const daysInt = parseInt(req.query.days, 10) || 30;
+    const winDays = parseInt(req.query.window_days, 10) || (await getAttributionWindowDays());
 
-    const params = [daysInt, winDays];
-    let locFilter = '';
-    if (locIds.length) {
-      params.push(locIds);
-      locFilter = ` AND m.location_id = ANY($${params.length})`;
-    }
-    const sourceFilter = buildSourceFilter(source);
+    const q = await db.query(
+      `WITH scoped_msgs AS (
+         SELECT m.id AS msg_id, m.ghl_conversation_id, m.location_id,
+                m.created_at, m.cluster_id,
+                wtc.workflow_cluster_id
+           FROM ghl_messages m
+           JOIN word_track_clusters wtc ON wtc.id = m.cluster_id
+          WHERE m.direction = 'outbound'
+            AND m.created_at >= NOW() - ($1 || ' days')::interval
+       ),
+       per_msg AS (
+         SELECT sm.workflow_cluster_id,
+                sm.msg_id,
+                sm.ghl_conversation_id,
+                sm.location_id,
+                sm.created_at AS out_at,
+                (SELECT MIN(created_at) FROM ghl_messages im
+                   WHERE im.ghl_conversation_id = sm.ghl_conversation_id
+                     AND im.location_id = sm.location_id
+                     AND im.direction = 'inbound'
+                     AND im.created_at > sm.created_at
+                     AND im.created_at <= sm.created_at + ($2 || ' days')::interval) AS in_at,
+                gc.terminal_outcome
+           FROM scoped_msgs sm
+           LEFT JOIN ghl_conversations gc
+             ON gc.ghl_conversation_id = sm.ghl_conversation_id AND gc.location_id = sm.location_id
+       ),
+       last_out_per_conv AS (
+         SELECT DISTINCT ON (sm.ghl_conversation_id, sm.location_id)
+                sm.workflow_cluster_id, sm.ghl_conversation_id, sm.location_id,
+                pm.terminal_outcome
+           FROM scoped_msgs sm
+           JOIN per_msg pm USING (msg_id)
+          ORDER BY sm.ghl_conversation_id, sm.location_id, sm.created_at DESC
+       )
+       SELECT wf.id, wf.label, wf.description, wf.conversation_count, wf.labeled_at, wf.example_opener,
+              COALESCE(m.sends, 0) AS sends,
+              COALESCE(m.replies, 0) AS replies,
+              COALESCE(m.avg_reply_seconds, 0) AS avg_reply_seconds,
+              COALESCE(m.drop_offs, 0) AS drop_offs,
+              COALESCE(m.unique_convs, 0) AS unique_convs,
+              COALESCE(c.bookings, 0) AS bookings,
+              COALESCE(c.opt_outs, 0) AS opt_outs
+         FROM workflow_clusters wf
+         LEFT JOIN (
+           SELECT workflow_cluster_id,
+                  COUNT(*)::int AS sends,
+                  COUNT(*) FILTER (WHERE in_at IS NOT NULL)::int AS replies,
+                  COALESCE(AVG(EXTRACT(EPOCH FROM (in_at - out_at))) FILTER (WHERE in_at IS NOT NULL), 0)::float AS avg_reply_seconds,
+                  COUNT(*) FILTER (WHERE in_at IS NULL)::int AS drop_offs,
+                  COUNT(DISTINCT ghl_conversation_id)::int AS unique_convs
+             FROM per_msg GROUP BY workflow_cluster_id
+         ) m ON m.workflow_cluster_id = wf.id
+         LEFT JOIN (
+           SELECT workflow_cluster_id,
+                  COUNT(*) FILTER (WHERE terminal_outcome = ANY($3))::int AS bookings,
+                  COUNT(*) FILTER (WHERE terminal_outcome = ANY($4))::int AS opt_outs
+             FROM last_out_per_conv GROUP BY workflow_cluster_id
+         ) c ON c.workflow_cluster_id = wf.id
+        ORDER BY sends DESC, wf.conversation_count DESC`,
+      [daysInt, winDays, BOOKED_OUTCOMES, OPTOUT_OUTCOMES]
+    );
 
-    // Per-cluster metrics.
-    //  - sends: count of outbound cluster messages in window
-    //  - replies: count of those that have a next-inbound within the
-    //    attribution window and are the most recent outbound before it
-    //  - bookings / opt-outs: count of conversations whose terminal outcome
-    //    matches, where THIS cluster message is the most recent outbound
-    //    before the conversation's last inbound (i.e. credited cluster)
-    //  - drop-offs: outbound sends with no next-inbound within window
-    const sql = `
-      WITH outbounds AS (
-        SELECT
-          m.id AS msg_id,
-          m.cluster_id,
-          m.ghl_conversation_id,
-          m.location_id,
-          m.created_at,
-          gc.terminal_outcome,
-          gc.source
-        FROM ghl_messages m
-        JOIN ghl_conversations gc ON gc.ghl_conversation_id = m.ghl_conversation_id AND gc.location_id = m.location_id
-        WHERE m.direction = 'outbound'
-          AND m.cluster_id IS NOT NULL
-          AND m.created_at >= NOW() - ($1 || ' days')::interval
-          ${sourceFilter}
-          ${locFilter}
-      ),
-      next_inbound AS (
-        SELECT
-          o.msg_id,
-          o.cluster_id,
-          o.ghl_conversation_id,
-          o.location_id,
-          o.created_at AS out_at,
-          o.terminal_outcome,
-          (SELECT MIN(created_at) FROM ghl_messages im
-             WHERE im.ghl_conversation_id = o.ghl_conversation_id
-               AND im.location_id = o.location_id
-               AND im.direction = 'inbound'
-               AND im.created_at > o.created_at
-               AND im.created_at <= o.created_at + ($2 || ' days')::interval) AS in_at
-        FROM outbounds o
-      ),
-      -- For each ghl_conversation, identify the single outbound cluster message
-      -- immediately preceding the conversation's terminal outcome (i.e. the
-      -- "credited" outbound for booking / opt-out attribution).
-      credited AS (
-        SELECT DISTINCT ON (o.ghl_conversation_id, o.location_id)
-               o.ghl_conversation_id, o.location_id, o.cluster_id, o.terminal_outcome
-          FROM outbounds o
-        ORDER BY o.ghl_conversation_id, o.location_id, o.created_at DESC
-      ),
-      per_cluster AS (
-        SELECT
-          ni.cluster_id,
-          COUNT(*)::int AS sends,
-          COUNT(*) FILTER (WHERE ni.in_at IS NOT NULL)::int AS replies,
-          COALESCE(AVG(EXTRACT(EPOCH FROM (ni.in_at - ni.out_at))) FILTER (WHERE ni.in_at IS NOT NULL), 0)::float AS avg_reply_seconds,
-          COUNT(*) FILTER (WHERE ni.in_at IS NULL)::int AS drop_offs,
-          COUNT(DISTINCT ni.ghl_conversation_id)::int AS unique_convs
-        FROM next_inbound ni
-        GROUP BY ni.cluster_id
-      ),
-      credit_totals AS (
-        SELECT
-          cluster_id,
-          COUNT(*) FILTER (WHERE terminal_outcome = ANY($3))::int AS bookings,
-          COUNT(*) FILTER (WHERE terminal_outcome = ANY($4))::int AS opt_outs
-        FROM credited
-        GROUP BY cluster_id
-      )
-      SELECT wc.id, wc.label, wc.description, wc.source, wc.example_text, wc.cluster_size,
-             COALESCE(pc.sends, 0) AS sends,
-             COALESCE(pc.replies, 0) AS replies,
-             COALESCE(pc.avg_reply_seconds, 0) AS avg_reply_seconds,
-             COALESCE(pc.drop_offs, 0) AS drop_offs,
-             COALESCE(pc.unique_convs, 0) AS unique_convs,
-             COALESCE(ct.bookings, 0) AS bookings,
-             COALESCE(ct.opt_outs, 0) AS opt_outs
-        FROM word_track_clusters wc
-        LEFT JOIN per_cluster pc ON pc.cluster_id = wc.id
-        LEFT JOIN credit_totals ct ON ct.cluster_id = wc.id
-       WHERE COALESCE(pc.sends, 0) > 0 OR COALESCE(ct.bookings, 0) > 0 OR COALESCE(ct.opt_outs, 0) > 0
-       ORDER BY sends DESC, wc.cluster_size DESC
-    `;
-    params.push(BOOKED_OUTCOMES, OPTOUT_OUTCOMES);
-    const result = await db.query(sql, params);
-
-    const clusters = result.rows.map((r) => {
+    const workflows = q.rows.map((r) => {
       const sends = Number(r.sends) || 0;
       const replies = Number(r.replies) || 0;
       const uniqueConvs = Number(r.unique_convs) || 0;
-      const bookings = Number(r.bookings) || 0;
-      const optOuts = Number(r.opt_outs) || 0;
-      const dropOffs = Number(r.drop_offs) || 0;
       return {
         id: r.id,
         label: r.label,
         description: r.description,
-        source: r.source,
-        example_text: r.example_text,
-        cluster_size: Number(r.cluster_size) || 0,
+        example_opener: r.example_opener,
+        conversation_count: Number(r.conversation_count) || 0,
+        labeled: !!r.labeled_at,
         sends,
         replies,
         reply_rate: sends ? replies / sends : 0,
         avg_reply_seconds: Number(r.avg_reply_seconds) || 0,
-        drop_offs: dropOffs,
-        drop_off_rate: sends ? dropOffs / sends : 0,
+        drop_offs: Number(r.drop_offs) || 0,
+        drop_off_rate: sends ? (Number(r.drop_offs) || 0) / sends : 0,
         unique_conversations: uniqueConvs,
-        bookings,
-        booking_rate: uniqueConvs ? bookings / uniqueConvs : 0,
-        opt_outs: optOuts,
-        opt_out_rate: uniqueConvs ? optOuts / uniqueConvs : 0
+        bookings: Number(r.bookings) || 0,
+        booking_rate: uniqueConvs ? (Number(r.bookings) || 0) / uniqueConvs : 0,
+        opt_outs: Number(r.opt_outs) || 0,
+        opt_out_rate: uniqueConvs ? (Number(r.opt_outs) || 0) / uniqueConvs : 0
       };
     });
 
-    res.json({ source, days: daysInt, attribution_window_days: winDays, clusters });
+    res.json({ days: daysInt, attribution_window_days: winDays, workflows });
   } catch (err) {
-    console.error('[wordtracks/clusters] error', err);
     res.status(500).json({ error: err.message, stack: err.stack });
   }
 });
 
-// Single-cluster detail: sample outbound + the inbound reply (if any)
-// within the attribution window for each sample.
+// ────────────────────────────────────────────────────────────────────────
+// DRILL-DOWN: for a specific workflow, per-position cluster breakdown.
+// ────────────────────────────────────────────────────────────────────────
+
+router.get('/wordtracks/workflow/:id', async (req, res) => {
+  try {
+    const wfId = parseInt(req.params.id, 10);
+    const daysInt = parseInt(req.query.days, 10) || 30;
+    const winDays = parseInt(req.query.window_days, 10) || (await getAttributionWindowDays());
+
+    const wfQ = await db.query(
+      `SELECT id, label, description, conversation_count, example_opener, labeled_at
+         FROM workflow_clusters WHERE id = $1`,
+      [wfId]
+    );
+    const workflow = wfQ.rows[0];
+    if (!workflow) return res.status(404).json({ error: 'workflow not found' });
+
+    const clustersQ = await db.query(
+      `WITH scoped AS (
+         SELECT m.id AS msg_id, m.ghl_conversation_id, m.location_id,
+                m.created_at, m.cluster_id,
+                wtc.position
+           FROM ghl_messages m
+           JOIN word_track_clusters wtc ON wtc.id = m.cluster_id
+          WHERE wtc.workflow_cluster_id = $1
+            AND m.direction = 'outbound'
+            AND m.created_at >= NOW() - ($2 || ' days')::interval
+       ),
+       next_inbound AS (
+         SELECT s.cluster_id, s.ghl_conversation_id, s.location_id, s.created_at AS out_at,
+                (SELECT MIN(created_at) FROM ghl_messages im
+                   WHERE im.ghl_conversation_id = s.ghl_conversation_id
+                     AND im.location_id = s.location_id
+                     AND im.direction = 'inbound'
+                     AND im.created_at > s.created_at
+                     AND im.created_at <= s.created_at + ($3 || ' days')::interval) AS in_at
+           FROM scoped s
+       ),
+       credited AS (
+         SELECT DISTINCT ON (s.ghl_conversation_id, s.location_id)
+                s.cluster_id, s.ghl_conversation_id, s.location_id,
+                gc.terminal_outcome
+           FROM scoped s
+           LEFT JOIN ghl_conversations gc
+             ON gc.ghl_conversation_id = s.ghl_conversation_id AND gc.location_id = s.location_id
+          ORDER BY s.ghl_conversation_id, s.location_id, s.created_at DESC
+       )
+       SELECT wtc.id, wtc.label, wtc.description, wtc.example_text, wtc.position, wtc.cluster_size, wtc.labeled_at,
+              COALESCE(m.sends, 0) AS sends,
+              COALESCE(m.replies, 0) AS replies,
+              COALESCE(m.avg_reply_seconds, 0) AS avg_reply_seconds,
+              COALESCE(m.drop_offs, 0) AS drop_offs,
+              COALESCE(m.unique_convs, 0) AS unique_convs,
+              COALESCE(c.bookings, 0) AS bookings,
+              COALESCE(c.opt_outs, 0) AS opt_outs
+         FROM word_track_clusters wtc
+         LEFT JOIN (
+           SELECT cluster_id,
+                  COUNT(*)::int AS sends,
+                  COUNT(*) FILTER (WHERE in_at IS NOT NULL)::int AS replies,
+                  COALESCE(AVG(EXTRACT(EPOCH FROM (in_at - out_at))) FILTER (WHERE in_at IS NOT NULL), 0)::float AS avg_reply_seconds,
+                  COUNT(*) FILTER (WHERE in_at IS NULL)::int AS drop_offs,
+                  COUNT(DISTINCT ghl_conversation_id)::int AS unique_convs
+             FROM next_inbound GROUP BY cluster_id
+         ) m ON m.cluster_id = wtc.id
+         LEFT JOIN (
+           SELECT cluster_id,
+                  COUNT(*) FILTER (WHERE terminal_outcome = ANY($4))::int AS bookings,
+                  COUNT(*) FILTER (WHERE terminal_outcome = ANY($5))::int AS opt_outs
+             FROM credited GROUP BY cluster_id
+         ) c ON c.cluster_id = wtc.id
+        WHERE wtc.workflow_cluster_id = $1
+        ORDER BY wtc.position ASC, sends DESC`,
+      [wfId, daysInt, winDays, BOOKED_OUTCOMES, OPTOUT_OUTCOMES]
+    );
+
+    const byPosition = new Map();
+    for (const r of clustersQ.rows) {
+      if (!byPosition.has(r.position)) byPosition.set(r.position, []);
+      const sends = Number(r.sends) || 0;
+      const replies = Number(r.replies) || 0;
+      const uniqueConvs = Number(r.unique_convs) || 0;
+      byPosition.get(r.position).push({
+        id: r.id,
+        label: r.label,
+        description: r.description,
+        example_text: r.example_text,
+        cluster_size: Number(r.cluster_size) || 0,
+        position: r.position,
+        labeled: !!r.labeled_at,
+        sends,
+        replies,
+        reply_rate: sends ? replies / sends : 0,
+        avg_reply_seconds: Number(r.avg_reply_seconds) || 0,
+        drop_offs: Number(r.drop_offs) || 0,
+        drop_off_rate: sends ? (Number(r.drop_offs) || 0) / sends : 0,
+        unique_conversations: uniqueConvs,
+        bookings: Number(r.bookings) || 0,
+        booking_rate: uniqueConvs ? (Number(r.bookings) || 0) / uniqueConvs : 0,
+        opt_outs: Number(r.opt_outs) || 0,
+        opt_out_rate: uniqueConvs ? (Number(r.opt_outs) || 0) / uniqueConvs : 0
+      });
+    }
+    const positions = Array.from(byPosition.keys()).sort((a, b) => a - b).map((pos) => ({
+      position: pos,
+      clusters: byPosition.get(pos)
+    }));
+
+    res.json({ workflow, attribution_window_days: winDays, positions });
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// CLUSTER DETAIL: all sends of a single (workflow, position, cluster).
+// ────────────────────────────────────────────────────────────────────────
+
 router.get('/wordtracks/cluster/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -180,8 +248,10 @@ router.get('/wordtracks/cluster/:id', async (req, res) => {
     const lim = Math.min(parseInt(limit, 10) || 30, 200);
 
     const cluster = (await db.query(
-      `SELECT id, label, description, source, example_text, cluster_size, first_seen_at, last_seen_at
-         FROM word_track_clusters WHERE id = $1`,
+      `SELECT wtc.*, wf.label AS workflow_label, wf.id AS workflow_id
+         FROM word_track_clusters wtc
+         LEFT JOIN workflow_clusters wf ON wf.id = wtc.workflow_cluster_id
+        WHERE wtc.id = $1`,
       [id]
     )).rows[0];
     if (!cluster) return res.status(404).json({ error: 'not found' });
@@ -213,141 +283,121 @@ router.get('/wordtracks/cluster/:id', async (req, res) => {
       [id, winDays, daysInt, lim]
     );
 
-    const samplesOut = samples.rows.map((r) => ({
-      message_id: r.msg_id,
-      ghl_conversation_id: r.ghl_conversation_id,
-      location_id: r.location_id,
-      source: r.source,
-      terminal_outcome: r.terminal_outcome,
-      contact_name: r.contact_name,
-      contact_phone: r.contact_phone,
-      content: r.content,
-      created_at: r.created_at,
-      reply_content: r.reply_content,
-      reply_seconds: r.reply_seconds,
-      negative_flag: r.reply_content ? NEGATIVE_RE.test(r.reply_content) : false
-    }));
-
-    res.json({ cluster, attribution_window_days: winDays, samples: samplesOut });
+    res.json({
+      cluster,
+      attribution_window_days: winDays,
+      samples: samples.rows.map((r) => ({
+        message_id: r.msg_id,
+        ghl_conversation_id: r.ghl_conversation_id,
+        location_id: r.location_id,
+        source: r.source,
+        terminal_outcome: r.terminal_outcome,
+        contact_name: r.contact_name,
+        contact_phone: r.contact_phone,
+        content: r.content,
+        created_at: r.created_at,
+        reply_content: r.reply_content,
+        reply_seconds: r.reply_seconds,
+        negative_flag: r.reply_content ? NEGATIVE_RE.test(r.reply_content) : false
+      }))
+    });
   } catch (err) {
-    console.error('[wordtracks/cluster/:id] error', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Rename/re-label a cluster manually.
+// Rename/re-label manually.
 router.patch('/wordtracks/cluster/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { label, description } = req.body || {};
     if (!label && !description) return res.status(400).json({ error: 'label or description required' });
     await db.query(
-      `UPDATE word_track_clusters
-          SET label = COALESCE($1, label),
-              description = COALESCE($2, description),
-              updated_at = NOW()
-        WHERE id = $3`,
+      `UPDATE word_track_clusters SET label = COALESCE($1, label), description = COALESCE($2, description), updated_at = NOW() WHERE id = $3`,
       [label || null, description || null, id]
     );
     res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Trigger a clustering run manually from the UI (admin-only via role guard).
+router.patch('/wordtracks/workflow/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { label, description } = req.body || {};
+    if (!label && !description) return res.status(400).json({ error: 'label or description required' });
+    await db.query(
+      `UPDATE workflow_clusters SET label = COALESCE($1, label), description = COALESCE($2, description), updated_at = NOW() WHERE id = $3`,
+      [label || null, description || null, id]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// Trigger a full two-layer rebuild. Returns a job ID for polling.
+// ────────────────────────────────────────────────────────────────────────
+
 router.post('/wordtracks/recluster', async (req, res) => {
   try {
-    const opts = req.body || {};
-    const out = await wtClusters.runFullPipeline(opts);
-    res.json({ ok: true, ...out });
+    const jobId = await jobs.createJob({
+      type: 'word_track_recluster',
+      startedBy: req.session?.username || null
+    });
+    jobs.spawn(jobId, async (reporter) => {
+      return await wtClusters.runFullPipeline({ reporter });
+    });
+    res.json({ ok: true, jobId });
   } catch (err) {
     res.status(500).json({ error: err.message, stack: err.stack });
   }
 });
 
-// Diagnostic endpoint — why is the WordTracks tab empty?
+// ────────────────────────────────────────────────────────────────────────
+// Diagnostic (same as before, expanded for two-layer state).
+// ────────────────────────────────────────────────────────────────────────
+
 router.get('/wordtracks/diag', async (req, res) => {
   try {
     const diag = {};
-    // Do the tables exist?
     const tblQ = await db.query(
-      `SELECT to_regclass('word_track_clusters') AS c,
+      `SELECT to_regclass('word_track_clusters') AS wtc,
+              to_regclass('workflow_clusters') AS wfc,
+              to_regclass('conversation_workflow_assignment') AS cwa,
               to_regclass('ghl_messages') AS m,
               to_regclass('anthropic_usage_log') AS a`
     );
     diag.tables = {
-      word_track_clusters: !!tblQ.rows[0]?.c,
+      word_track_clusters: !!tblQ.rows[0]?.wtc,
+      workflow_clusters: !!tblQ.rows[0]?.wfc,
+      conversation_workflow_assignment: !!tblQ.rows[0]?.cwa,
       ghl_messages: !!tblQ.rows[0]?.m,
       anthropic_usage_log: !!tblQ.rows[0]?.a
     };
-    if (!diag.tables.word_track_clusters) {
-      return res.json({ ok: false, reason: 'word_track_clusters table missing — migrations not run. Redeploy.', diag });
+    if (!diag.tables.workflow_clusters) {
+      return res.json({ ok: false, reason: 'workflow_clusters table missing — boot migration did not run. Redeploy.', diag });
     }
-    // Does ghl_messages have the cluster_id column?
-    const colQ = await db.query(
-      `SELECT column_name FROM information_schema.columns
-        WHERE table_name='ghl_messages' AND column_name IN ('cluster_id','normalized_hash')`
-    );
-    diag.ghl_messages_columns = colQ.rows.map((r) => r.column_name);
-    // Counts.
     const countsQ = await db.query(
       `SELECT
-         (SELECT COUNT(*) FROM ghl_messages) AS total_ghl_messages,
          (SELECT COUNT(*) FROM ghl_messages WHERE direction = 'outbound') AS total_outbound,
-         (SELECT COUNT(*) FROM ghl_messages WHERE direction = 'outbound' AND cluster_id IS NULL) AS unclustered_outbound,
-         (SELECT COUNT(*) FROM ghl_messages WHERE direction = 'outbound' AND cluster_id IS NOT NULL) AS clustered_outbound,
-         (SELECT COUNT(*) FROM word_track_clusters) AS total_clusters,
-         (SELECT COUNT(*) FROM word_track_clusters WHERE label = 'unlabeled') AS unlabeled_clusters,
-         (SELECT COUNT(*) FROM word_track_clusters WHERE labeled_at IS NOT NULL) AS labeled_clusters`
+         (SELECT COUNT(*) FROM workflow_clusters) AS workflows_total,
+         (SELECT COUNT(*) FROM workflow_clusters WHERE labeled_at IS NOT NULL) AS workflows_labeled,
+         (SELECT COUNT(*) FROM word_track_clusters WHERE workflow_cluster_id IS NOT NULL) AS word_tracks_total,
+         (SELECT COUNT(*) FROM word_track_clusters WHERE workflow_cluster_id IS NOT NULL AND labeled_at IS NOT NULL) AS word_tracks_labeled,
+         (SELECT COUNT(*) FROM conversation_workflow_assignment) AS conversations_assigned,
+         (SELECT COUNT(*) FROM ghl_messages WHERE cluster_id IS NOT NULL) AS messages_attached`
     );
     diag.counts = {};
-    for (const [k, v] of Object.entries(countsQ.rows[0] || {})) {
-      diag.counts[k] = Number(v) || 0;
-    }
-    // 5 most recent outbound samples with normalization to help judge bucketing.
-    const sampleQ = await db.query(
-      `SELECT id, content, cluster_id, normalized_hash
-         FROM ghl_messages
-        WHERE direction = 'outbound'
-        ORDER BY created_at DESC
-        LIMIT 5`
-    );
-    diag.recent_outbound_samples = sampleQ.rows.map((r) => ({
-      id: r.id,
-      content: (r.content || '').slice(0, 200),
-      cluster_id: r.cluster_id,
-      normalized: wtClusters.normalizeMessage(r.content || ''),
-      normalized_hash: r.normalized_hash || wtClusters.hashNormalized(wtClusters.normalizeMessage(r.content || ''))
-    }));
-    // 5 most-recent clusters.
-    const clustersQ = await db.query(
-      `SELECT id, label, source, cluster_size, labeled_at, example_text
-         FROM word_track_clusters
-        ORDER BY updated_at DESC
-        LIMIT 5`
-    );
-    diag.recent_clusters = clustersQ.rows.map((r) => ({
-      id: r.id, label: r.label, source: r.source, cluster_size: r.cluster_size,
-      labeled: !!r.labeled_at, example: (r.example_text || '').slice(0, 120)
-    }));
-    // Clustering calls logged?
-    try {
-      const usageQ = await db.query(
-        `SELECT COUNT(*)::int AS n FROM anthropic_usage_log WHERE category = 'word_track_clustering'`
-      );
-      diag.clustering_calls_logged = Number(usageQ.rows[0]?.n) || 0;
-    } catch { diag.clustering_calls_logged = null; }
+    for (const [k, v] of Object.entries(countsQ.rows[0] || {})) diag.counts[k] = Number(v) || 0;
 
     let hint = null;
     if (diag.counts.total_outbound === 0) {
-      hint = 'No outbound messages in ghl_messages yet. Pull conversations from the Analyzer tab first.';
-    } else if (diag.counts.total_clusters === 0) {
-      hint = 'Never run the clusterer. Click "Recluster now" on the WordTracks tab.';
-    } else if (diag.counts.clustered_outbound === 0) {
-      hint = 'Clusters exist but no messages are attached. Every bucket had size 1 (every outbound message is unique). Either more sends are needed or the normalizer is too strict.';
-    } else if (diag.counts.unlabeled_clusters > 0 && diag.clustering_calls_logged === 0) {
-      hint = 'Clusters exist but none are labeled — labeler never ran. Check logs for Anthropic errors.';
+      hint = 'No outbound messages in ghl_messages. Run a GHL pull from the Analyzer tab first.';
+    } else if (diag.counts.workflows_total === 0) {
+      hint = 'No workflows clustered yet. Click "Recluster now" on the WordTracks tab.';
+    } else if (diag.counts.conversations_assigned === 0) {
+      hint = 'Workflows exist but no conversations are mapped — pipeline may have errored mid-run.';
+    } else if (diag.counts.workflows_labeled === 0) {
+      hint = 'Workflows exist but no labels. Check anthropic_usage_log for word_track_clustering errors.';
     }
     res.json({ ok: true, diag, hint });
   } catch (err) {
