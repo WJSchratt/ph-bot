@@ -217,6 +217,46 @@ async function migrate() {
       ON CONFLICT (section, key) DO NOTHING;
     `);
     console.log('[migrate] cost_config pricing defaults seeded');
+
+    // Word track clusters — Claude clusters outbound SMS templates and the
+    // WordTracks tab credits replies/bookings/opt-outs to the most recent
+    // outbound cluster message before each inbound event.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS word_track_clusters (
+        id SERIAL PRIMARY KEY,
+        label VARCHAR(200) NOT NULL,
+        description TEXT,
+        source VARCHAR(20) DEFAULT 'mixed',
+        example_text TEXT NOT NULL,
+        normalized_hash VARCHAR(64) UNIQUE,
+        cluster_size INTEGER DEFAULT 0,
+        first_seen_at TIMESTAMPTZ,
+        last_seen_at TIMESTAMPTZ,
+        labeled_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_clusters_source ON word_track_clusters(source);
+      CREATE INDEX IF NOT EXISTS idx_clusters_label ON word_track_clusters(label);
+
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ghl_messages' AND column_name='cluster_id') THEN
+          ALTER TABLE ghl_messages ADD COLUMN cluster_id INTEGER REFERENCES word_track_clusters(id) ON DELETE SET NULL;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ghl_messages' AND column_name='normalized_hash') THEN
+          ALTER TABLE ghl_messages ADD COLUMN normalized_hash VARCHAR(64);
+        END IF;
+      END $$;
+
+      CREATE INDEX IF NOT EXISTS idx_ghl_messages_cluster ON ghl_messages(cluster_id) WHERE cluster_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_ghl_messages_norm_hash ON ghl_messages(normalized_hash) WHERE normalized_hash IS NOT NULL;
+
+      -- Attribution window default (configurable per-request on the UI).
+      INSERT INTO app_settings (section, key, value) VALUES
+        ('wordtracks', 'attribution_window_days', '7')
+      ON CONFLICT (section, key) DO NOTHING;
+    `);
+    console.log('[migrate] word_track_clusters + ghl_messages.cluster_id ensured');
   } catch (err) {
     console.error('[migrate] failed', err);
     process.exit(1);

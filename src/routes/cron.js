@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const ghl = require('../services/ghl');
+const wtClusters = require('../services/wordTrackClusters');
 
 const router = express.Router();
 
@@ -95,6 +96,21 @@ router.post('/aggregate-analytics', requireCronAuth, async (req, res) => {
   } catch (err) {
     console.error('[cron/aggregate-analytics]', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Runs the full word-track clustering pipeline:
+//   1. Hash-bucket every unclustered outbound ghl_message (normalize + sha).
+//   2. Create/update clusters from buckets of size >= 2.
+//   3. Batch-label unlabeled clusters via Claude (category=word_track_clustering).
+router.post('/cluster-word-tracks', requireCronAuth, async (req, res) => {
+  try {
+    const opts = req.body || {};
+    const out = await wtClusters.runFullPipeline(opts);
+    res.json({ ok: true, ...out });
+  } catch (err) {
+    console.error('[cron/cluster-word-tracks]', err);
+    res.status(500).json({ error: err.message, stack: err.stack });
   }
 });
 

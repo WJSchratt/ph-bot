@@ -458,15 +458,24 @@ textarea.form-input{resize:vertical;min-height:80px;}
 
 <!-- ====== WORDTRACKS ====== -->
 <div class="tab-content" id="tab-wordtracks">
-  <div class="sh"><span class="sh-title">Workflow Wordtracks</span><div class="sh-line"></div></div>
-  <div class="itabs" style="margin-bottom:12px;">
-    <div class="itab active" data-wbt="combined" onclick="setWtBotType('combined', this)">Combined</div>
-    <div class="itab" data-wbt="claude" onclick="setWtBotType('claude', this)">Claude Bot</div>
-    <div class="itab" data-wbt="botpress" onclick="setWtBotType('botpress', this)">BotPress</div>
+  <div class="sh"><span class="sh-title">Word Track Clusters</span><div class="sh-line"></div>
+    <div style="font-size:11px;color:var(--muted);">Attribution is temporal: each inbound reply / booking / opt-out is credited to the most recent outbound cluster message within the window.</div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+    <div class="itabs">
+      <div class="itab active" data-wbt="all" onclick="setWtSource('all', this)">All</div>
+      <div class="itab" data-wbt="claude" onclick="setWtSource('claude', this)">Claude Bot</div>
+      <div class="itab" data-wbt="botpress" onclick="setWtSource('botpress', this)">BotPress</div>
+      <div class="itab" data-wbt="other" onclick="setWtSource('other', this)">Other</div>
+    </div>
+    <label style="font-size:11px;color:var(--muted);">Window (days):
+      <input id="wt-window" type="number" min="1" max="60" value="7" style="width:60px;background:var(--panel);border:1px solid var(--border);color:#fff;padding:4px 6px;border-radius:4px;" onchange="loadWordtracks()">
+    </label>
+    <button class="btn-sm" onclick="reclusterWordTracks()">Recluster now</button>
   </div>
   <div class="card">
     <table id="wt-stages-table">
-      <thead><tr><th>Stage</th><th>Sent</th><th>Reply %</th><th>Avg Reply</th><th>Booking Conv</th><th>Opt-Out %</th><th>Drop-Off %</th><th>Convs</th></tr></thead>
+      <thead><tr><th>Cluster Label</th><th>Source</th><th>Sends</th><th>Replies</th><th>Reply %</th><th>Avg Reply</th><th>Bookings</th><th>Booking %</th><th>Opt-Outs</th><th>Opt-Out %</th><th>Drop-Off %</th><th>Convs</th></tr></thead>
       <tbody id="wt-stages-tbody"></tbody>
     </table>
   </div>
@@ -1453,57 +1462,82 @@ function chartOpts() {
   };
 }
 
-// ========== WORDTRACKS ==========
-let wtBotType = 'combined';
-function setWtBotType(bt, el) {
-  wtBotType = bt;
+// ========== WORDTRACKS (cluster-based) ==========
+let wtSource = 'all';
+function setWtSource(src, el) {
+  wtSource = src;
   document.querySelectorAll('#tab-wordtracks .itab').forEach(i => i.classList.remove('active'));
   el.classList.add('active');
   loadWordtracks();
 }
 async function loadWordtracks() {
-  const params = new URLSearchParams({ days: getDays(), bot_type: wtBotType });
+  const windowDays = parseInt(document.getElementById('wt-window')?.value, 10) || 7;
+  const params = new URLSearchParams({ days: getDays(), source: wtSource, window_days: windowDays });
   const locParam = getLocationParam();
-  const data = await api('/api/wordtracks/stages?' + params + (locParam ? '&' + locParam : ''));
+  const data = await api('/api/wordtracks/clusters?' + params + (locParam ? '&' + locParam : ''));
   if (!data) return;
   const tbody = document.getElementById('wt-stages-tbody');
   tbody.innerHTML = '';
-  (data.stages || []).forEach(s => {
-    const rate = parseFloat(s.reply_rate) || 0;
-    const optOut = parseFloat(s.opt_out_rate) || 0;
-    const booking = parseFloat(s.booking_conversion) || 0;
-    const drop = parseFloat(s.drop_off_rate) || 0;
-    const avg = s.avg_reply_time_seconds ? (Math.round(s.avg_reply_time_seconds) + 's') : '---';
-    tbody.innerHTML += '<tr style="cursor:pointer;" onclick="expandStage(\'' + esc(s.stage) + '\')">' +
-      '<td><span class="pill c">' + esc(s.stage) + '</span></td>' +
-      '<td>' + fmtNum(s.total_sent) + '</td>' +
-      '<td style="color:var(--cyan);">' + fmtPct(rate) + '</td>' +
+  (data.clusters || []).forEach(c => {
+    const replyRate = parseFloat(c.reply_rate) || 0;
+    const bookingRate = parseFloat(c.booking_rate) || 0;
+    const optOutRate = parseFloat(c.opt_out_rate) || 0;
+    const dropRate = parseFloat(c.drop_off_rate) || 0;
+    const avg = c.avg_reply_seconds ? (Math.round(c.avg_reply_seconds) + 's') : '---';
+    const srcColor = c.source === 'claude' ? 'c' : (c.source === 'botpress' ? 'a' : 'g');
+    const label = c.label && c.label !== 'unlabeled' ? c.label : ('cluster #' + c.id + ' (unlabeled)');
+    tbody.innerHTML += '<tr style="cursor:pointer;" onclick="expandWtCluster(' + c.id + ')">' +
+      '<td><div style="font-weight:600;">' + esc(label) + '</div>' +
+        (c.description ? '<div style="font-size:10px;color:var(--muted);margin-top:2px;">' + esc(c.description) + '</div>' : '') +
+        '<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic;">"' + esc((c.example_text || '').slice(0, 120)) + '"</div></td>' +
+      '<td><span class="pill ' + srcColor + '">' + esc(c.source || '-') + '</span></td>' +
+      '<td>' + fmtNum(c.sends) + '</td>' +
+      '<td>' + fmtNum(c.replies) + '</td>' +
+      '<td style="color:var(--cyan);">' + fmtPct(replyRate) + '</td>' +
       '<td>' + avg + '</td>' +
-      '<td style="color:var(--green);">' + fmtPct(booking) + '</td>' +
-      '<td style="color:' + (optOut > 0.035 ? 'var(--red)' : 'var(--muted)') + ';">' + fmtPct(optOut) + '</td>' +
-      '<td style="color:var(--amber);">' + fmtPct(drop) + '</td>' +
-      '<td>' + fmtNum(s.unique_conversations) + '</td>' +
+      '<td>' + fmtNum(c.bookings) + '</td>' +
+      '<td style="color:var(--green);">' + fmtPct(bookingRate) + '</td>' +
+      '<td>' + fmtNum(c.opt_outs) + '</td>' +
+      '<td style="color:' + (optOutRate > 0.035 ? 'var(--red)' : 'var(--muted)') + ';">' + fmtPct(optOutRate) + '</td>' +
+      '<td style="color:var(--amber);">' + fmtPct(dropRate) + '</td>' +
+      '<td>' + fmtNum(c.unique_conversations) + '</td>' +
     '</tr>';
   });
-  if (!tbody.innerHTML) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--muted);">No stage data yet.</td></tr>';
-  document.getElementById('wt-stage-detail').innerHTML = '';
+  if (!tbody.innerHTML) tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:30px;color:var(--muted);">No cluster data yet — run clustering first (click "Recluster now").</td></tr>';
+  const det = document.getElementById('wt-stage-detail');
+  if (det) det.innerHTML = '';
 }
-async function expandStage(stage) {
+async function expandWtCluster(id) {
   const el = document.getElementById('wt-stage-detail');
-  el.innerHTML = '<div class="card"><div class="card-title">Loading samples for ' + esc(stage) + '…</div></div>';
-  const params = new URLSearchParams({ days: getDays(), bot_type: wtBotType, limit: 25 });
-  const locParam = getLocationParam();
-  const data = await api('/api/wordtracks/stage/' + encodeURIComponent(stage) + '?' + params + (locParam ? '&' + locParam : ''));
+  if (!el) return;
+  const windowDays = parseInt(document.getElementById('wt-window')?.value, 10) || 7;
+  el.innerHTML = '<div class="card"><div class="card-title">Loading cluster samples…</div></div>';
+  const params = new URLSearchParams({ days: getDays(), window_days: windowDays, limit: 30 });
+  const data = await api('/api/wordtracks/cluster/' + id + '?' + params);
   if (!data) return;
-  el.innerHTML = '<div class="card"><div class="card-title">Samples — ' + esc(stage) + ' (' + (data.samples || []).length + ')</div>' +
+  const c = data.cluster;
+  const label = c.label && c.label !== 'unlabeled' ? c.label : ('cluster #' + c.id + ' (unlabeled)');
+  el.innerHTML = '<div class="card">' +
+    '<div class="card-title">' + esc(label) + ' — ' + (data.samples || []).length + ' samples</div>' +
+    (c.description ? '<div style="font-size:11px;color:var(--muted);margin-bottom:10px;">' + esc(c.description) + '</div>' : '') +
     (data.samples || []).map(s => {
       const negFlag = s.negative_flag ? '<span class="pill r" style="margin-left:6px;">NEG</span>' : '';
+      const outcome = s.terminal_outcome ? '<span class="pill ' + (s.terminal_outcome === 'appointment_booked' ? 'g' : (s.terminal_outcome === 'dnc' ? 'r' : 'a')) + '" style="margin-left:6px;">' + esc(s.terminal_outcome) + '</span>' : '';
+      const replySec = s.reply_seconds ? (' · reply in ' + Math.round(s.reply_seconds) + 's') : '';
       return '<div style="padding:10px 0;border-bottom:1px solid var(--border);">' +
-        '<div style="font-size:11px;color:var(--muted);margin-bottom:4px;">' + esc(s.contact_name || 'unknown') + ' · ' + esc(s.terminal_outcome || 'open') + ' · ' + fmtDate(s.created_at) + ' · ' + esc(s.bot_type) + negFlag + '</div>' +
+        '<div style="font-size:11px;color:var(--muted);margin-bottom:4px;">' + esc(s.contact_name || 'unknown') + ' · ' + esc(s.source || '-') + ' · ' + fmtDate(s.created_at) + replySec + outcome + negFlag + '</div>' +
         '<div class="bubble bot" style="max-width:100%;">' + esc(s.content) + '</div>' +
-        (s.reply_content ? '<div class="bubble lead" style="max-width:100%;margin-top:6px;">' + esc(s.reply_content) + '</div>' : '<div style="color:var(--muted);font-size:11px;margin-top:4px;">(no reply)</div>') +
+        (s.reply_content ? '<div class="bubble lead" style="max-width:100%;margin-top:6px;">' + esc(s.reply_content) + '</div>' : '<div style="color:var(--muted);font-size:11px;margin-top:4px;">(no reply within ' + data.attribution_window_days + 'd window)</div>') +
       '</div>';
-    }).join('') + '</div>';
+    }).join('') +
+  '</div>';
+}
+async function reclusterWordTracks() {
+  toast('Clustering + labeling in progress…');
+  const res = await api('/api/wordtracks/recluster', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  if (!res) { toast('Reclustering failed.'); return; }
+  toast('Clustered: ' + (res.created_clusters || 0) + ' new · ' + (res.attached_messages || 0) + ' msgs · ' + (res.labeled || 0) + ' labeled');
+  loadWordtracks();
 }
 
 // ========== PIPELINE ==========
