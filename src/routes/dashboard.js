@@ -8,11 +8,8 @@ const HANDOFF_OUTCOMES = ["'human_handoff'", "'handoff_requested'"];
 
 async function loadCostConfig() {
   const defaults = {
-    // Anthropic (kept for legacy per-subaccount token-based cost estimation only —
-    // real per-category totals now come from anthropic_usage_log.cost_usd).
     input_cost_per_m: 3,
     output_cost_per_m: 15,
-    // Signal House SMS carrier.
     sh_base_monthly: 50,
     sh_base_segments: 7500,
     sh_overage_per_seg: 0.01,
@@ -36,29 +33,77 @@ async function loadCostConfig() {
 }
 
 /**
- * Signal House cost for a date range:
- *   base = (days_in_range / 30) * $50/mo
- *   segments_covered = min(sms_segments, sh_base_segments * days_in_range / 30)
- *   overage = max(0, sms_segments - segments_covered) * overage_per_seg
- *   mms = mms_segments * mms_per_seg
- *   total = base + overage + mms
+ * Signal House cost model: agency-wide pool, tiered pricing, per-sub pro-rata
+ * allocation. No base plan line item — Jeremiah bills per-message only.
+ *
+ *   First 7,500 segments/month:  $50 / 7,500 = $0.00667/seg
+ *   Segment 7,501+:              $0.01/seg
+ *   MMS:                         $0.04/seg   (flat, no pool)
+ *
+ * The 7,500 tier applies per calendar month to agency total segments. For a
+ * date range spanning multiple months, we tier each month separately and sum.
+ * Per-sub-account cost is allocated pro-rata by each sub's share of the
+ * month's agency-wide volume.
  */
-function computeSignalHouseCost({ smsSegments, mmsSegments, daysInRange, cfg }) {
-  const days = Math.max(1, daysInRange);
-  const proratedBase = (days / 30) * cfg.sh_base_monthly;
-  const proratedBaseSegments = (days / 30) * cfg.sh_base_segments;
-  const overageSegments = Math.max(0, smsSegments - proratedBaseSegments);
-  const overageCost = overageSegments * cfg.sh_overage_per_seg;
-  const mmsCost = mmsSegments * cfg.sh_mms_per_seg;
+function computeTieredMonthCost(agencyMonthSmsSegs, cfg) {
+  const cheapRate = cfg.sh_base_monthly / cfg.sh_base_segments; // $50/7500 = $0.006667/seg
+  const baseSegs = Math.min(agencyMonthSmsSegs, cfg.sh_base_segments);
+  const overageSegs = Math.max(0, agencyMonthSmsSegs - cfg.sh_base_segments);
   return {
-    base_cost: Math.round(proratedBase * 100) / 100,
-    base_segments_included: Math.round(proratedBaseSegments),
-    overage_segments: Math.round(overageSegments),
-    overage_cost: Math.round(overageCost * 100) / 100,
-    mms_segments: mmsSegments,
-    mms_cost: Math.round(mmsCost * 100) / 100,
-    total: Math.round((proratedBase + overageCost + mmsCost) * 100) / 100
+    base_segs: baseSegs,
+    base_cost: baseSegs * cheapRate,
+    overage_segs: overageSegs,
+    overage_cost: overageSegs * cfg.sh_overage_per_seg,
+    total_sms_cost: baseSegs * cheapRate + overageSegs * cfg.sh_overage_per_seg
   };
+}
+
+/**
+ * Given per-(location, calendar-month) SMS + MMS segment rows, compute:
+ *   - agency totals
+ *   - per-sub allocations (pro-rata within each month, summed across months)
+ */
+function allocateSignalHouse(rows, cfg) {
+  // Group by month → { total_sms, total_mms, locs: [{loc, sms, mms}] }
+  const byMonth = new Map();
+  for (const r of rows) {
+    const monthKey = (r.month_start instanceof Date ? r.month_start.toISOString() : String(r.month_start)).slice(0, 7);
+    if (!byMonth.has(monthKey)) byMonth.set(monthKey, { total_sms: 0, total_mms: 0, locs: [] });
+    const m = byMonth.get(monthKey);
+    m.total_sms += r.sms_segments;
+    m.total_mms += r.mms_segments;
+    m.locs.push({ location_id: r.location_id, sms: r.sms_segments, mms: r.mms_segments });
+  }
+
+  const agency = { sms_segments: 0, mms_segments: 0, base_segs: 0, overage_segs: 0, sms_cost: 0, mms_cost: 0 };
+  const perSub = new Map();
+
+  for (const [, m] of byMonth.entries()) {
+    const tier = computeTieredMonthCost(m.total_sms, cfg);
+    const monthMmsCost = m.total_mms * cfg.sh_mms_per_seg;
+
+    agency.sms_segments += m.total_sms;
+    agency.mms_segments += m.total_mms;
+    agency.base_segs += tier.base_segs;
+    agency.overage_segs += tier.overage_segs;
+    agency.sms_cost += tier.total_sms_cost;
+    agency.mms_cost += monthMmsCost;
+
+    for (const loc of m.locs) {
+      if (!perSub.has(loc.location_id)) {
+        perSub.set(loc.location_id, { sms_segments: 0, mms_segments: 0, sms_cost: 0, mms_cost: 0 });
+      }
+      const s = perSub.get(loc.location_id);
+      s.sms_segments += loc.sms;
+      s.mms_segments += loc.mms;
+      const smsShare = m.total_sms ? loc.sms / m.total_sms : 0;
+      s.sms_cost += tier.total_sms_cost * smsShare;
+      s.mms_cost += loc.mms * cfg.sh_mms_per_seg;
+    }
+  }
+
+  agency.total_cost = agency.sms_cost + agency.mms_cost;
+  return { agency, per_sub: perSub };
 }
 
 router.get('/dashboard', async (req, res) => {
@@ -111,17 +156,6 @@ router.get('/dashboard', async (req, res) => {
       msgParams
     );
     const mg = msgRes.rows[0];
-
-    // Additional MMS detection from pulled GHL data.
-    const mmsGhlQ = await db.query(
-      `SELECT
-         COUNT(*) FILTER (WHERE direction = 'outbound' AND message_type ILIKE '%MMS%')::int AS mms_out,
-         COUNT(*) FILTER (WHERE direction = 'inbound'  AND message_type ILIKE '%MMS%')::int AS mms_in
-       FROM ghl_messages gm
-       ${locIds.length ? 'WHERE location_id = ANY($1) AND created_at >= NOW() - ($2 || \' days\')::interval' : 'WHERE created_at >= NOW() - ($1 || \' days\')::interval'}`,
-      locIds.length ? [locIds, daysInt] : [daysInt]
-    );
-    const ghlMms = mmsGhlQ.rows[0] || { mms_out: 0, mms_in: 0 };
 
     const avgMsgRes = await db.query(
       `SELECT AVG(cnt)::float AS avg_msgs FROM (
@@ -180,21 +214,41 @@ router.get('/dashboard', async (req, res) => {
     const optOutRate = totalConversations ? dncCount / totalConversations : 0;
     const dncRate = optOutRate;
 
-    // --- 4) Signal House carrier cost (prorated base + overage + MMS) ---
+    // --- 4) Signal House carrier cost (agency pool, tiered, pro-rata) ---
+    //
+    // Pull per-(location, calendar-month) segment counts from the messages
+    // table (segment counts live on rows there, set at send-time). The 7,500
+    // pool applies to agency-wide monthly SMS totals; MMS is a flat $0.04/seg
+    // with no pool. Note: `messages` captures Claude bot sends; Botpress
+    // drip sends live in ghl_messages but don't have segment counts — they
+    // don't contribute to the pool calc here. Acceptable for now since
+    // Botpress is being decommissioned.
+    const shBaseParams = [daysInt];
+    let shLocFilter = '';
+    if (locIds.length) { shBaseParams.push(locIds); shLocFilter = ` AND location_id = ANY($${shBaseParams.length})`; }
+    const shRowsQ = await db.query(
+      `SELECT location_id,
+              date_trunc('month', created_at)::date AS month_start,
+              COALESCE(SUM(segments) FILTER (WHERE COALESCE(message_type,'') NOT ILIKE '%mms%'), 0)::int AS sms_segments,
+              COALESCE(SUM(segments) FILTER (WHERE COALESCE(message_type,'') ILIKE '%mms%'), 0)::int AS mms_segments
+         FROM messages
+        WHERE created_at >= NOW() - ($1 || ' days')::interval
+          ${shLocFilter}
+        GROUP BY 1, 2`,
+      shBaseParams
+    );
+
+    const shAlloc = allocateSignalHouse(shRowsQ.rows, costConfig);
+    const agencyCarrier = shAlloc.agency;
+    const carrierCost = Math.round(agencyCarrier.total_cost * 10000) / 10000;
+
+    // Expose these for KPI cards (replaces the old per-message-type split).
     const smsOutSeg = mg.sms_out_segments || 0;
     const smsInSeg = mg.sms_in_segments || 0;
-    const mmsOutSeg = (mg.mms_out_segments || 0) + (ghlMms.mms_out || 0);
-    const mmsInSeg = (mg.mms_in_segments || 0) + (ghlMms.mms_in || 0);
-    const totalSmsSegments = smsOutSeg + smsInSeg;
-    const totalMmsSegments = mmsOutSeg + mmsInSeg;
-
-    const signalHouse = computeSignalHouseCost({
-      smsSegments: totalSmsSegments,
-      mmsSegments: totalMmsSegments,
-      daysInRange: daysInt,
-      cfg: costConfig
-    });
-    const carrierCost = signalHouse.total;
+    const mmsOutSeg = mg.mms_out_segments || 0;
+    const mmsInSeg = mg.mms_in_segments || 0;
+    const totalSmsSegments = agencyCarrier.sms_segments;
+    const totalMmsSegments = agencyCarrier.mms_segments;
 
     // --- 5) Anthropic API cost breakdown (from anthropic_usage_log) ---
     const usageParams = [daysInt];
@@ -361,12 +415,11 @@ router.get('/dashboard', async (req, res) => {
       const smsSeg = (Number(r.sms_out) || 0) + (Number(r.sms_in) || 0);
       const mmsSeg = (Number(r.mms_out) || 0) + (Number(r.mms_in) || 0);
       const ai = Number(r.ai_cost) || 0;
-      const sh = computeSignalHouseCost({
-        smsSegments: smsSeg,
-        mmsSegments: mmsSeg,
-        daysInRange: daysInt,
-        cfg: costConfig
-      });
+      // Pull this sub's allocated Signal House cost (computed with pro-rata
+      // agency-pool tiering above). Fall back to zero if this sub had no
+      // segments in the window.
+      const alloc = shAlloc.per_sub.get(r.location_id) || { sms_cost: 0, mms_cost: 0, sms_segments: 0, mms_segments: 0 };
+      const carrierTotal = alloc.sms_cost + alloc.mms_cost;
       return {
         location_id: r.location_id,
         subaccount_name: r.subaccount_name || null,
@@ -380,9 +433,10 @@ router.get('/dashboard', async (req, res) => {
         avg_messages_per_conversation: Number(r.avg_messages_per_conversation) || 0,
         ai_cost: Math.round(ai * 10000) / 10000,
         ai_calls: Number(r.ai_calls) || 0,
-        carrier_cost: sh.total,
-        carrier_breakdown: sh,
-        total_cost: Math.round((ai + sh.total) * 10000) / 10000,
+        carrier_cost: Math.round(carrierTotal * 10000) / 10000,
+        carrier_sms_segments: alloc.sms_segments,
+        carrier_mms_segments: alloc.mms_segments,
+        total_cost: Math.round((ai + carrierTotal) * 10000) / 10000,
         time_saved_hours: Math.round(((smsSeg) * 100 + booked * 120) / 3600)
       };
     });
@@ -461,7 +515,15 @@ router.get('/dashboard', async (req, res) => {
         ai_cost: Math.round(aiCost * 100) / 100,
         ai_calls: Number(anthropicTotals.call_count) || 0,
         carrier_cost: carrierCost,
-        carrier_breakdown: signalHouse,
+        carrier_breakdown: {
+          sms_segments: agencyCarrier.sms_segments,
+          mms_segments: agencyCarrier.mms_segments,
+          base_tier_segments: agencyCarrier.base_segs,
+          overage_segments: agencyCarrier.overage_segs,
+          sms_cost: Math.round(agencyCarrier.sms_cost * 10000) / 10000,
+          mms_cost: Math.round(agencyCarrier.mms_cost * 10000) / 10000,
+          total_cost: Math.round(agencyCarrier.total_cost * 10000) / 10000
+        },
         total_cost: Math.round(totalCost * 100) / 100,
         cost_per_message: Math.round(costPerMessage * 10000) / 10000,
         total_segments: totalSmsSegments + totalMmsSegments,

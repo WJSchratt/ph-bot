@@ -1286,9 +1286,14 @@ async function loadDashboard() {
   const smsSeg = (k.sms_segments && k.sms_segments.total) || 0;
   const mmsSeg = (k.mms_segments && k.mms_segments.total) || 0;
   const cb = k.carrier_breakdown || {};
+  // Agency-wide tier split: first 7,500 SMS segs of the month at cheap rate,
+  // rest at overage. No base plan line — per-message only.
+  const baseSegs = cb.base_tier_segments || 0;
+  const overSegs = cb.overage_segments || 0;
+  const mmsSegs = cb.mms_segments || 0;
   costEl.innerHTML =
     '<div class="card"><div class="card-title">Anthropic API</div><div class="card-value">' + fmtDollar(k.ai_cost || 0, 2) + '</div><div class="card-sub">' + fmtNum(k.ai_calls || 0) + ' calls · In ' + fmtNum(k.total_input_tokens) + ' / Out ' + fmtNum(k.total_output_tokens) + '</div></div>' +
-    '<div class="card"><div class="card-title">Signal House SMS</div><div class="card-value">' + fmtDollar(k.carrier_cost || 0, 2) + '</div><div class="card-sub">Base ' + fmtDollar(cb.base_cost || 0, 2) + ' · Overage ' + fmtNum(cb.overage_segments || 0) + ' seg ' + fmtDollar(cb.overage_cost || 0, 2) + ' · MMS ' + fmtNum(mmsSeg) + ' ' + fmtDollar(cb.mms_cost || 0, 2) + '</div></div>' +
+    '<div class="card"><div class="card-title">Signal House SMS</div><div class="card-value">' + fmtDollar(k.carrier_cost || 0, 2) + '</div><div class="card-sub">' + fmtNum(baseSegs) + ' @ $0.00667 · ' + fmtNum(overSegs) + ' overage @ $0.01 · ' + fmtNum(mmsSegs) + ' MMS @ $0.04</div></div>' +
     '<div class="card"><div class="card-title">Total Cost</div><div class="card-value">' + fmtDollar(k.total_cost || 0, 2) + '</div><div class="card-sub">Anthropic + Signal House</div></div>' +
     '<div class="card"><div class="card-title">Cost / Message</div><div class="card-value">' + fmtDollar(k.cost_per_message || 0, 4) + '</div><div class="card-sub">Blended, per SMS in+out</div></div>';
 
