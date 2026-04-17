@@ -266,4 +266,93 @@ router.post('/wordtracks/recluster', async (req, res) => {
   }
 });
 
+// Diagnostic endpoint — why is the WordTracks tab empty?
+router.get('/wordtracks/diag', async (req, res) => {
+  try {
+    const diag = {};
+    // Do the tables exist?
+    const tblQ = await db.query(
+      `SELECT to_regclass('word_track_clusters') AS c,
+              to_regclass('ghl_messages') AS m,
+              to_regclass('anthropic_usage_log') AS a`
+    );
+    diag.tables = {
+      word_track_clusters: !!tblQ.rows[0]?.c,
+      ghl_messages: !!tblQ.rows[0]?.m,
+      anthropic_usage_log: !!tblQ.rows[0]?.a
+    };
+    if (!diag.tables.word_track_clusters) {
+      return res.json({ ok: false, reason: 'word_track_clusters table missing — migrations not run. Redeploy.', diag });
+    }
+    // Does ghl_messages have the cluster_id column?
+    const colQ = await db.query(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_name='ghl_messages' AND column_name IN ('cluster_id','normalized_hash')`
+    );
+    diag.ghl_messages_columns = colQ.rows.map((r) => r.column_name);
+    // Counts.
+    const countsQ = await db.query(
+      `SELECT
+         (SELECT COUNT(*) FROM ghl_messages) AS total_ghl_messages,
+         (SELECT COUNT(*) FROM ghl_messages WHERE direction = 'outbound') AS total_outbound,
+         (SELECT COUNT(*) FROM ghl_messages WHERE direction = 'outbound' AND cluster_id IS NULL) AS unclustered_outbound,
+         (SELECT COUNT(*) FROM ghl_messages WHERE direction = 'outbound' AND cluster_id IS NOT NULL) AS clustered_outbound,
+         (SELECT COUNT(*) FROM word_track_clusters) AS total_clusters,
+         (SELECT COUNT(*) FROM word_track_clusters WHERE label = 'unlabeled') AS unlabeled_clusters,
+         (SELECT COUNT(*) FROM word_track_clusters WHERE labeled_at IS NOT NULL) AS labeled_clusters`
+    );
+    diag.counts = {};
+    for (const [k, v] of Object.entries(countsQ.rows[0] || {})) {
+      diag.counts[k] = Number(v) || 0;
+    }
+    // 5 most recent outbound samples with normalization to help judge bucketing.
+    const sampleQ = await db.query(
+      `SELECT id, content, cluster_id, normalized_hash
+         FROM ghl_messages
+        WHERE direction = 'outbound'
+        ORDER BY created_at DESC
+        LIMIT 5`
+    );
+    diag.recent_outbound_samples = sampleQ.rows.map((r) => ({
+      id: r.id,
+      content: (r.content || '').slice(0, 200),
+      cluster_id: r.cluster_id,
+      normalized: wtClusters.normalizeMessage(r.content || ''),
+      normalized_hash: r.normalized_hash || wtClusters.hashNormalized(wtClusters.normalizeMessage(r.content || ''))
+    }));
+    // 5 most-recent clusters.
+    const clustersQ = await db.query(
+      `SELECT id, label, source, cluster_size, labeled_at, example_text
+         FROM word_track_clusters
+        ORDER BY updated_at DESC
+        LIMIT 5`
+    );
+    diag.recent_clusters = clustersQ.rows.map((r) => ({
+      id: r.id, label: r.label, source: r.source, cluster_size: r.cluster_size,
+      labeled: !!r.labeled_at, example: (r.example_text || '').slice(0, 120)
+    }));
+    // Clustering calls logged?
+    try {
+      const usageQ = await db.query(
+        `SELECT COUNT(*)::int AS n FROM anthropic_usage_log WHERE category = 'word_track_clustering'`
+      );
+      diag.clustering_calls_logged = Number(usageQ.rows[0]?.n) || 0;
+    } catch { diag.clustering_calls_logged = null; }
+
+    let hint = null;
+    if (diag.counts.total_outbound === 0) {
+      hint = 'No outbound messages in ghl_messages yet. Pull conversations from the Analyzer tab first.';
+    } else if (diag.counts.total_clusters === 0) {
+      hint = 'Never run the clusterer. Click "Recluster now" on the WordTracks tab.';
+    } else if (diag.counts.clustered_outbound === 0) {
+      hint = 'Clusters exist but no messages are attached. Every bucket had size 1 (every outbound message is unique). Either more sends are needed or the normalizer is too strict.';
+    } else if (diag.counts.unlabeled_clusters > 0 && diag.clustering_calls_logged === 0) {
+      hint = 'Clusters exist but none are labeled — labeler never ran. Check logs for Anthropic errors.';
+    }
+    res.json({ ok: true, diag, hint });
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
 module.exports = router;

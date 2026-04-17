@@ -18,15 +18,16 @@ function normalizeMessage(text) {
   let t = text.toLowerCase().trim();
   t = t.replace(/https?:\/\/\S+/g, '{url}');
   t = t.replace(/\b\d{1,2}[:.]\d{2}\s*(am|pm)?\b/g, '{time}');
-  t = t.replace(/\b(mon|tue|wed|thu|fri|sat|sun)(day)?\b/g, '{day}');
+  t = t.replace(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)\b/g, '{day}');
   t = t.replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/g, '{month}');
   t = t.replace(/\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/g, '{date}');
   t = t.replace(/\$\d+(\.\d{2})?/g, '{money}');
   t = t.replace(/\b\d{3,}\b/g, '{num}');
   t = t.replace(/\b\d+\b/g, '{n}');
-  // Strip likely first-name tokens after common greetings.
-  t = t.replace(/\b(hey|hi|hello|good morning|good afternoon|morning|afternoon)[,\s]+[a-z]+\b/g, '$1 {name}');
-  // Generic capitalized-word stripping is too aggressive; skip to avoid false merges.
+  // Strip first-name tokens right after a greeting. Require a trailing comma
+  // or space-then-comma to avoid eating legitimate words like "hey, just here"
+  // (previous regex collapsed "hey, just" → "hey {name}").
+  t = t.replace(/\b(hey|hi|hello|good morning|good afternoon)\s+[a-z]+(?=[,.!?])/g, '$1 {name}');
   t = t.replace(/[^\w\s{}]/g, ' ');
   t = t.replace(/\s+/g, ' ').trim();
   return t;
@@ -84,38 +85,61 @@ async function assignHashClusters({ limit = 5000 } = {}) {
     }
   }
 
-  // For each bucket >= MIN_CLUSTER_SIZE: upsert cluster, link all messages.
+  // Cluster creation / attachment.
+  //   - If a cluster already exists for this hash: attach every message in
+  //     the bucket to it, regardless of bucket size (handles the case where
+  //     a single new message arrives matching an established template).
+  //   - Else: only create a cluster when the bucket has >= MIN_CLUSTER_SIZE
+  //     messages (avoids polluting the cluster list with one-off unique
+  //     bot replies).
   let createdClusters = 0;
   let attachedMessages = 0;
+  let attachedToExisting = 0;
+  let singletonBucketsSkipped = 0;
   for (const [hash, b] of buckets.entries()) {
-    if (b.messages.length < MIN_CLUSTER_SIZE) continue;
-    const source = b.sources.size === 1 ? [...b.sources][0] : 'mixed';
     const firstMsg = b.messages[b.messages.length - 1];
     const lastMsg = b.messages[0];
-    const upsert = await db.query(
+    const ids = b.messages.map((m) => m.id);
+
+    // Check for existing cluster on this hash first.
+    const existingQ = await db.query(
+      `SELECT id FROM word_track_clusters WHERE normalized_hash = $1`,
+      [hash]
+    );
+    if (existingQ.rows[0]) {
+      const clusterId = existingQ.rows[0].id;
+      await db.query(
+        `UPDATE ghl_messages SET cluster_id = $1 WHERE id = ANY($2) AND cluster_id IS NULL`,
+        [clusterId, ids]
+      );
+      await db.query(
+        `UPDATE word_track_clusters
+            SET cluster_size = cluster_size + $1,
+                last_seen_at = GREATEST(last_seen_at, $2),
+                updated_at = NOW()
+          WHERE id = $3`,
+        [b.messages.length, lastMsg.created_at, clusterId]
+      );
+      attachedMessages += ids.length;
+      attachedToExisting += ids.length;
+      continue;
+    }
+
+    if (b.messages.length < MIN_CLUSTER_SIZE) {
+      singletonBucketsSkipped++;
+      continue;
+    }
+
+    const source = b.sources.size === 1 ? [...b.sources][0] : 'mixed';
+    const insert = await db.query(
       `INSERT INTO word_track_clusters (label, description, source, example_text, normalized_hash, cluster_size, first_seen_at, last_seen_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (normalized_hash) DO UPDATE
-         SET cluster_size = word_track_clusters.cluster_size + EXCLUDED.cluster_size,
-             last_seen_at = GREATEST(word_track_clusters.last_seen_at, EXCLUDED.last_seen_at),
-             updated_at = NOW()
-       RETURNING id, (xmax = 0) AS inserted`,
-      [
-        'unlabeled',
-        null,
-        source,
-        b.messages[0].content.slice(0, 500),
-        hash,
-        b.messages.length,
-        firstMsg.created_at,
-        lastMsg.created_at
-      ]
+       RETURNING id`,
+      ['unlabeled', null, source, b.messages[0].content.slice(0, 500), hash, b.messages.length, firstMsg.created_at, lastMsg.created_at]
     );
-    const clusterId = upsert.rows[0].id;
-    if (upsert.rows[0].inserted) createdClusters++;
+    const clusterId = insert.rows[0].id;
+    createdClusters++;
 
-    const ids = b.messages.map((m) => m.id);
-    // Link messages to cluster.
     await db.query(
       `UPDATE ghl_messages SET cluster_id = $1 WHERE id = ANY($2) AND cluster_id IS NULL`,
       [clusterId, ids]
@@ -123,7 +147,15 @@ async function assignHashClusters({ limit = 5000 } = {}) {
     attachedMessages += ids.length;
   }
 
-  return { scanned: q.rows.length, buckets: buckets.size, created_clusters: createdClusters, attached_messages: attachedMessages };
+  return {
+    scanned: q.rows.length,
+    buckets: buckets.size,
+    created_clusters: createdClusters,
+    attached_messages: attachedMessages,
+    attached_to_existing: attachedToExisting,
+    singleton_buckets_skipped: singletonBucketsSkipped,
+    min_cluster_size: MIN_CLUSTER_SIZE
+  };
 }
 
 /**

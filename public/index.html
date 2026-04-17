@@ -1536,9 +1536,21 @@ async function loadWordtracks() {
       '<td>' + fmtNum(c.unique_conversations) + '</td>' +
     '</tr>';
   });
-  if (!tbody.innerHTML) tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:30px;color:var(--muted);">No cluster data yet — run clustering first (click "Recluster now").</td></tr>';
+  if (!tbody.innerHTML) {
+    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:30px;color:var(--muted);">No cluster data yet — run clustering first (click "Recluster now") or <a href="javascript:showWtDiag()" style="color:var(--cyan);">see diagnostic</a>.</td></tr>';
+  }
   const det = document.getElementById('wt-stage-detail');
   if (det) det.innerHTML = '';
+}
+async function showWtDiag() {
+  const r = await api('/api/wordtracks/diag');
+  if (!r) return;
+  const el = document.getElementById('wt-stage-detail');
+  if (!el) return;
+  el.innerHTML = '<div class="card"><div class="card-title">WordTracks Diagnostic</div>' +
+    (r.hint ? '<div style="padding:8px 10px;background:rgba(255,181,71,.1);border:1px solid var(--amber);border-radius:4px;margin-bottom:10px;font-size:12px;color:var(--amber);">' + esc(r.hint) + '</div>' : '') +
+    '<pre style="background:var(--panel);padding:10px;border-radius:4px;overflow:auto;font-size:11px;">' + esc(JSON.stringify(r.diag, null, 2)) + '</pre>' +
+    '</div>';
 }
 async function expandWtCluster(id) {
   const el = document.getElementById('wt-stage-detail');
