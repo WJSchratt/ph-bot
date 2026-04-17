@@ -67,6 +67,9 @@ router.get('/wordtracks/workflows', async (req, res) => {
               COALESCE(m.avg_reply_seconds, 0) AS avg_reply_seconds,
               COALESCE(m.drop_offs, 0) AS drop_offs,
               COALESCE(m.unique_convs, 0) AS unique_convs,
+              m.last_send_at,
+              m.last_reply_at,
+              m.subaccount_locations,
               COALESCE(c.bookings, 0) AS bookings,
               COALESCE(c.opt_outs, 0) AS opt_outs
          FROM workflow_clusters wf
@@ -76,7 +79,10 @@ router.get('/wordtracks/workflows', async (req, res) => {
                   COUNT(*) FILTER (WHERE in_at IS NOT NULL)::int AS replies,
                   COALESCE(AVG(EXTRACT(EPOCH FROM (in_at - out_at))) FILTER (WHERE in_at IS NOT NULL), 0)::float AS avg_reply_seconds,
                   COUNT(*) FILTER (WHERE in_at IS NULL)::int AS drop_offs,
-                  COUNT(DISTINCT ghl_conversation_id)::int AS unique_convs
+                  COUNT(DISTINCT ghl_conversation_id)::int AS unique_convs,
+                  MAX(out_at) AS last_send_at,
+                  MAX(in_at) AS last_reply_at,
+                  ARRAY_AGG(DISTINCT location_id) AS subaccount_locations
              FROM per_msg GROUP BY workflow_cluster_id
          ) m ON m.workflow_cluster_id = wf.id
          LEFT JOIN (
@@ -110,7 +116,10 @@ router.get('/wordtracks/workflows', async (req, res) => {
         bookings: Number(r.bookings) || 0,
         booking_rate: uniqueConvs ? (Number(r.bookings) || 0) / uniqueConvs : 0,
         opt_outs: Number(r.opt_outs) || 0,
-        opt_out_rate: uniqueConvs ? (Number(r.opt_outs) || 0) / uniqueConvs : 0
+        opt_out_rate: uniqueConvs ? (Number(r.opt_outs) || 0) / uniqueConvs : 0,
+        last_send_at: r.last_send_at,
+        last_reply_at: r.last_reply_at,
+        subaccount_locations: Array.isArray(r.subaccount_locations) ? r.subaccount_locations.filter(Boolean) : []
       };
     });
 
@@ -174,6 +183,9 @@ router.get('/wordtracks/workflow/:id', async (req, res) => {
               COALESCE(m.avg_reply_seconds, 0) AS avg_reply_seconds,
               COALESCE(m.drop_offs, 0) AS drop_offs,
               COALESCE(m.unique_convs, 0) AS unique_convs,
+              m.last_send_at,
+              m.last_reply_at,
+              m.subaccount_locations,
               COALESCE(c.bookings, 0) AS bookings,
               COALESCE(c.opt_outs, 0) AS opt_outs
          FROM word_track_clusters wtc
@@ -183,7 +195,10 @@ router.get('/wordtracks/workflow/:id', async (req, res) => {
                   COUNT(*) FILTER (WHERE in_at IS NOT NULL)::int AS replies,
                   COALESCE(AVG(EXTRACT(EPOCH FROM (in_at - out_at))) FILTER (WHERE in_at IS NOT NULL), 0)::float AS avg_reply_seconds,
                   COUNT(*) FILTER (WHERE in_at IS NULL)::int AS drop_offs,
-                  COUNT(DISTINCT ghl_conversation_id)::int AS unique_convs
+                  COUNT(DISTINCT ghl_conversation_id)::int AS unique_convs,
+                  MAX(out_at) AS last_send_at,
+                  MAX(in_at) AS last_reply_at,
+                  ARRAY_AGG(DISTINCT location_id) AS subaccount_locations
              FROM next_inbound GROUP BY cluster_id
          ) m ON m.cluster_id = wtc.id
          LEFT JOIN (
@@ -221,7 +236,10 @@ router.get('/wordtracks/workflow/:id', async (req, res) => {
         bookings: Number(r.bookings) || 0,
         booking_rate: uniqueConvs ? (Number(r.bookings) || 0) / uniqueConvs : 0,
         opt_outs: Number(r.opt_outs) || 0,
-        opt_out_rate: uniqueConvs ? (Number(r.opt_outs) || 0) / uniqueConvs : 0
+        opt_out_rate: uniqueConvs ? (Number(r.opt_outs) || 0) / uniqueConvs : 0,
+        last_send_at: r.last_send_at,
+        last_reply_at: r.last_reply_at,
+        subaccount_locations: Array.isArray(r.subaccount_locations) ? r.subaccount_locations.filter(Boolean) : []
       });
     }
     const positions = Array.from(byPosition.keys()).sort((a, b) => a - b).map((pos) => ({

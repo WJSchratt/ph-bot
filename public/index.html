@@ -1612,6 +1612,46 @@ function renderWtPagination(targetId, page, totalPages, onPageChange) {
 function wtGotoWorkflowPage(p) { wtView.page = p; renderWtWorkflows(); }
 function wtGotoWorkflowDetailPage(p) { wtView.page = p; renderWtWorkflowDetail(wtView.workflowId); }
 
+// Short relative-time: "3m ago" / "2h ago" / "4d ago". null if no timestamp.
+function shortAgo(ts) {
+  if (!ts) return null;
+  const ms = Date.now() - new Date(ts).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return sec + 's ago';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return min + 'm ago';
+  const hr = Math.floor(min / 60);
+  if (hr < 48) return hr + 'h ago';
+  const day = Math.floor(hr / 24);
+  return day + 'd ago';
+}
+
+// Resolve GHL location_ids → subaccount name badges. Uses the global
+// `subaccounts` cache populated by the nav.
+function subaccountBadges(locationIds) {
+  if (!Array.isArray(locationIds) || !locationIds.length) return '';
+  const badges = locationIds.map(loc => {
+    const sub = (subaccounts || []).find(s => s.ghl_location_id === loc);
+    const name = sub ? sub.name : (loc || '').slice(0, 6);
+    // Short abbreviation: first letter of each word, max 2-3 chars.
+    const abbr = sub ? (sub.name.split(/\s+/).map(w => w.charAt(0).toUpperCase()).join('').slice(0, 3)) : name.slice(0, 3).toUpperCase();
+    return '<span class="pill" style="font-size:9px;padding:1px 5px;margin-right:3px;" title="' + esc(name) + '">' + esc(abbr) + '</span>';
+  }).join('');
+  return badges;
+}
+
+// "Last send X ago · Last reply Y ago" footer line for a cluster row.
+function lastActivityLine(lastSend, lastReply) {
+  const s = shortAgo(lastSend);
+  const r = shortAgo(lastReply);
+  const parts = [];
+  if (s) parts.push('Sent ' + s);
+  if (r) parts.push('Replied ' + r);
+  if (!parts.length) return '';
+  return '<div style="font-size:9px;color:var(--muted);margin-top:3px;">' + parts.join(' · ') + '</div>';
+}
+
 async function renderWtWorkflows() {
   document.getElementById('wt-breadcrumb').innerHTML = '<strong>All Workflows</strong>';
   const thead = document.getElementById('wt-stages-thead');
@@ -1639,10 +1679,15 @@ async function renderWtWorkflows() {
     const rawLabel = w.label || 'unlabeled';
     const label = displayLabel(rawLabel, w.id, 'Workflow');
     const avg = w.avg_reply_seconds ? (Math.round(w.avg_reply_seconds) + 's') : '---';
-    tbody.innerHTML += '<tr style="cursor:pointer;" onclick="drillWtWorkflow(' + w.id + ', ' + JSON.stringify(label).replace(/"/g, '&quot;') + ')">' +
-      '<td><div style="font-weight:600;">' + esc(label) + '</div>' +
+    const badges = subaccountBadges(w.subaccount_locations);
+    const activity = lastActivityLine(w.last_send_at, w.last_reply_at);
+    const fullExample = (w.example_opener || '').trim();
+    const rowTitle = fullExample ? esc(fullExample.slice(0, 400)) : '';
+    tbody.innerHTML += '<tr style="cursor:pointer;" onclick="drillWtWorkflow(' + w.id + ', ' + JSON.stringify(label).replace(/"/g, '&quot;') + ')" title="' + rowTitle + '">' +
+      '<td><div style="font-weight:600;">' + badges + esc(label) + '</div>' +
         (w.description ? '<div style="font-size:10px;color:var(--muted);margin-top:2px;">' + esc(w.description) + '</div>' : '') +
-        '<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic;">"' + esc((w.example_opener || '').slice(0, 120)) + '"</div></td>' +
+        '<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic;">"' + esc((w.example_opener || '').slice(0, 120)) + '"</div>' +
+        activity + '</td>' +
       '<td>' + fmtNum(w.unique_conversations) + '</td>' +
       '<td>' + fmtNum(w.sends) + '</td>' +
       '<td>' + fmtNum(w.replies) + '</td>' +
@@ -1697,10 +1742,15 @@ async function renderWtWorkflowDetail(wfId) {
     for (const c of posBlock.clusters) {
       const label = displayLabel(c.label || 'unlabeled', c.id, 'Cluster');
       const avg = c.avg_reply_seconds ? (Math.round(c.avg_reply_seconds) + 's') : '---';
-      tbody.innerHTML += '<tr style="cursor:pointer;" onclick="expandWtCluster(' + c.id + ')">' +
-        '<td style="padding-left:24px;"><div style="font-weight:600;">' + esc(label) + '</div>' +
+      const badges = subaccountBadges(c.subaccount_locations);
+      const activity = lastActivityLine(c.last_send_at, c.last_reply_at);
+      const fullExample = (c.example_text || '').trim();
+      const rowTitle = fullExample ? esc(fullExample.slice(0, 400)) : '';
+      tbody.innerHTML += '<tr style="cursor:pointer;" onclick="expandWtCluster(' + c.id + ')" title="' + rowTitle + '">' +
+        '<td style="padding-left:24px;"><div style="font-weight:600;">' + badges + esc(label) + '</div>' +
           (c.description ? '<div style="font-size:10px;color:var(--muted);margin-top:2px;">' + esc(c.description) + '</div>' : '') +
-          '<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic;">"' + esc((c.example_text || '').slice(0, 120)) + '"</div></td>' +
+          '<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic;">"' + esc((c.example_text || '').slice(0, 120)) + '"</div>' +
+          activity + '</td>' +
         '<td>' + fmtNum(c.sends) + '</td>' +
         '<td>' + fmtNum(c.replies) + '</td>' +
         '<td style="color:var(--cyan);">' + fmtPct(c.reply_rate) + '</td>' +
