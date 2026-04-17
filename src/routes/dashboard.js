@@ -7,25 +7,58 @@ const BOOKED_OUTCOMES = ["'appointment_booked'", "'fex_immediate'", "'mp_immedia
 const HANDOFF_OUTCOMES = ["'human_handoff'", "'handoff_requested'"];
 
 async function loadCostConfig() {
+  const defaults = {
+    // Anthropic (kept for legacy per-subaccount token-based cost estimation only —
+    // real per-category totals now come from anthropic_usage_log.cost_usd).
+    input_cost_per_m: 3,
+    output_cost_per_m: 15,
+    // Signal House SMS carrier.
+    sh_base_monthly: 50,
+    sh_base_segments: 7500,
+    sh_overage_per_seg: 0.01,
+    sh_mms_per_seg: 0.04
+  };
   try {
     const q = await db.query(`SELECT key, value FROM app_settings WHERE section = 'cost_config'`);
     const map = {};
     for (const r of q.rows) map[r.key] = r.value;
     return {
-      sms_out: parseFloat(map.carrier_cost_per_segment_outbound) || 0.01,
-      sms_in: parseFloat(map.carrier_cost_per_segment_inbound) || 0.01,
-      mms_out: parseFloat(map.carrier_cost_mms_outbound) || 0.04,
-      mms_in: parseFloat(map.carrier_cost_mms_inbound) || 0.04,
-      webhook_free: parseInt(map.webhook_free_tier_per_month, 10) || 100,
-      webhook_cost: parseFloat(map.webhook_cost_per_event) || 0.01,
-      email_cost: parseFloat(map.email_cost_per_send) || 0.000675,
-      input_cost_per_m: parseFloat(map.input_token_cost_per_million) || 3,
-      output_cost_per_m: parseFloat(map.output_token_cost_per_million) || 15,
-      botpress_per_msg: parseFloat(map.botpress_ai_cost_per_message) || 0.0186
+      input_cost_per_m: parseFloat(map.input_token_cost_per_million) || defaults.input_cost_per_m,
+      output_cost_per_m: parseFloat(map.output_token_cost_per_million) || defaults.output_cost_per_m,
+      sh_base_monthly: parseFloat(map.signal_house_base_monthly) || defaults.sh_base_monthly,
+      sh_base_segments: parseInt(map.signal_house_base_segments, 10) || defaults.sh_base_segments,
+      sh_overage_per_seg: parseFloat(map.signal_house_overage_per_seg) || defaults.sh_overage_per_seg,
+      sh_mms_per_seg: parseFloat(map.signal_house_mms_per_seg) || defaults.sh_mms_per_seg
     };
   } catch {
-    return { sms_out: 0.01, sms_in: 0.01, mms_out: 0.04, mms_in: 0.04, webhook_free: 100, webhook_cost: 0.01, email_cost: 0.000675, input_cost_per_m: 3, output_cost_per_m: 15, botpress_per_msg: 0.0186 };
+    return defaults;
   }
+}
+
+/**
+ * Signal House cost for a date range:
+ *   base = (days_in_range / 30) * $50/mo
+ *   segments_covered = min(sms_segments, sh_base_segments * days_in_range / 30)
+ *   overage = max(0, sms_segments - segments_covered) * overage_per_seg
+ *   mms = mms_segments * mms_per_seg
+ *   total = base + overage + mms
+ */
+function computeSignalHouseCost({ smsSegments, mmsSegments, daysInRange, cfg }) {
+  const days = Math.max(1, daysInRange);
+  const proratedBase = (days / 30) * cfg.sh_base_monthly;
+  const proratedBaseSegments = (days / 30) * cfg.sh_base_segments;
+  const overageSegments = Math.max(0, smsSegments - proratedBaseSegments);
+  const overageCost = overageSegments * cfg.sh_overage_per_seg;
+  const mmsCost = mmsSegments * cfg.sh_mms_per_seg;
+  return {
+    base_cost: Math.round(proratedBase * 100) / 100,
+    base_segments_included: Math.round(proratedBaseSegments),
+    overage_segments: Math.round(overageSegments),
+    overage_cost: Math.round(overageCost * 100) / 100,
+    mms_segments: mmsSegments,
+    mms_cost: Math.round(mmsCost * 100) / 100,
+    total: Math.round((proratedBase + overageCost + mmsCost) * 100) / 100
+  };
 }
 
 router.get('/dashboard', async (req, res) => {
@@ -79,9 +112,7 @@ router.get('/dashboard', async (req, res) => {
     );
     const mg = msgRes.rows[0];
 
-    // Additional MMS detection from pulled GHL data (ghl_messages stores
-    // GHL's own messageType like TYPE_MMS). Only count rows whose location/
-    // contact would NOT double-count local bot-handled conversations.
+    // Additional MMS detection from pulled GHL data.
     const mmsGhlQ = await db.query(
       `SELECT
          COUNT(*) FILTER (WHERE direction = 'outbound' AND message_type ILIKE '%MMS%')::int AS mms_out,
@@ -136,8 +167,7 @@ router.get('/dashboard', async (req, res) => {
     );
     const ghlOut = ghlOutboundRes.rows[0] || {};
 
-    // --- 3) Combined headline numbers (prefer GHL-pulled since it includes
-    //        BotPress + manual agent + Claude, not just Claude-bot rows) ---
+    // --- 3) Combined headline numbers ---
     const totalConversations = ghlKpi.total || botKpi.total || 0;
     const appointmentsBooked = (ghlKpi.booked || 0) + (botKpi.booked || 0);
     const dncCount = (ghlKpi.dnc || 0) + Math.max(0, (botKpi.dnc || 0) - (ghlKpi.dnc || 0));
@@ -148,62 +178,89 @@ router.get('/dashboard', async (req, res) => {
     const responseRate = sentTo ? replied / sentTo : 0;
     const bookingRate = totalConversations ? appointmentsBooked / totalConversations : 0;
     const optOutRate = totalConversations ? dncCount / totalConversations : 0;
-    const dncRate = optOutRate; // alias
+    const dncRate = optOutRate;
 
-    // --- 4) Cost + time saved ---
-    const inputCost = (Number(botKpi.input_tokens) * costConfig.input_cost_per_m) / 1000000;
-    const outputCost = (Number(botKpi.output_tokens) * costConfig.output_cost_per_m) / 1000000;
-    const aiCost = inputCost + outputCost;
-
+    // --- 4) Signal House carrier cost (prorated base + overage + MMS) ---
     const smsOutSeg = mg.sms_out_segments || 0;
     const smsInSeg = mg.sms_in_segments || 0;
     const mmsOutSeg = (mg.mms_out_segments || 0) + (ghlMms.mms_out || 0);
     const mmsInSeg = (mg.mms_in_segments || 0) + (ghlMms.mms_in || 0);
+    const totalSmsSegments = smsOutSeg + smsInSeg;
+    const totalMmsSegments = mmsOutSeg + mmsInSeg;
 
-    const smsCost = smsOutSeg * costConfig.sms_out + smsInSeg * costConfig.sms_in;
-    const mmsCost = mmsOutSeg * costConfig.mms_out + mmsInSeg * costConfig.mms_in;
-    const carrierCost = smsCost + mmsCost;
-    const outSegments = smsOutSeg + mmsOutSeg;
-    const inSegments = smsInSeg + mmsInSeg;
+    const signalHouse = computeSignalHouseCost({
+      smsSegments: totalSmsSegments,
+      mmsSegments: totalMmsSegments,
+      daysInRange: daysInt,
+      cfg: costConfig
+    });
+    const carrierCost = signalHouse.total;
 
-    // Webhook billing: each terminal outcome fires one inbound_webhook trigger
-    // at GHL (our post-call router). First N/month are free, then per-event rate.
-    // Webhooks coming FROM GHL to our bot are free and are NOT counted here.
-    const webhookFiredQ = await db.query(
-      `SELECT COUNT(*)::int AS n FROM conversations ${botWhere} AND terminal_outcome IS NOT NULL`,
-      botParams
+    // --- 5) Anthropic API cost breakdown (from anthropic_usage_log) ---
+    const usageParams = [daysInt];
+    let usageWhere = `created_at >= NOW() - ($1 || ' days')::interval`;
+    if (locIds.length) {
+      usageParams.push(locIds);
+      // Note: many call categories don't attach a location_id (analyzer cross-account,
+      // dev_console). When a location filter is applied, include only rows matching
+      // one of those locations.
+      usageWhere += ` AND location_id = ANY($${usageParams.length})`;
+    }
+
+    const anthropicTotalsRes = await db.query(
+      `SELECT
+         COALESCE(SUM(cost_usd), 0)::numeric AS total_cost,
+         COALESCE(SUM(input_tokens), 0)::bigint AS total_input,
+         COALESCE(SUM(output_tokens), 0)::bigint AS total_output,
+         COALESCE(SUM(cache_creation_input_tokens), 0)::bigint AS total_cache_write,
+         COALESCE(SUM(cache_read_input_tokens), 0)::bigint AS total_cache_read,
+         COUNT(*)::int AS call_count
+       FROM anthropic_usage_log
+       WHERE ${usageWhere}`,
+      usageParams
     );
-    const webhookEvents = webhookFiredQ.rows[0]?.n || 0;
-    const webhookBillable = Math.max(0, webhookEvents - costConfig.webhook_free);
-    const webhookCost = webhookBillable * costConfig.webhook_cost;
+    const anthropicTotals = anthropicTotalsRes.rows[0] || {};
 
-    // Email billing: calendar confirmation per booked appointment, sent by GHL.
-    const emailSends = appointmentsBooked;
-    const emailCost = emailSends * costConfig.email_cost;
-
-    // BotPress AI cost: count outbound messages from BotPress-classified
-    // conversations within the window × configured per-message rate.
-    const bpParams = [daysInt];
-    let bpWhere = `gc.source = 'botpress' AND gm.direction = 'outbound' AND gm.created_at >= NOW() - ($1 || ' days')::interval`;
-    if (locIds.length) { bpParams.push(locIds); bpWhere += ` AND gm.location_id = ANY($${bpParams.length})`; }
-    const bpQ = await db.query(
-      `SELECT COUNT(*)::int AS n FROM ghl_messages gm
-       JOIN ghl_conversations gc ON gc.ghl_conversation_id = gm.ghl_conversation_id AND gc.location_id = gm.location_id
-       WHERE ${bpWhere}`,
-      bpParams
+    const anthropicByCatRes = await db.query(
+      `SELECT category,
+              COUNT(*)::int AS call_count,
+              COALESCE(SUM(cost_usd), 0)::numeric AS cost_usd,
+              COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
+              COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
+              COALESCE(SUM(cache_creation_input_tokens), 0)::bigint AS cache_write_tokens,
+              COALESCE(SUM(cache_read_input_tokens), 0)::bigint AS cache_read_tokens,
+              COALESCE(AVG(duration_ms), 0)::int AS avg_ms
+       FROM anthropic_usage_log
+       WHERE ${usageWhere}
+       GROUP BY category
+       ORDER BY cost_usd DESC`,
+      usageParams
     );
-    const botpressMessages = bpQ.rows[0]?.n || 0;
-    const botpressAiCost = botpressMessages * costConfig.botpress_per_msg;
 
-    const totalMessages = (mg.outbound || 0) + (mg.inbound || 0) + botpressMessages || 1;
-    const costPerMessage = (aiCost + botpressAiCost + carrierCost + webhookCost + emailCost) / totalMessages;
+    const anthropicDailyRes = await db.query(
+      `SELECT created_at::date AS date,
+              category,
+              COALESCE(SUM(cost_usd), 0)::numeric AS cost_usd
+       FROM anthropic_usage_log
+       WHERE ${usageWhere}
+       GROUP BY 1, 2
+       ORDER BY 1 ASC`,
+      usageParams
+    );
+
+    const aiCost = Number(anthropicTotals.total_cost) || 0;
+
+    // --- 6) Cost-per-message + time saved ---
+    const totalMessages = (mg.outbound || 0) + (mg.inbound || 0) || 1;
+    const totalCost = aiCost + carrierCost;
+    const costPerMessage = totalCost / totalMessages;
 
     const smsSavedSec = ((mg.outbound || 0) + (mg.inbound || 0)) * 100;
     const callSavedSec = appointmentsBooked * 120;
     const adminSavedSec = (totalConversations || 0) * 15;
     const hoursSaved = Math.round((smsSavedSec + callSavedSec + adminSavedSec) / 3600);
 
-    // --- 5) Per-subaccount breakdown (merges bot-only metrics with GHL totals) ---
+    // --- 7) Per-subaccount breakdown ---
     const subParams = [daysInt];
     const subRes = await db.query(
       `WITH ghl_agg AS (
@@ -220,8 +277,6 @@ router.get('/dashboard', async (req, res) => {
          SELECT location_id,
            COUNT(*)::int AS bot_total,
            COUNT(*) FILTER (WHERE terminal_outcome = 'human_handoff')::int AS handoffs,
-           COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
-           COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
            COALESCE(AVG(jsonb_array_length(messages)), 0)::float AS avg_messages
          FROM conversations
          WHERE is_sandbox = FALSE AND created_at >= NOW() - ($1 || ' days')::interval
@@ -229,22 +284,23 @@ router.get('/dashboard', async (req, res) => {
        ),
        msg_agg AS (
          SELECT location_id,
-           COALESCE(SUM(segments) FILTER (WHERE direction = 'outbound'), 0)::int AS out_segments,
-           COALESCE(SUM(segments) FILTER (WHERE direction = 'inbound'), 0)::int AS in_segments
+           COALESCE(SUM(segments) FILTER (WHERE direction = 'outbound' AND COALESCE(message_type, '') NOT ILIKE '%mms%'), 0)::int AS sms_out,
+           COALESCE(SUM(segments) FILTER (WHERE direction = 'inbound'  AND COALESCE(message_type, '') NOT ILIKE '%mms%'), 0)::int AS sms_in,
+           COALESCE(SUM(segments) FILTER (WHERE direction = 'outbound' AND COALESCE(message_type, '') ILIKE '%mms%'), 0)::int AS mms_out,
+           COALESCE(SUM(segments) FILTER (WHERE direction = 'inbound'  AND COALESCE(message_type, '') ILIKE '%mms%'), 0)::int AS mms_in
          FROM messages
          WHERE created_at >= NOW() - ($1 || ' days')::interval
          GROUP BY location_id
        ),
-       bp_agg AS (
-         SELECT gm.location_id,
-           COUNT(*)::int AS bp_messages
-         FROM ghl_messages gm
-         JOIN ghl_conversations gc ON gc.ghl_conversation_id = gm.ghl_conversation_id AND gc.location_id = gm.location_id
-         WHERE gc.source = 'botpress' AND gm.direction = 'outbound'
-           AND gm.created_at >= NOW() - ($1 || ' days')::interval
-         GROUP BY gm.location_id
+       usage_agg AS (
+         SELECT location_id,
+           COALESCE(SUM(cost_usd), 0)::numeric AS ai_cost,
+           COUNT(*)::int AS ai_calls
+         FROM anthropic_usage_log
+         WHERE created_at >= NOW() - ($1 || ' days')::interval AND location_id IS NOT NULL
+         GROUP BY location_id
        )
-       SELECT COALESCE(g.location_id, b.location_id, m.location_id, bp.location_id) AS location_id,
+       SELECT COALESCE(g.location_id, b.location_id, m.location_id, u.location_id) AS location_id,
               s.name AS subaccount_name,
               COALESCE(g.total, b.bot_total, 0) AS total_conversations,
               COALESCE(g.booked, 0) AS appointments_booked,
@@ -252,16 +308,17 @@ router.get('/dashboard', async (req, res) => {
               COALESCE(b.handoffs, 0) AS human_handoffs,
               COALESCE(g.replied, 0) AS replied_to,
               COALESCE(b.avg_messages, 0) AS avg_messages_per_conversation,
-              COALESCE(b.input_tokens, 0) AS input_tokens,
-              COALESCE(b.output_tokens, 0) AS output_tokens,
-              COALESCE(m.out_segments, 0) AS out_segments,
-              COALESCE(m.in_segments, 0) AS in_segments,
-              COALESCE(bp.bp_messages, 0) AS bp_messages
+              COALESCE(m.sms_out, 0) AS sms_out,
+              COALESCE(m.sms_in, 0) AS sms_in,
+              COALESCE(m.mms_out, 0) AS mms_out,
+              COALESCE(m.mms_in, 0) AS mms_in,
+              COALESCE(u.ai_cost, 0) AS ai_cost,
+              COALESCE(u.ai_calls, 0) AS ai_calls
          FROM ghl_agg g
          FULL OUTER JOIN bot_agg b ON g.location_id = b.location_id
          FULL OUTER JOIN msg_agg m ON COALESCE(g.location_id, b.location_id) = m.location_id
-         FULL OUTER JOIN bp_agg bp ON COALESCE(g.location_id, b.location_id, m.location_id) = bp.location_id
-         LEFT JOIN subaccounts s ON s.ghl_location_id = COALESCE(g.location_id, b.location_id, m.location_id, bp.location_id)
+         FULL OUTER JOIN usage_agg u ON COALESCE(g.location_id, b.location_id, m.location_id) = u.location_id
+         LEFT JOIN subaccounts s ON s.ghl_location_id = COALESCE(g.location_id, b.location_id, m.location_id, u.location_id)
         ORDER BY total_conversations DESC`,
       subParams
     );
@@ -271,16 +328,15 @@ router.get('/dashboard', async (req, res) => {
       const replied = Number(r.replied_to) || 0;
       const booked = Number(r.appointments_booked) || 0;
       const dnc = Number(r.dnc_count) || 0;
-      const outSeg = Number(r.out_segments) || 0;
-      const inSeg = Number(r.in_segments) || 0;
-      const inTok = Number(r.input_tokens) || 0;
-      const outTok = Number(r.output_tokens) || 0;
-      const ai = (inTok * costConfig.input_cost_per_m + outTok * costConfig.output_cost_per_m) / 1000000;
-      // Per-subaccount row doesn't have the SMS/MMS split (messages table doesn't
-      // distinguish here); treat as SMS since that's what the bot sends.
-      const carrier = outSeg * costConfig.sms_out + inSeg * costConfig.sms_in;
-      const bpMessages = Number(r.bp_messages) || 0;
-      const bpCost = bpMessages * costConfig.botpress_per_msg;
+      const smsSeg = (Number(r.sms_out) || 0) + (Number(r.sms_in) || 0);
+      const mmsSeg = (Number(r.mms_out) || 0) + (Number(r.mms_in) || 0);
+      const ai = Number(r.ai_cost) || 0;
+      const sh = computeSignalHouseCost({
+        smsSegments: smsSeg,
+        mmsSegments: mmsSeg,
+        daysInRange: daysInt,
+        cfg: costConfig
+      });
       return {
         location_id: r.location_id,
         subaccount_name: r.subaccount_name || null,
@@ -293,15 +349,15 @@ router.get('/dashboard', async (req, res) => {
         booking_rate: total ? booked / total : 0,
         avg_messages_per_conversation: Number(r.avg_messages_per_conversation) || 0,
         ai_cost: Math.round(ai * 10000) / 10000,
-        botpress_ai_cost: Math.round(bpCost * 10000) / 10000,
-        botpress_messages: bpMessages,
-        carrier_cost: Math.round(carrier * 10000) / 10000,
-        total_cost: Math.round((ai + bpCost + carrier) * 10000) / 10000,
-        time_saved_hours: Math.round(((outSeg + inSeg) * 100 + booked * 120) / 3600)
+        ai_calls: Number(r.ai_calls) || 0,
+        carrier_cost: sh.total,
+        carrier_breakdown: sh,
+        total_cost: Math.round((ai + sh.total) * 10000) / 10000,
+        time_saved_hours: Math.round(((smsSeg) * 100 + booked * 120) / 3600)
       };
     });
 
-    // --- 6) Response outcome donut (from GHL-pulled) ---
+    // --- 8) Response outcome donut ---
     const outcomeRes = await db.query(
       `SELECT
          CASE
@@ -318,7 +374,7 @@ router.get('/dashboard', async (req, res) => {
       ghlParams
     );
 
-    // --- 7) Daily trend (from GHL-pulled so it reflects ALL conversations) ---
+    // --- 9) Daily trend ---
     const trendParams = [];
     if (locIds.length) { trendParams.push(locIds); }
     trendParams.push(daysInt);
@@ -335,7 +391,7 @@ router.get('/dashboard', async (req, res) => {
       trendParams
     );
 
-    // --- 8) Appointments by type (uses bot-local conversations.product_type) ---
+    // --- 10) Appointments by type ---
     const apptByTypeRes = await db.query(
       `SELECT COALESCE(NULLIF(product_type, ''), 'Unknown') AS type,
               COUNT(*)::int AS count
@@ -352,7 +408,7 @@ router.get('/dashboard', async (req, res) => {
         completed_conversations: ghlKpi.completed || 0,
         appointments_booked: appointmentsBooked,
         booking_rate: bookingRate,
-        appointment_rate: bookingRate, // backwards-compat alias
+        appointment_rate: bookingRate,
         human_handoffs: handoffs,
         dnc_count: dncCount,
         dnc_rate: dncRate,
@@ -364,24 +420,21 @@ router.get('/dashboard', async (req, res) => {
         avg_response_time_seconds: mg.avg_response_time || 0,
         total_inbound: mg.inbound || 0,
         total_outbound: mg.outbound || 0,
-        total_input_tokens: Number(botKpi.input_tokens) || 0,
-        total_output_tokens: Number(botKpi.output_tokens) || 0,
+        total_input_tokens: Number(anthropicTotals.total_input) || Number(botKpi.input_tokens) || 0,
+        total_output_tokens: Number(anthropicTotals.total_output) || Number(botKpi.output_tokens) || 0,
+        total_cache_write_tokens: Number(anthropicTotals.total_cache_write) || 0,
+        total_cache_read_tokens: Number(anthropicTotals.total_cache_read) || 0,
         ai_cost: Math.round(aiCost * 100) / 100,
-        botpress_ai_cost: Math.round(botpressAiCost * 100) / 100,
-        botpress_messages: botpressMessages,
-        sms_cost: Math.round(smsCost * 100) / 100,
-        mms_cost: Math.round(mmsCost * 100) / 100,
-        carrier_cost: Math.round(carrierCost * 100) / 100,
-        webhook_cost: Math.round(webhookCost * 100) / 100,
-        email_cost: Math.round(emailCost * 10000) / 10000,
-        email_sends: emailSends,
-        total_cost: Math.round((aiCost + botpressAiCost + carrierCost + webhookCost + emailCost) * 100) / 100,
+        ai_calls: Number(anthropicTotals.call_count) || 0,
+        carrier_cost: carrierCost,
+        carrier_breakdown: signalHouse,
+        total_cost: Math.round(totalCost * 100) / 100,
         cost_per_message: Math.round(costPerMessage * 10000) / 10000,
-        total_segments: outSegments + inSegments,
-        total_segments_outbound: outSegments,
-        total_segments_inbound: inSegments,
-        sms_segments: { outbound: smsOutSeg, inbound: smsInSeg, total: smsOutSeg + smsInSeg },
-        mms_segments: { outbound: mmsOutSeg, inbound: mmsInSeg, total: mmsOutSeg + mmsInSeg },
+        total_segments: totalSmsSegments + totalMmsSegments,
+        total_segments_outbound: smsOutSeg + mmsOutSeg,
+        total_segments_inbound: smsInSeg + mmsInSeg,
+        sms_segments: { outbound: smsOutSeg, inbound: smsInSeg, total: totalSmsSegments },
+        mms_segments: { outbound: mmsOutSeg, inbound: mmsInSeg, total: totalMmsSegments },
         hours_saved: hoursSaved,
         time_saved_breakdown: {
           sms_responded_hours: Math.round((smsSavedSec / 3600) * 10) / 10,
@@ -392,9 +445,26 @@ router.get('/dashboard', async (req, res) => {
           claude: ghlKpi.src_claude || 0,
           botpress: ghlKpi.src_botpress || 0,
           other: ghlKpi.src_other || 0
-        },
-        webhook_events: webhookEvents,
-        webhook_billable_events: webhookBillable
+        }
+      },
+      anthropic_breakdown: {
+        total_cost: Math.round(aiCost * 10000) / 10000,
+        call_count: Number(anthropicTotals.call_count) || 0,
+        by_category: anthropicByCatRes.rows.map((r) => ({
+          category: r.category,
+          call_count: Number(r.call_count) || 0,
+          cost_usd: Math.round(Number(r.cost_usd) * 10000) / 10000,
+          input_tokens: Number(r.input_tokens) || 0,
+          output_tokens: Number(r.output_tokens) || 0,
+          cache_write_tokens: Number(r.cache_write_tokens) || 0,
+          cache_read_tokens: Number(r.cache_read_tokens) || 0,
+          avg_ms: Number(r.avg_ms) || 0
+        })),
+        daily: anthropicDailyRes.rows.map((r) => ({
+          date: r.date instanceof Date ? r.date.toISOString().slice(0, 10) : r.date,
+          category: r.category,
+          cost_usd: Math.round(Number(r.cost_usd) * 10000) / 10000
+        }))
       },
       cost_config: costConfig,
       trends: trendRes.rows.map((r) => ({

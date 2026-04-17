@@ -1,13 +1,11 @@
 const express = require('express');
-const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../db');
 const store = require('../services/conversationStore');
 const claude = require('../services/claude');
 const logger = require('../services/logger');
+const { callAnthropic } = require('../services/anthropic');
 const { parseTags, determineContactStage, determineProductType, determineIsCa } = require('../utils/parser');
 const router = express.Router();
-
-const qcClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const SAMPLE_PROFILES = [
   { first_name: 'Linda', state: 'FL', offer: 'Final Expense', existing_age: '68', existing_smoker: 'no', existing_health: 'high blood pressure', persona: 'easy_close' },
@@ -178,12 +176,6 @@ router.get('/conversations/:id/full', async (req, res) => {
 // and return a batch grid for human review.
 const sandboxRoutes = require('./sandbox');
 async function runSimConversation(profile) {
-  // Reuse the /sandbox/simulate logic by importing the route's axios call would be hacky;
-  // call its exposed helpers via the module directly.
-  // We fall back to a local inline loop that mirrors /sandbox/simulate.
-  const Anthropic = require('@anthropic-ai/sdk');
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
   const variables = {
     first_name: profile.first_name,
     state: profile.state,
@@ -239,12 +231,19 @@ async function runSimConversation(profile) {
     // Lead reply
     const msgs = thread.map((m) => m.role === 'bot' ? { role: 'user', content: m.text } : { role: 'assistant', content: m.text });
     if (!msgs.length) msgs.push({ role: 'user', content: '(the agent has not replied yet — send your first short message as the lead)' });
-    const leadResp = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 300,
-      system: personaSystem,
-      messages: msgs
-    });
+    const leadResp = await callAnthropic(
+      {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 300,
+        system: personaSystem,
+        messages: msgs
+      },
+      {
+        category: 'qc_sim_score',
+        location_id: parsed.location_id || null,
+        meta: { phase: 'lead_reply', persona: profile.persona }
+      }
+    );
     const leadText = (leadResp.content.find((b) => b.type === 'text')?.text || '').trim();
     if (!leadText || /^<<<END_SIM>>>$/.test(leadText)) { terminal = terminal || 'lead_abandoned'; break; }
     thread.push({ role: 'lead', text: leadText });
@@ -260,12 +259,19 @@ async function runSimConversation(profile) {
 
   // Auto-score with Claude
   const transcript = thread.map((m, i) => `${i + 1}. ${m.role === 'bot' ? 'BOT' : 'LEAD'}: ${m.text}`).join('\n');
-  const scoreResp = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 400,
-    system: `You are grading a SMS qualification bot conversation. Respond ONLY with JSON: { "score": 0-100, "grade": "Good|OK|Wrong", "reason": "one sentence" }. Good ≥80, OK 50-79, Wrong <50.`,
-    messages: [{ role: 'user', content: `Persona: ${profile.persona}\nOutcome: ${terminal || 'incomplete'}\n\nTranscript:\n${transcript}` }]
-  });
+  const scoreResp = await callAnthropic(
+    {
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 400,
+      system: `You are grading a SMS qualification bot conversation. Respond ONLY with JSON: { "score": 0-100, "grade": "Good|OK|Wrong", "reason": "one sentence" }. Good ≥80, OK 50-79, Wrong <50.`,
+      messages: [{ role: 'user', content: `Persona: ${profile.persona}\nOutcome: ${terminal || 'incomplete'}\n\nTranscript:\n${transcript}` }]
+    },
+    {
+      category: 'qc_sim_score',
+      location_id: parsed.location_id || null,
+      meta: { phase: 'scoring', persona: profile.persona, terminal: terminal || 'incomplete' }
+    }
+  );
   let score = { score: null, grade: 'OK', reason: '' };
   try {
     const t = (scoreResp.content.find((b) => b.type === 'text')?.text || '').trim();

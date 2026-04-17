@@ -1,0 +1,123 @@
+const Anthropic = require('@anthropic-ai/sdk');
+const db = require('../db');
+const logger = require('./logger');
+
+const ALLOWED_CATEGORIES = new Set([
+  'bot_response',
+  'word_track_clustering',
+  'qc_sim_score',
+  'qc_generate_samples',
+  'qc_batch_apply',
+  'analyzer_analysis',
+  'analyzer_prompt_gen',
+  'dev_console',
+  'sandbox_sim'
+]);
+
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+let pricingCache = null;
+let pricingCacheAt = 0;
+const PRICING_TTL_MS = 60 * 1000;
+
+async function getPricing() {
+  const now = Date.now();
+  if (pricingCache && now - pricingCacheAt < PRICING_TTL_MS) return pricingCache;
+  const defaults = {
+    input_per_m: 3,
+    output_per_m: 15,
+    cache_read_per_m: 0.30,
+    cache_write_per_m: 3.75
+  };
+  try {
+    const q = await db.query(`SELECT key, value FROM app_settings WHERE section = 'cost_config'`);
+    const map = {};
+    for (const r of q.rows) map[r.key] = r.value;
+    pricingCache = {
+      input_per_m: parseFloat(map.input_token_cost_per_million) || defaults.input_per_m,
+      output_per_m: parseFloat(map.output_token_cost_per_million) || defaults.output_per_m,
+      cache_read_per_m: parseFloat(map.cache_read_cost_per_million) || defaults.cache_read_per_m,
+      cache_write_per_m: parseFloat(map.cache_write_cost_per_million) || defaults.cache_write_per_m
+    };
+  } catch {
+    pricingCache = defaults;
+  }
+  pricingCacheAt = now;
+  return pricingCache;
+}
+
+function computeCost(usage, pricing) {
+  const input = usage.input_tokens || 0;
+  const output = usage.output_tokens || 0;
+  const cacheWrite = usage.cache_creation_input_tokens || 0;
+  const cacheRead = usage.cache_read_input_tokens || 0;
+  return (
+    (input * pricing.input_per_m +
+     output * pricing.output_per_m +
+     cacheWrite * pricing.cache_write_per_m +
+     cacheRead * pricing.cache_read_per_m) / 1_000_000
+  );
+}
+
+async function logUsage({ category, model, location_id, usage, duration_ms, meta }) {
+  const pricing = await getPricing();
+  const cost = computeCost(usage || {}, pricing);
+  await db.query(
+    `INSERT INTO anthropic_usage_log
+     (category, model, location_id, input_tokens, output_tokens,
+      cache_creation_input_tokens, cache_read_input_tokens,
+      cost_usd, duration_ms, meta)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      category,
+      model,
+      location_id || null,
+      usage?.input_tokens || 0,
+      usage?.output_tokens || 0,
+      usage?.cache_creation_input_tokens || 0,
+      usage?.cache_read_input_tokens || 0,
+      cost,
+      duration_ms || null,
+      meta ? JSON.stringify(meta) : null
+    ]
+  );
+}
+
+/**
+ * Shared wrapper for all Anthropic calls. Forwards params to
+ * client.messages.create() unchanged and returns the raw response.
+ * Usage logging is fire-and-forget so the hot path is never blocked.
+ */
+async function callAnthropic(params, ctx) {
+  const category = ctx?.category;
+  if (!category) throw new Error('callAnthropic: category is required');
+  if (!ALLOWED_CATEGORIES.has(category)) {
+    throw new Error(`callAnthropic: unknown category "${category}"`);
+  }
+  const t0 = Date.now();
+  const resp = await client.messages.create(params);
+  const duration_ms = Date.now() - t0;
+
+  logUsage({
+    category,
+    model: params.model,
+    location_id: ctx.location_id || null,
+    usage: resp.usage || {},
+    duration_ms,
+    meta: ctx.meta || null
+  }).catch((err) => {
+    logger.log('anthropic_usage', 'error', null, 'usage log insert failed', {
+      category,
+      error: err.message
+    });
+  });
+
+  return resp;
+}
+
+module.exports = {
+  callAnthropic,
+  client,
+  ALLOWED_CATEGORIES: Array.from(ALLOWED_CATEGORIES),
+  _internal: { getPricing, computeCost }
+};

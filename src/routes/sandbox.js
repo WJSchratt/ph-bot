@@ -1,7 +1,7 @@
 const express = require('express');
-const Anthropic = require('@anthropic-ai/sdk');
 const store = require('../services/conversationStore');
 const claude = require('../services/claude');
+const { callAnthropic } = require('../services/anthropic');
 const { parseTags, determineContactStage, determineProductType, determineIsCa } = require('../utils/parser');
 
 const router = express.Router();
@@ -9,7 +9,6 @@ const router = express.Router();
 const SANDBOX_CONTACT_ID = 'sandbox_user';
 const SANDBOX_LOCATION_ID = 'sandbox_location';
 
-const simClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const SIM_MODEL = 'claude-sonnet-4-20250514';
 const SIM_MAX_TURNS = 20;
 
@@ -223,12 +222,19 @@ async function generateLeadReply(personaKey, variables, conversation) {
   if (!messages.length) {
     messages.push({ role: 'user', content: '(no message from the agent yet — start the conversation as the lead would, e.g. a short curious or annoyed reply to a drip text)' });
   }
-  const resp = await simClient.messages.create({
-    model: SIM_MODEL,
-    max_tokens: 400,
-    system,
-    messages
-  });
+  const resp = await callAnthropic(
+    {
+      model: SIM_MODEL,
+      max_tokens: 400,
+      system,
+      messages
+    },
+    {
+      category: 'sandbox_sim',
+      location_id: SANDBOX_LOCATION_ID,
+      meta: { persona: personaKey }
+    }
+  );
   const text = (resp.content.find((b) => b.type === 'text')?.text || '').trim();
   return {
     text,

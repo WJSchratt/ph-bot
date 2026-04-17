@@ -114,3 +114,22 @@ CREATE TABLE IF NOT EXISTS analytics_daily (
 );
 
 CREATE INDEX IF NOT EXISTS idx_analytics_location_date ON analytics_daily(location_id, date);
+
+CREATE TABLE IF NOT EXISTS anthropic_usage_log (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  category VARCHAR(50) NOT NULL,
+  model VARCHAR(100) NOT NULL,
+  location_id VARCHAR(100),
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+  cost_usd NUMERIC(12, 6) NOT NULL DEFAULT 0,
+  duration_ms INTEGER,
+  meta JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_anthropic_usage_created ON anthropic_usage_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_anthropic_usage_cat ON anthropic_usage_log(category, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_anthropic_usage_loc ON anthropic_usage_log(location_id, created_at DESC) WHERE location_id IS NOT NULL;

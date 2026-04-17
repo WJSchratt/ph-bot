@@ -182,6 +182,41 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS idx_opps_updated ON ghl_opportunities(location_id, ghl_updated_at DESC);
     `);
     console.log('[migrate] ghl_pipelines + ghl_opportunities ensured');
+
+    // Anthropic usage log — every Claude call tagged by category for cost attribution.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS anthropic_usage_log (
+        id BIGSERIAL PRIMARY KEY,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        category VARCHAR(50) NOT NULL,
+        model VARCHAR(100) NOT NULL,
+        location_id VARCHAR(100),
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+        cost_usd NUMERIC(12, 6) NOT NULL DEFAULT 0,
+        duration_ms INTEGER,
+        meta JSONB
+      );
+      CREATE INDEX IF NOT EXISTS idx_anthropic_usage_created ON anthropic_usage_log(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_anthropic_usage_cat ON anthropic_usage_log(category, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_anthropic_usage_loc ON anthropic_usage_log(location_id, created_at DESC) WHERE location_id IS NOT NULL;
+    `);
+    console.log('[migrate] anthropic_usage_log ensured');
+
+    // Seed cache pricing defaults into app_settings.cost_config if not already set.
+    await pool.query(`
+      INSERT INTO app_settings (section, key, value) VALUES
+        ('cost_config', 'cache_read_cost_per_million',  '0.30'),
+        ('cost_config', 'cache_write_cost_per_million', '3.75'),
+        ('cost_config', 'signal_house_base_monthly',    '50'),
+        ('cost_config', 'signal_house_base_segments',   '7500'),
+        ('cost_config', 'signal_house_overage_per_seg', '0.01'),
+        ('cost_config', 'signal_house_mms_per_seg',     '0.04')
+      ON CONFLICT (section, key) DO NOTHING;
+    `);
+    console.log('[migrate] cost_config pricing defaults seeded');
   } catch (err) {
     console.error('[migrate] failed', err);
     process.exit(1);

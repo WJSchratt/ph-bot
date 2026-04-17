@@ -1,12 +1,11 @@
 const express = require('express');
-const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../db');
 const logger = require('../services/logger');
 const standardPrompt = require('../prompts/standard');
 const ghlConv = require('../services/ghlConversations');
+const { callAnthropic } = require('../services/anthropic');
 
 const router = express.Router();
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const ANALYZE_CACHE_TTL_MS = 60 * 60 * 1000;
 let analyzeCache = { ts: 0, result: null };
@@ -272,12 +271,19 @@ Provide a structured analysis:
 
 Keep it under 2000 words. Use clear section headers.`;
 
-    const resp = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 3000,
-      system: 'You are a conversational AI quality analyst. You compare two bot implementations against real conversations and produce actionable findings. Be specific, cite examples, and recommend concrete prompt changes.',
-      messages: [{ role: 'user', content: userContent }]
-    });
+    const resp = await callAnthropic(
+      {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 3000,
+        system: 'You are a conversational AI quality analyst. You compare two bot implementations against real conversations and produce actionable findings. Be specific, cite examples, and recommend concrete prompt changes.',
+        messages: [{ role: 'user', content: userContent }]
+      },
+      {
+        category: 'analyzer_analysis',
+        location_id: null,
+        meta: { scope: 'cross_account', claude_samples: samples.claude.length, botpress_samples: samples.botpress.length }
+      }
+    );
 
     const textBlock = resp.content.find((b) => b.type === 'text');
     const analysis = textBlock ? textBlock.text : '';
@@ -376,17 +382,20 @@ router.post('/generate-prompt', async (req, res) => {
       ...samples.botpress.map((c, i) => `=== BOTPRESS SAMPLE ${i + 1} ===\n${serializeBotpress(c.botpress_history)}`)
     ].join('\n\n');
 
-    const resp = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 8000,
-      system: `You are a prompt engineer rewriting an SMS bot system prompt. Apply the requested changes precisely while preserving the existing structure, tone rules, and JSON response format. Output ONLY the full revised prompt text with no markdown fences, no commentary, no "here is the updated prompt" preamble.`,
-      messages: [
-        {
-          role: 'user',
-          content: `CURRENT SYSTEM PROMPT:\n\n${base}\n\n---\n\nREQUESTED CHANGES:\n${change_description}\n\n---\n\nREAL CONVERSATION SAMPLES (for context on how the bot currently behaves):\n${sampleText}\n\n---\n\nRewrite the full system prompt with the requested changes applied. Preserve anything that wasn't asked to change.`
-        }
-      ]
-    });
+    const resp = await callAnthropic(
+      {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 8000,
+        system: `You are a prompt engineer rewriting an SMS bot system prompt. Apply the requested changes precisely while preserving the existing structure, tone rules, and JSON response format. Output ONLY the full revised prompt text with no markdown fences, no commentary, no "here is the updated prompt" preamble.`,
+        messages: [
+          {
+            role: 'user',
+            content: `CURRENT SYSTEM PROMPT:\n\n${base}\n\n---\n\nREQUESTED CHANGES:\n${change_description}\n\n---\n\nREAL CONVERSATION SAMPLES (for context on how the bot currently behaves):\n${sampleText}\n\n---\n\nRewrite the full system prompt with the requested changes applied. Preserve anything that wasn't asked to change.`
+          }
+        ]
+      },
+      { category: 'analyzer_prompt_gen', location_id: null, meta: { scope: 'cross_account' } }
+    );
     const textBlock = resp.content.find((b) => b.type === 'text');
     const generated = textBlock ? textBlock.text : '';
     res.json({
@@ -887,12 +896,15 @@ Produce a focused analysis (<1500 words):
 3. Specific improvements with exact phrasing`;
     }
 
-    const resp = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 3000,
-      system: 'You are a conversational AI quality analyst. Be specific, cite examples, and recommend concrete prompt changes.',
-      messages: [{ role: 'user', content: userContent }]
-    });
+    const resp = await callAnthropic(
+      {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 3000,
+        system: 'You are a conversational AI quality analyst. Be specific, cite examples, and recommend concrete prompt changes.',
+        messages: [{ role: 'user', content: userContent }]
+      },
+      { category: 'analyzer_analysis', location_id: locationId || null, meta: { scope: 'pulled', source: filterSource } }
+    );
     const textBlock = resp.content.find((b) => b.type === 'text');
     res.json({
       analysis: textBlock ? textBlock.text : '',
@@ -927,17 +939,20 @@ router.post('/generate-prompt-pulled', async (req, res) => {
       sampleText = samples.map((c, i) => `=== SAMPLE #${i + 1} (${c.source}, ${c.outcome}) ===\n${serializePulledConversation(c)}`).join('\n\n');
     }
 
-    const resp = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 8000,
-      system: `You are a prompt engineer rewriting an SMS bot system prompt. Apply the requested changes precisely while preserving the existing structure, tone rules, and JSON response format. Output ONLY the full revised prompt text with no markdown fences, no commentary, no preamble.`,
-      messages: [
-        {
-          role: 'user',
-          content: `CURRENT SYSTEM PROMPT:\n\n${base}\n\n---\n\nREQUESTED CHANGES:\n${change_description}\n\n---\n\nREAL CONVERSATION SAMPLES (prioritized: incomplete / drop-offs) to inform the rewrite:\n${sampleText || '(no samples available — rely solely on the requested changes)'}\n\n---\n\nRewrite the full system prompt with the requested changes applied. Preserve anything not asked to change.`
-        }
-      ]
-    });
+    const resp = await callAnthropic(
+      {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 8000,
+        system: `You are a prompt engineer rewriting an SMS bot system prompt. Apply the requested changes precisely while preserving the existing structure, tone rules, and JSON response format. Output ONLY the full revised prompt text with no markdown fences, no commentary, no preamble.`,
+        messages: [
+          {
+            role: 'user',
+            content: `CURRENT SYSTEM PROMPT:\n\n${base}\n\n---\n\nREQUESTED CHANGES:\n${change_description}\n\n---\n\nREAL CONVERSATION SAMPLES (prioritized: incomplete / drop-offs) to inform the rewrite:\n${sampleText || '(no samples available — rely solely on the requested changes)'}\n\n---\n\nRewrite the full system prompt with the requested changes applied. Preserve anything not asked to change.`
+          }
+        ]
+      },
+      { category: 'analyzer_prompt_gen', location_id: locationId || null, meta: { scope: 'pulled', source: source || 'all' } }
+    );
     const textBlock = resp.content.find((b) => b.type === 'text');
     res.json({
       generated_prompt: textBlock ? textBlock.text : '',

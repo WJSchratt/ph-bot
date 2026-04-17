@@ -1,16 +1,15 @@
 const express = require('express');
 const os = require('os');
 const axios = require('axios');
-const Anthropic = require('@anthropic-ai/sdk');
 
 const dc = require('../services/devConsole');
 const logger = require('../services/logger');
 const db = require('../db');
 const { buildSystemPrompt } = require('../prompts');
 const standardPrompt = require('../prompts/standard');
+const { callAnthropic } = require('../services/anthropic');
 
 const router = express.Router();
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-sonnet-4-20250514';
 
 // --- SQL + HTTP tool execution for Dev Console chat ----------------------
@@ -408,12 +407,23 @@ router.post('/chat', async (req, res) => {
     const sessionToken = req.sessionToken || null;
 
     for (let iter = 0; iter < MAX_TOOL_ITERATIONS + 1; iter++) {
-      const resp = await client.messages.create({
-        model: MODEL,
-        max_tokens: 4096,
-        system,
-        messages
-      });
+      const resp = await callAnthropic(
+        {
+          model: MODEL,
+          max_tokens: 4096,
+          system,
+          messages
+        },
+        {
+          category: 'dev_console',
+          location_id: null,
+          meta: {
+            endpoint: 'chat',
+            iteration: iter,
+            user: req.session?.username || null
+          }
+        }
+      );
       totalIn += resp.usage?.input_tokens || 0;
       totalOut += resp.usage?.output_tokens || 0;
 
@@ -497,12 +507,22 @@ router.post('/generate-changes', async (req, res) => {
     const ctx = await buildContextBundle();
     const system = buildDevSystemPrompt(ctx, files) + '\n\nFor THIS request: output ONLY the <<<CHANGES>>> JSON block (with a short explanatory paragraph above it). No other changes.';
 
-    const resp = await client.messages.create({
-      model: MODEL,
-      max_tokens: 4096,
-      system,
-      messages: [{ role: 'user', content: `Generate concrete code changes for: ${description}` }]
-    });
+    const resp = await callAnthropic(
+      {
+        model: MODEL,
+        max_tokens: 4096,
+        system,
+        messages: [{ role: 'user', content: `Generate concrete code changes for: ${description}` }]
+      },
+      {
+        category: 'dev_console',
+        location_id: null,
+        meta: {
+          endpoint: 'generate-changes',
+          user: req.session?.username || null
+        }
+      }
+    );
 
     const text = (resp.content.find((b) => b.type === 'text')?.text) || '';
     const changes = parseChangesBlock(text);

@@ -1,10 +1,8 @@
-const Anthropic = require('@anthropic-ai/sdk');
 const { buildSystemPrompt } = require('../prompts');
 const logger = require('./logger');
+const { callAnthropic } = require('./anthropic');
 
 const MODEL = 'claude-sonnet-4-20250514';
-
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 function extractJson(text) {
   if (!text) return null;
@@ -58,14 +56,24 @@ async function generateResponse(conversation, history, newUserMessage, contact_i
 
   let response;
   try {
-    response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 1024,
-      system: [
-        { type: 'text', text: system, cache_control: { type: 'ephemeral' } }
-      ],
-      messages
-    });
+    response = await callAnthropic(
+      {
+        model: MODEL,
+        max_tokens: 1024,
+        system: [
+          { type: 'text', text: system, cache_control: { type: 'ephemeral' } }
+        ],
+        messages
+      },
+      {
+        category: 'bot_response',
+        location_id: conversation?.location_id || null,
+        meta: {
+          conversation_id: conversation?.id || null,
+          contact_id: contact_id || conversation?.contact_id || null
+        }
+      }
+    );
   } catch (err) {
     logger.log('error', 'error', contact_id || null, 'Claude API error', { error: err.message });
     throw err;

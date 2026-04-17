@@ -426,7 +426,17 @@ textarea.form-input{resize:vertical;min-height:80px;}
       <div class="chart-wrap" style="height:190px;"><canvas id="ch-resp-outcome"></canvas></div>
     </div>
   </div>
-  <div class="grid c7" style="margin-bottom:13px;" id="cost-cards"></div>
+  <div class="grid c4" style="margin-bottom:13px;" id="cost-cards"></div>
+  <div class="grid c2" style="margin-bottom:13px;">
+    <div class="card">
+      <div class="card-title">Anthropic API — Cost by Category</div>
+      <div id="anthropic-breakdown" style="margin-top:6px;"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Anthropic API — Daily Spend (stacked)</div>
+      <div class="chart-wrap" style="height:190px;"><canvas id="ch-anthropic-daily"></canvas></div>
+    </div>
+  </div>
   <div class="grid c2" style="margin-bottom:13px;">
     <div class="card">
       <div class="card-title">Appointments by Type</div>
@@ -789,27 +799,21 @@ textarea.form-input{resize:vertical;min-height:80px;}
       <!-- Cost Configuration -->
       <div class="settings-panel" id="st-cost">
         <div class="sh"><span class="sh-title">Cost Configuration</span><div class="sh-line"></div></div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:14px;">Used to calculate Overview cost cards and per-subaccount cost column.</div>
-        <div style="font-size:10px;letter-spacing:1.5px;color:var(--amber);font-weight:700;margin-bottom:6px;">SIGNAL HOUSE CARRIER (VIA GHL LC PHONE)</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:14px;">Signal House is the only carrier we pay (GHL passes the cost through). Anthropic pricing is used to compute <code>cost_usd</code> per row in <code>anthropic_usage_log</code> at log time.</div>
+        <div style="font-size:10px;letter-spacing:1.5px;color:var(--amber);font-weight:700;margin-bottom:6px;">SIGNAL HOUSE SMS (date range is prorated from monthly base)</div>
         <div class="grid c2">
-          <div class="form-group"><label class="form-label">SMS / Segment (Outbound)</label><input class="form-input" id="cost-out-seg" type="number" step="0.0001"></div>
-          <div class="form-group"><label class="form-label">SMS / Segment (Inbound)</label><input class="form-input" id="cost-in-seg" type="number" step="0.0001"></div>
-          <div class="form-group"><label class="form-label">MMS / Segment (Outbound)</label><input class="form-input" id="cost-mms-out" type="number" step="0.0001"></div>
-          <div class="form-group"><label class="form-label">MMS / Segment (Inbound)</label><input class="form-input" id="cost-mms-in" type="number" step="0.0001"></div>
+          <div class="form-group"><label class="form-label">Base Monthly $</label><input class="form-input" id="cost-sh-base" type="number" step="0.01"></div>
+          <div class="form-group"><label class="form-label">Base Segments Included / Month</label><input class="form-input" id="cost-sh-segs" type="number"></div>
+          <div class="form-group"><label class="form-label">Overage $ / Segment</label><input class="form-input" id="cost-sh-overage" type="number" step="0.0001"></div>
+          <div class="form-group"><label class="form-label">MMS $ / Segment</label><input class="form-input" id="cost-sh-mms" type="number" step="0.0001"></div>
         </div>
-        <div style="font-size:10px;letter-spacing:1.5px;color:var(--amber);font-weight:700;margin:14px 0 6px;">AI + WEBHOOK + EMAIL</div>
+        <div style="font-size:10px;letter-spacing:1.5px;color:var(--amber);font-weight:700;margin:14px 0 6px;">ANTHROPIC API PRICING ($/MILLION TOKENS)</div>
         <div class="grid c2">
-          <div class="form-group"><label class="form-label">Input Token Cost / 1M</label><input class="form-input" id="cost-in-tok" type="number" step="0.01"></div>
-          <div class="form-group"><label class="form-label">Output Token Cost / 1M</label><input class="form-input" id="cost-out-tok" type="number" step="0.01"></div>
-          <div class="form-group"><label class="form-label">GHL Webhook Free Tier / Month</label><input class="form-input" id="cost-wh-free" type="number"></div>
-          <div class="form-group"><label class="form-label">Webhook Cost / Event (after free tier)</label><input class="form-input" id="cost-wh-cost" type="number" step="0.001"></div>
-          <div class="form-group"><label class="form-label">Email Notification / Send</label><input class="form-input" id="cost-email" type="number" step="0.000001"></div>
+          <div class="form-group"><label class="form-label">Input Tokens / 1M</label><input class="form-input" id="cost-in-tok" type="number" step="0.01"></div>
+          <div class="form-group"><label class="form-label">Output Tokens / 1M</label><input class="form-input" id="cost-out-tok" type="number" step="0.01"></div>
+          <div class="form-group"><label class="form-label">Cache Read / 1M</label><input class="form-input" id="cost-cache-read" type="number" step="0.01"></div>
+          <div class="form-group"><label class="form-label">Cache Write / 1M</label><input class="form-input" id="cost-cache-write" type="number" step="0.01"></div>
         </div>
-        <div style="font-size:10px;letter-spacing:1.5px;color:var(--amber);font-weight:700;margin:14px 0 6px;">BOTPRESS COSTS</div>
-        <div class="grid c2">
-          <div class="form-group"><label class="form-label">BotPress AI Cost per Message</label><input class="form-input" id="cost-bp-msg" type="number" step="0.0001"></div>
-        </div>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Average cost per BotPress message. Calculate from BotPress dashboard: total monthly AI spend &divide; total messages.</div>
         <button class="btn pri" onclick="saveCostConfig()" style="margin-top:12px;">Save Cost Config</button>
       </div>
       <!-- User Management -->
@@ -902,15 +906,16 @@ textarea.form-input{resize:vertical;min-height:80px;}
     <div class="formula">Admin Saved = Total Contacts Engaged x 15 seconds / 3600</div>
 
     <h2>5. Cost Metrics</h2>
-    <h3>5.1 AI Token Cost</h3>
-    <div class="formula">Token Cost = (Input Tokens x Input Rate) + (Output Tokens x Output Rate)</div>
-    <p>Pull token usage from Anthropic API response headers. Store per conversation_id. Aggregate by subaccount + timeframe.</p>
+    <h3>5.1 Anthropic API Cost (per-call, per-category)</h3>
+    <div class="formula">cost_usd = (input x $3 + output x $15 + cache_write x $3.75 + cache_read x $0.30) / 1,000,000</div>
+    <p>Every Claude call goes through <code>src/services/anthropic.js</code> which logs to <code>anthropic_usage_log</code> tagged with a category (bot_response, qc_sim_score, analyzer_analysis, dev_console, etc.). Dashboard aggregates SUM(cost_usd) by category and by location_id.</p>
 
-    <h3>5.2 SMS Carrier Cost</h3>
-    <div class="formula">Carrier Cost = Segments Sent x $0.0075 per segment</div>
+    <h3>5.2 Signal House SMS (prorated base + overage + MMS)</h3>
+    <div class="formula">base = (days_in_range / 30) x $50 · overage = max(0, sms_segments - prorated_included) x $0.01 · mms = mms_segments x $0.04</div>
+    <p>Base plan: $50/mo for 7,500 segments. Overage $0.01/seg. MMS $0.04/seg. GHL does not bill us separately — Signal House is the only carrier.</p>
 
     <h3>5.3 Cost Per Message (Blended)</h3>
-    <div class="formula">Cost Per Message = (Total AI Cost + Total Carrier Cost) / Total Messages Sent</div>
+    <div class="formula">Cost Per Message = (Anthropic Total + Signal House Total) / Total Messages Sent</div>
 
     <h3>5.4 Avg Segments Per Message</h3>
     <div class="formula">Avg Segments = Sum of All Segment Counts / Total Messages Sent</div>
@@ -1249,18 +1254,20 @@ async function loadDashboard() {
     kpiCard('AI Accuracy (QC)', '---', 'Placeholder', 'p') +
     kpiCard('Time Saved', fmtNum(k.hours_saved, 0) + ' hrs', 'This period', 'g', true);
 
-  // Cost cards — AI + SMS + MMS + Webhook + Total + Cost/Message
+  // Cost cards — Signal House SMS + Anthropic API + Total + Cost/Message.
+  // Removed: GHL, webhook, email, BotPress (Signal House is the only carrier
+  // charging us; real Anthropic spend comes from anthropic_usage_log).
   const costEl = document.getElementById('cost-cards');
   const smsSeg = (k.sms_segments && k.sms_segments.total) || 0;
   const mmsSeg = (k.mms_segments && k.mms_segments.total) || 0;
+  const cb = k.carrier_breakdown || {};
   costEl.innerHTML =
-    '<div class="card"><div class="card-title">AI Token Cost</div><div class="card-value">' + fmtDollar(k.ai_cost, 2) + '</div><div class="card-sub">Claude · In ' + fmtNum(k.total_input_tokens) + ' / Out ' + fmtNum(k.total_output_tokens) + '</div></div>' +
-    '<div class="card"><div class="card-title">BotPress AI Cost</div><div class="card-value">' + fmtDollar(k.botpress_ai_cost || 0, 2) + '</div><div class="card-sub">' + fmtNum(k.botpress_messages || 0) + ' outbound messages</div></div>' +
-    '<div class="card"><div class="card-title">SMS Carrier Cost</div><div class="card-value">' + fmtDollar(k.sms_cost || 0, 2) + '</div><div class="card-sub">' + fmtNum(smsSeg) + ' segments · Signal House</div></div>' +
-    '<div class="card"><div class="card-title">MMS Carrier Cost</div><div class="card-value">' + fmtDollar(k.mms_cost || 0, 2) + '</div><div class="card-sub">' + fmtNum(mmsSeg) + ' segments · Signal House</div></div>' +
-    '<div class="card"><div class="card-title">Webhook + Email</div><div class="card-value">' + fmtDollar((k.webhook_cost || 0) + (k.email_cost || 0), 2) + '</div><div class="card-sub">' + fmtNum(k.webhook_billable_events || 0) + ' webhooks · ' + fmtNum(k.email_sends || 0) + ' emails</div></div>' +
-    '<div class="card"><div class="card-title">Total Cost</div><div class="card-value">' + fmtDollar(k.total_cost || ((k.ai_cost || 0) + (k.botpress_ai_cost || 0) + (k.carrier_cost || 0) + (k.webhook_cost || 0) + (k.email_cost || 0)), 2) + '</div><div class="card-sub">Claude + BP + SMS + MMS + WH + Email</div></div>' +
-    '<div class="card"><div class="card-title">Cost / Message</div><div class="card-value">' + fmtDollar(k.cost_per_message, 4) + '</div><div class="card-sub">Blended</div></div>';
+    '<div class="card"><div class="card-title">Anthropic API</div><div class="card-value">' + fmtDollar(k.ai_cost || 0, 2) + '</div><div class="card-sub">' + fmtNum(k.ai_calls || 0) + ' calls · In ' + fmtNum(k.total_input_tokens) + ' / Out ' + fmtNum(k.total_output_tokens) + '</div></div>' +
+    '<div class="card"><div class="card-title">Signal House SMS</div><div class="card-value">' + fmtDollar(k.carrier_cost || 0, 2) + '</div><div class="card-sub">Base ' + fmtDollar(cb.base_cost || 0, 2) + ' · Overage ' + fmtNum(cb.overage_segments || 0) + ' seg ' + fmtDollar(cb.overage_cost || 0, 2) + ' · MMS ' + fmtNum(mmsSeg) + ' ' + fmtDollar(cb.mms_cost || 0, 2) + '</div></div>' +
+    '<div class="card"><div class="card-title">Total Cost</div><div class="card-value">' + fmtDollar(k.total_cost || 0, 2) + '</div><div class="card-sub">Anthropic + Signal House</div></div>' +
+    '<div class="card"><div class="card-title">Cost / Message</div><div class="card-value">' + fmtDollar(k.cost_per_message || 0, 4) + '</div><div class="card-sub">Blended, per SMS in+out</div></div>';
+
+  renderAnthropicBreakdown(data.anthropic_breakdown || { total_cost: 0, call_count: 0, by_category: [], daily: [] });
 
   // Trends chart
   if (data.trends && data.trends.length) {
@@ -1320,6 +1327,85 @@ function renderAppointmentsByType(list, kpis) {
 
 function kpiCard(title, value, sub, color, small) {
   return '<div class="card kpi-l ' + (color || '') + '"><div class="card-title">' + title + '</div><div class="card-value' + (small ? ' sm' : '') + '">' + value + '</div>' + (sub ? '<div class="card-sub">' + sub + '</div>' : '') + '</div>';
+}
+
+// Render Anthropic API category breakdown table + stacked daily spend chart.
+const CATEGORY_COLORS = {
+  bot_response:          '#00d4ff',
+  word_track_clustering: '#9b7bff',
+  qc_sim_score:          '#ffb547',
+  qc_generate_samples:   '#ffd347',
+  qc_batch_apply:        '#ff8b47',
+  analyzer_analysis:     '#10d98a',
+  analyzer_prompt_gen:   '#66e0b2',
+  dev_console:           '#ff4560',
+  sandbox_sim:           '#a0a0a0'
+};
+const CATEGORY_LABELS = {
+  bot_response:          'Bot Response (customer SMS)',
+  word_track_clustering: 'Word Track Clustering',
+  qc_sim_score:          'QC Sim + Score',
+  qc_generate_samples:   'QC Sample Generation',
+  qc_batch_apply:        'QC Batch Apply',
+  analyzer_analysis:     'Analyzer — Analysis',
+  analyzer_prompt_gen:   'Analyzer — Prompt Gen',
+  dev_console:           'Dev Console',
+  sandbox_sim:           'Sandbox Sim'
+};
+
+function renderAnthropicBreakdown(bd) {
+  const el = document.getElementById('anthropic-breakdown');
+  if (el) {
+    const total = bd.total_cost || 0;
+    const rows = (bd.by_category || []).map(r => {
+      const label = CATEGORY_LABELS[r.category] || r.category;
+      const color = CATEGORY_COLORS[r.category] || '#888';
+      const pct = total ? (r.cost_usd / total) * 100 : 0;
+      return '<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;">' +
+        '<span style="width:8px;height:8px;background:' + color + ';display:inline-block;border-radius:2px;"></span>' +
+        '<span style="flex:1;">' + esc(label) + '</span>' +
+        '<span style="color:var(--muted);font-family:\'JetBrains Mono\';">' + fmtNum(r.call_count) + ' calls</span>' +
+        '<span class="hl" style="min-width:70px;text-align:right;">' + fmtDollar(r.cost_usd, 4) + '</span>' +
+        '<span style="color:var(--muted);min-width:42px;text-align:right;">' + pct.toFixed(1) + '%</span>' +
+      '</div>';
+    }).join('');
+    el.innerHTML = rows || '<div style="color:var(--muted);font-size:12px;">No Anthropic calls logged in this window yet.</div>';
+  }
+
+  renderAnthropicDailyChart(bd.daily || []);
+}
+
+function renderAnthropicDailyChart(daily) {
+  const canvas = document.getElementById('ch-anthropic-daily');
+  if (!canvas) return;
+  // Pivot: rows grouped by date → one dataset per category.
+  const dateSet = new Set();
+  const catMap = {};
+  daily.forEach(d => {
+    dateSet.add(d.date);
+    if (!catMap[d.category]) catMap[d.category] = {};
+    catMap[d.category][d.date] = (catMap[d.category][d.date] || 0) + d.cost_usd;
+  });
+  const dates = Array.from(dateSet).sort();
+  const datasets = Object.keys(catMap).map(cat => ({
+    label: CATEGORY_LABELS[cat] || cat,
+    data: dates.map(d => catMap[cat][d] || 0),
+    backgroundColor: CATEGORY_COLORS[cat] || '#888',
+    borderWidth: 0
+  }));
+
+  if (chartInstances.anthropicDaily) chartInstances.anthropicDaily.destroy();
+  chartInstances.anthropicDaily = new Chart(canvas, {
+    type: 'bar',
+    data: { labels: dates.map(d => d ? d.slice(5) : ''), datasets },
+    options: Object.assign({}, chartOpts(), {
+      scales: {
+        x: { stacked: true, ticks: { color: '#888', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' } },
+        y: { stacked: true, ticks: { color: '#888', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' } }
+      },
+      plugins: { legend: { display: true, position: 'bottom', labels: { color: '#aaa', font: { size: 10 }, boxWidth: 10 } } }
+    })
+  });
 }
 
 function renderTrendsChart(trends) {
@@ -1821,16 +1907,14 @@ async function loadSettingsPanel(panelId) {
     settingsLoaded.cost = true;
     const data = await api('/api/settings/cost_config');
     if (data && data.settings) {
-      document.getElementById('cost-out-seg').value = data.settings.carrier_cost_per_segment_outbound || '0.01';
-      document.getElementById('cost-in-seg').value = data.settings.carrier_cost_per_segment_inbound || '0.01';
-      document.getElementById('cost-mms-out').value = data.settings.carrier_cost_mms_outbound || '0.04';
-      document.getElementById('cost-mms-in').value = data.settings.carrier_cost_mms_inbound || '0.04';
+      document.getElementById('cost-sh-base').value = data.settings.signal_house_base_monthly || '50';
+      document.getElementById('cost-sh-segs').value = data.settings.signal_house_base_segments || '7500';
+      document.getElementById('cost-sh-overage').value = data.settings.signal_house_overage_per_seg || '0.01';
+      document.getElementById('cost-sh-mms').value = data.settings.signal_house_mms_per_seg || '0.04';
       document.getElementById('cost-in-tok').value = data.settings.input_token_cost_per_million || '3';
       document.getElementById('cost-out-tok').value = data.settings.output_token_cost_per_million || '15';
-      document.getElementById('cost-wh-free').value = data.settings.webhook_free_tier_per_month || '100';
-      document.getElementById('cost-wh-cost').value = data.settings.webhook_cost_per_event || '0.01';
-      document.getElementById('cost-email').value = data.settings.email_cost_per_send || '0.000675';
-      document.getElementById('cost-bp-msg').value = data.settings.botpress_ai_cost_per_message || '0.0186';
+      document.getElementById('cost-cache-read').value = data.settings.cache_read_cost_per_million || '0.30';
+      document.getElementById('cost-cache-write').value = data.settings.cache_write_cost_per_million || '3.75';
     }
   }
   if (panelId === 'st-users' && !settingsLoaded.users) {
@@ -2060,7 +2144,7 @@ function renderWeeklyCard(sub, d) {
     '</div>' +
     '<div class="divider"></div>' +
     '<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);"><span>Cost this week</span><span style="color:#fff;">' + fmtDollar(d.total_cost) + '</span></div>' +
-    '<div style="font-size:10px;color:var(--muted);">Claude ' + fmtDollar(d.ai_cost) + ' · BP ' + fmtDollar(d.botpress_ai_cost || 0) + ' · SMS ' + fmtDollar(d.sms_cost || 0) + ' · MMS ' + fmtDollar(d.mms_cost || 0) + ' · WH ' + fmtDollar(d.webhook_cost || 0) + ' · Email ' + fmtDollar(d.email_cost || 0, 4) + '</div>' +
+    '<div style="font-size:10px;color:var(--muted);">Anthropic ' + fmtDollar(d.ai_cost) + ' · Signal House ' + fmtDollar(d.carrier_cost || 0) + '</div>' +
     (appts ? '<div style="margin-top:10px;"><div style="font-size:9px;letter-spacing:1.5px;color:var(--muted);">BOOKED APPOINTMENTS</div><ul style="margin-top:5px;padding-left:20px;font-size:12px;">' + appts + '</ul></div>' : '') +
   '</div>';
 }
@@ -2201,16 +2285,14 @@ async function reviewAutoPopulate() {
 // ========== COST CONFIG ==========
 async function saveCostConfig() {
   const body = {
-    carrier_cost_per_segment_outbound: document.getElementById('cost-out-seg').value,
-    carrier_cost_per_segment_inbound: document.getElementById('cost-in-seg').value,
-    carrier_cost_mms_outbound: document.getElementById('cost-mms-out').value,
-    carrier_cost_mms_inbound: document.getElementById('cost-mms-in').value,
+    signal_house_base_monthly: document.getElementById('cost-sh-base').value,
+    signal_house_base_segments: document.getElementById('cost-sh-segs').value,
+    signal_house_overage_per_seg: document.getElementById('cost-sh-overage').value,
+    signal_house_mms_per_seg: document.getElementById('cost-sh-mms').value,
     input_token_cost_per_million: document.getElementById('cost-in-tok').value,
     output_token_cost_per_million: document.getElementById('cost-out-tok').value,
-    webhook_free_tier_per_month: document.getElementById('cost-wh-free').value,
-    webhook_cost_per_event: document.getElementById('cost-wh-cost').value,
-    email_cost_per_send: document.getElementById('cost-email').value,
-    botpress_ai_cost_per_message: document.getElementById('cost-bp-msg').value
+    cache_read_cost_per_million: document.getElementById('cost-cache-read').value,
+    cache_write_cost_per_million: document.getElementById('cost-cache-write').value
   };
   const res = await api('/api/settings/cost_config', {
     method: 'PUT',

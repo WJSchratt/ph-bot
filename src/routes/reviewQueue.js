@@ -1,10 +1,8 @@
 const express = require('express');
-const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../db');
 const logger = require('../services/logger');
+const { callAnthropic } = require('../services/anthropic');
 const router = express.Router();
-
-const reviewClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const NEGATIVE_RE = /\b(stop|unsubscribe|remove me|take me off|leave me alone|fuck|shit|damn|bitch|asshole|pissed|fuck off)\b/i;
 function isNegativeReply(text) {
@@ -182,8 +180,9 @@ router.post('/review-queue/:id/generate-alternatives', async (req, res) => {
     const item = q.rows[0];
     if (!item) return res.status(404).json({ error: 'not found' });
 
-    // Pull up to 6 prior messages for context
+    // Pull up to 6 prior messages for context + conversation's location_id.
     let context = '';
+    let locationId = null;
     if (item.conversation_id) {
       const msgsQ = await db.query(
         `SELECT direction, content, message_type FROM messages WHERE conversation_id = $1 AND created_at <= (SELECT created_at FROM messages WHERE id = $2) ORDER BY created_at DESC LIMIT 6`,
@@ -191,15 +190,24 @@ router.post('/review-queue/:id/generate-alternatives', async (req, res) => {
       );
       const ctxLines = msgsQ.rows.reverse().map((m) => `${m.direction === 'outbound' ? 'BOT' : 'LEAD'}: ${m.content}`).join('\n');
       context = ctxLines;
+      const locQ = await db.query(`SELECT location_id FROM conversations WHERE id = $1`, [item.conversation_id]);
+      locationId = locQ.rows[0]?.location_id || null;
     }
 
     const system = `You are improving a problematic SMS bot message. The current message triggered a negative or drop-off reply. Produce 3 alternative replacements that might have worked better — short, lowercase, conversational (match the bot's tone). Output ONLY valid JSON: { "alternatives": [{"text": "...", "reason": "why this is better"}, ...] }`;
-    const resp = await reviewClient.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1200,
-      system,
-      messages: [{ role: 'user', content: `Prior context:\n${context || '(none)'}\n\nCurrent (problematic) bot message:\n"${item.current_text}"\n\nWhy it was flagged: ${item.ai_reason || 'unknown'}\n\nMessage type: ${item.message_type || 'general'}` }]
-    });
+    const resp = await callAnthropic(
+      {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1200,
+        system,
+        messages: [{ role: 'user', content: `Prior context:\n${context || '(none)'}\n\nCurrent (problematic) bot message:\n"${item.current_text}"\n\nWhy it was flagged: ${item.ai_reason || 'unknown'}\n\nMessage type: ${item.message_type || 'general'}` }]
+      },
+      {
+        category: 'qc_generate_samples',
+        location_id: locationId,
+        meta: { review_queue_id: id, conversation_id: item.conversation_id || null }
+      }
+    );
     const text = (resp.content.find((b) => b.type === 'text')?.text || '').trim();
     let parsed = null;
     try {
