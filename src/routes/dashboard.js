@@ -216,23 +216,34 @@ router.get('/dashboard', async (req, res) => {
 
     // --- 4) Signal House carrier cost (agency pool, tiered, pro-rata) ---
     //
-    // Pull per-(location, calendar-month) segment counts from the messages
-    // table (segment counts live on rows there, set at send-time). The 7,500
-    // pool applies to agency-wide monthly SMS totals; MMS is a flat $0.04/seg
-    // with no pool. Note: `messages` captures Claude bot sends; Botpress
-    // drip sends live in ghl_messages but don't have segment counts — they
-    // don't contribute to the pool calc here. Acceptable for now since
-    // Botpress is being decommissioned.
+    // Source: ghl_messages — this is the archive of EVERY message that flowed
+    // through GHL Phone (Botpress drips, GHL workflow sends, manual agent
+    // replies, Claude bot), which is what Signal House actually bills us for.
+    // The local `messages` table only has Claude bot sends, so using it here
+    // badly under-counted (Jeremiah saw $0.39 for an agency with 1,000+
+    // real sends because only the handful of Claude test sends showed up).
+    //
+    // ghl_messages has no `segments` column, so we infer from content length:
+    // SMS = ceil(len/160) segments. MMS = 1 per message (Signal House bills
+    // per MMS). Both inbound and outbound count — the carrier charges for
+    // both directions.
     const shBaseParams = [daysInt];
     let shLocFilter = '';
     if (locIds.length) { shBaseParams.push(locIds); shLocFilter = ` AND location_id = ANY($${shBaseParams.length})`; }
     const shRowsQ = await db.query(
       `SELECT location_id,
               date_trunc('month', created_at)::date AS month_start,
-              COALESCE(SUM(segments) FILTER (WHERE COALESCE(message_type,'') NOT ILIKE '%mms%'), 0)::int AS sms_segments,
-              COALESCE(SUM(segments) FILTER (WHERE COALESCE(message_type,'') ILIKE '%mms%'), 0)::int AS mms_segments
-         FROM messages
+              COALESCE(SUM(
+                CASE WHEN COALESCE(message_type,'') ILIKE '%mms%' THEN 0
+                     ELSE GREATEST(1, CEIL(LENGTH(COALESCE(content, ''))::float / 160))
+                END
+              ), 0)::int AS sms_segments,
+              COALESCE(SUM(
+                CASE WHEN COALESCE(message_type,'') ILIKE '%mms%' THEN 1 ELSE 0 END
+              ), 0)::int AS mms_segments
+         FROM ghl_messages
         WHERE created_at >= NOW() - ($1 || ' days')::interval
+          AND COALESCE(content, '') <> ''
           ${shLocFilter}
         GROUP BY 1, 2`,
       shBaseParams
@@ -242,11 +253,33 @@ router.get('/dashboard', async (req, res) => {
     const agencyCarrier = shAlloc.agency;
     const carrierCost = Math.round(agencyCarrier.total_cost * 10000) / 10000;
 
-    // Expose these for KPI cards (replaces the old per-message-type split).
-    const smsOutSeg = mg.sms_out_segments || 0;
-    const smsInSeg = mg.sms_in_segments || 0;
-    const mmsOutSeg = mg.mms_out_segments || 0;
-    const mmsInSeg = mg.mms_in_segments || 0;
+    // Per-direction segment split for the KPI card — also from ghl_messages
+    // so it stays consistent with the total above.
+    const shDirQ = await db.query(
+      `SELECT
+         COALESCE(SUM(
+           CASE WHEN direction = 'outbound' AND COALESCE(message_type,'') NOT ILIKE '%mms%'
+                THEN GREATEST(1, CEIL(LENGTH(COALESCE(content, ''))::float / 160))
+                ELSE 0 END
+         ), 0)::int AS sms_out,
+         COALESCE(SUM(
+           CASE WHEN direction = 'inbound' AND COALESCE(message_type,'') NOT ILIKE '%mms%'
+                THEN GREATEST(1, CEIL(LENGTH(COALESCE(content, ''))::float / 160))
+                ELSE 0 END
+         ), 0)::int AS sms_in,
+         COALESCE(SUM(CASE WHEN direction = 'outbound' AND COALESCE(message_type,'') ILIKE '%mms%' THEN 1 ELSE 0 END), 0)::int AS mms_out,
+         COALESCE(SUM(CASE WHEN direction = 'inbound'  AND COALESCE(message_type,'') ILIKE '%mms%' THEN 1 ELSE 0 END), 0)::int AS mms_in
+       FROM ghl_messages
+       WHERE created_at >= NOW() - ($1 || ' days')::interval
+         AND COALESCE(content, '') <> ''
+         ${shLocFilter}`,
+      shBaseParams
+    );
+    const shDir = shDirQ.rows[0] || { sms_out: 0, sms_in: 0, mms_out: 0, mms_in: 0 };
+    const smsOutSeg = Number(shDir.sms_out) || 0;
+    const smsInSeg = Number(shDir.sms_in) || 0;
+    const mmsOutSeg = Number(shDir.mms_out) || 0;
+    const mmsInSeg = Number(shDir.mms_in) || 0;
     const totalSmsSegments = agencyCarrier.sms_segments;
     const totalMmsSegments = agencyCarrier.mms_segments;
 
@@ -367,13 +400,19 @@ router.get('/dashboard', async (req, res) => {
          GROUP BY location_id
        ),
        msg_agg AS (
+         -- Per-sub segment counts pulled from ghl_messages (Signal House's
+         -- actual billing source). Segments inferred from content length;
+         -- MMS counted per-message.
          SELECT location_id,
-           COALESCE(SUM(segments) FILTER (WHERE direction = 'outbound' AND COALESCE(message_type, '') NOT ILIKE '%mms%'), 0)::int AS sms_out,
-           COALESCE(SUM(segments) FILTER (WHERE direction = 'inbound'  AND COALESCE(message_type, '') NOT ILIKE '%mms%'), 0)::int AS sms_in,
-           COALESCE(SUM(segments) FILTER (WHERE direction = 'outbound' AND COALESCE(message_type, '') ILIKE '%mms%'), 0)::int AS mms_out,
-           COALESCE(SUM(segments) FILTER (WHERE direction = 'inbound'  AND COALESCE(message_type, '') ILIKE '%mms%'), 0)::int AS mms_in
-         FROM messages
+           COALESCE(SUM(CASE WHEN direction = 'outbound' AND COALESCE(message_type,'') NOT ILIKE '%mms%'
+                             THEN GREATEST(1, CEIL(LENGTH(COALESCE(content,''))::float / 160)) ELSE 0 END), 0)::int AS sms_out,
+           COALESCE(SUM(CASE WHEN direction = 'inbound'  AND COALESCE(message_type,'') NOT ILIKE '%mms%'
+                             THEN GREATEST(1, CEIL(LENGTH(COALESCE(content,''))::float / 160)) ELSE 0 END), 0)::int AS sms_in,
+           COALESCE(SUM(CASE WHEN direction = 'outbound' AND COALESCE(message_type,'') ILIKE '%mms%' THEN 1 ELSE 0 END), 0)::int AS mms_out,
+           COALESCE(SUM(CASE WHEN direction = 'inbound'  AND COALESCE(message_type,'') ILIKE '%mms%' THEN 1 ELSE 0 END), 0)::int AS mms_in
+         FROM ghl_messages
          WHERE created_at >= NOW() - ($1 || ' days')::interval
+           AND COALESCE(content, '') <> ''
          GROUP BY location_id
        ),
        usage_agg AS (
