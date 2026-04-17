@@ -476,6 +476,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
       <thead id="wt-stages-thead"><tr><th>Workflow</th><th>Convs</th><th>Sends</th><th>Replies</th><th>Reply %</th><th>Avg Reply</th><th>Bookings</th><th>Booking %</th><th>Opt-Outs</th><th>Opt-Out %</th><th>Drop-Off %</th></tr></thead>
       <tbody id="wt-stages-tbody"></tbody>
     </table>
+    <div id="wt-pagination"></div>
   </div>
   <div id="wt-stage-detail" style="margin-top:14px;"></div>
 </div>
@@ -1555,10 +1556,37 @@ function chartOpts() {
 }
 
 // ========== WORDTRACKS (two-layer: workflows → positions → clusters) ==========
-let wtView = { level: 'workflows', workflowId: null, workflowLabel: null };
+let wtView = { level: 'workflows', workflowId: null, workflowLabel: null, page: 1 };
+const WT_PAGE_SIZE = 10;
+
+// Render-time humanization of kebab-case cluster labels. Keep the slug in
+// the DB for stability; this is cosmetic only.
+// "mp-ai-tool-intro-opener" → "MP AI Tool Intro"
+// "mp-past-request-followup-opener" → "MP Past Request Followup"
+const WT_ACRONYMS = new Set(['mp','ai','ca','nv','tx','fl','oh','nc','pa','ny','az','mi','ga','dnc','ghl','fex','aca','qc','mms','sms','url','pif','wfg','nm','llc','crm','dob']);
+const WT_STRIP_SUFFIXES = ['-opener'];
+function humanizeLabel(slug) {
+  if (!slug || typeof slug !== 'string') return '';
+  let s = slug.trim();
+  if (!s || s === 'unlabeled') return s;
+  for (const suf of WT_STRIP_SUFFIXES) {
+    if (s.toLowerCase().endsWith(suf)) s = s.slice(0, -suf.length);
+  }
+  return s.split('-').filter(Boolean).map(w => {
+    const low = w.toLowerCase();
+    if (WT_ACRONYMS.has(low)) return low.toUpperCase();
+    return low.charAt(0).toUpperCase() + low.slice(1);
+  }).join(' ');
+}
+function displayLabel(rawLabel, fallbackId, kind) {
+  if (!rawLabel || rawLabel === 'unlabeled') {
+    return (kind || 'Cluster') + ' #' + fallbackId + ' (unlabeled)';
+  }
+  return humanizeLabel(rawLabel);
+}
 
 function loadWordtracks() {
-  wtView = { level: 'workflows', workflowId: null, workflowLabel: null };
+  wtView = { level: 'workflows', workflowId: null, workflowLabel: null, page: 1 };
   renderWtView();
 }
 
@@ -1566,6 +1594,23 @@ async function renderWtView() {
   if (wtView.level === 'workflows') return renderWtWorkflows();
   if (wtView.level === 'workflow') return renderWtWorkflowDetail(wtView.workflowId);
 }
+
+// Simple prev/next pagination controls. Renders into a target <div>.
+function renderWtPagination(targetId, page, totalPages, onPageChange) {
+  const el = document.getElementById(targetId);
+  if (!el) return;
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+  const prevDisabled = page <= 1;
+  const nextDisabled = page >= totalPages;
+  el.innerHTML =
+    '<div style="display:flex;gap:10px;align-items:center;justify-content:center;padding:12px 8px;font-size:12px;color:var(--muted);">' +
+      '<button class="btn-sm" ' + (prevDisabled ? 'disabled style="opacity:0.4;cursor:not-allowed;"' : 'onclick="' + onPageChange + '(' + (page - 1) + ')"') + '>&laquo; Prev</button>' +
+      '<span>Page <strong style="color:var(--cyan);">' + page + '</strong> of ' + totalPages + '</span>' +
+      '<button class="btn-sm" ' + (nextDisabled ? 'disabled style="opacity:0.4;cursor:not-allowed;"' : 'onclick="' + onPageChange + '(' + (page + 1) + ')"') + '>Next &raquo;</button>' +
+    '</div>';
+}
+function wtGotoWorkflowPage(p) { wtView.page = p; renderWtWorkflows(); }
+function wtGotoWorkflowDetailPage(p) { wtView.page = p; renderWtWorkflowDetail(wtView.workflowId); }
 
 async function renderWtWorkflows() {
   document.getElementById('wt-breadcrumb').innerHTML = '<strong>All Workflows</strong>';
@@ -1576,14 +1621,23 @@ async function renderWtWorkflows() {
   const data = await api('/api/wordtracks/workflows?' + params);
   const tbody = document.getElementById('wt-stages-tbody');
   tbody.innerHTML = '';
+  const pagerEl = document.getElementById('wt-pagination');
+  if (pagerEl) pagerEl.innerHTML = '';
   if (!data || !(data.workflows || []).length) {
     tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:30px;color:var(--muted);">No workflows clustered yet — click "Recluster now" or <a href="javascript:showWtDiag()" style="color:var(--cyan);">see diagnostic</a>.</td></tr>';
     const det = document.getElementById('wt-stage-detail');
     if (det) det.innerHTML = '';
     return;
   }
-  (data.workflows || []).forEach(w => {
-    const label = w.label && w.label !== 'unlabeled' ? w.label : ('workflow #' + w.id + ' (unlabeled)');
+  const all = data.workflows || [];
+  const totalPages = Math.max(1, Math.ceil(all.length / WT_PAGE_SIZE));
+  if (wtView.page > totalPages) wtView.page = totalPages;
+  const startIdx = (wtView.page - 1) * WT_PAGE_SIZE;
+  const pageRows = all.slice(startIdx, startIdx + WT_PAGE_SIZE);
+
+  pageRows.forEach(w => {
+    const rawLabel = w.label || 'unlabeled';
+    const label = displayLabel(rawLabel, w.id, 'Workflow');
     const avg = w.avg_reply_seconds ? (Math.round(w.avg_reply_seconds) + 's') : '---';
     tbody.innerHTML += '<tr style="cursor:pointer;" onclick="drillWtWorkflow(' + w.id + ', ' + JSON.stringify(label).replace(/"/g, '&quot;') + ')">' +
       '<td><div style="font-weight:600;">' + esc(label) + '</div>' +
@@ -1601,17 +1655,18 @@ async function renderWtWorkflows() {
       '<td style="color:var(--amber);">' + fmtPct(w.drop_off_rate) + '</td>' +
     '</tr>';
   });
+  renderWtPagination('wt-pagination', wtView.page, totalPages, 'wtGotoWorkflowPage');
   const det = document.getElementById('wt-stage-detail');
   if (det) det.innerHTML = '';
 }
 
 async function drillWtWorkflow(id, label) {
-  wtView = { level: 'workflow', workflowId: id, workflowLabel: label };
+  wtView = { level: 'workflow', workflowId: id, workflowLabel: label, page: 1 };
   renderWtWorkflowDetail(id);
 }
 
 function backToWorkflows() {
-  wtView = { level: 'workflows', workflowId: null, workflowLabel: null };
+  wtView = { level: 'workflows', workflowId: null, workflowLabel: null, page: 1 };
   renderWtView();
 }
 
@@ -1625,11 +1680,22 @@ async function renderWtWorkflowDetail(wfId) {
   const data = await api('/api/wordtracks/workflow/' + wfId + '?' + params);
   const tbody = document.getElementById('wt-stages-tbody');
   tbody.innerHTML = '';
+  const pagerEl = document.getElementById('wt-pagination');
+  if (pagerEl) pagerEl.innerHTML = '';
   if (!data) return;
-  for (const posBlock of (data.positions || [])) {
+
+  // Paginate at the position level — 10 positions per page is more natural
+  // than 10 clusters, since positions group together visually.
+  const positions = data.positions || [];
+  const totalPages = Math.max(1, Math.ceil(positions.length / WT_PAGE_SIZE));
+  if (wtView.page > totalPages) wtView.page = totalPages;
+  const startIdx = (wtView.page - 1) * WT_PAGE_SIZE;
+  const pagePositions = positions.slice(startIdx, startIdx + WT_PAGE_SIZE);
+
+  for (const posBlock of pagePositions) {
     tbody.innerHTML += '<tr><td colspan="11" style="background:rgba(0,212,255,0.06);font-weight:700;padding:8px 10px;color:var(--cyan);">Message Position ' + posBlock.position + (posBlock.position === 1 ? ' (opener)' : '') + '</td></tr>';
     for (const c of posBlock.clusters) {
-      const label = c.label && c.label !== 'unlabeled' ? c.label : ('cluster #' + c.id + ' (unlabeled)');
+      const label = displayLabel(c.label || 'unlabeled', c.id, 'Cluster');
       const avg = c.avg_reply_seconds ? (Math.round(c.avg_reply_seconds) + 's') : '---';
       tbody.innerHTML += '<tr style="cursor:pointer;" onclick="expandWtCluster(' + c.id + ')">' +
         '<td style="padding-left:24px;"><div style="font-weight:600;">' + esc(label) + '</div>' +
@@ -1651,6 +1717,7 @@ async function renderWtWorkflowDetail(wfId) {
   if (!tbody.innerHTML) {
     tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:30px;color:var(--muted);">No messages attached to clusters in this window yet.</td></tr>';
   }
+  renderWtPagination('wt-pagination', wtView.page, totalPages, 'wtGotoWorkflowDetailPage');
   const det = document.getElementById('wt-stage-detail');
   if (det) det.innerHTML = '';
 }
@@ -1664,9 +1731,10 @@ async function expandWtCluster(id) {
   const data = await api('/api/wordtracks/cluster/' + id + '?' + params);
   if (!data) return;
   const c = data.cluster;
-  const label = c.label && c.label !== 'unlabeled' ? c.label : ('cluster #' + c.id + ' (unlabeled)');
+  const label = displayLabel(c.label || 'unlabeled', c.id, 'Cluster');
+  const workflowHuman = c.workflow_label ? humanizeLabel(c.workflow_label) : null;
   el.innerHTML = '<div class="card">' +
-    '<div class="card-title">' + esc(label) + (c.workflow_label ? ' <span style="font-size:11px;color:var(--muted);">in ' + esc(c.workflow_label) + ' · position ' + c.position + '</span>' : '') + ' — ' + (data.samples || []).length + ' samples</div>' +
+    '<div class="card-title">' + esc(label) + (workflowHuman ? ' <span style="font-size:11px;color:var(--muted);">in ' + esc(workflowHuman) + ' · position ' + c.position + '</span>' : '') + ' — ' + (data.samples || []).length + ' samples</div>' +
     (c.description ? '<div style="font-size:11px;color:var(--muted);margin-bottom:10px;">' + esc(c.description) + '</div>' : '') +
     (data.samples || []).map(s => {
       const negFlag = s.negative_flag ? '<span class="pill r" style="margin-left:6px;">NEG</span>' : '';

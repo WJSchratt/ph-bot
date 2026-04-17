@@ -245,13 +245,19 @@ async function labelWorkflowClusters(reporter) {
     const prompt = `You are labeling WORKFLOW IDENTITIES from SMS drip openers in a life-insurance / marketplace funnel.
 Each numbered workflow below is the first-message template used by a single drip campaign.
 
-For each: return a short kebab-case label (<=50 chars) describing the workflow it identifies
-and a one-sentence description. Examples:
-  "mp-aged-lead-reengagement-opener"
-  "fex-intro-opener"
-  "aca-renewal-checkin-opener"
-  "advanced-markets-intro-opener"
-  "sms-consent-verification-opener"
+For each: return a short kebab-case label (<=40 chars) that is ALSO readable when the
+dashes are converted to spaces. The UI humanizes slugs at render time
+(mp-aged-lead-reengagement → "MP Aged Lead Reengagement"), so write slugs as if
+they were a short, specific title — 2-5 lowercase words separated by hyphens.
+
+Rules:
+  - Do NOT append "-opener", "-followup", "-drip" or any other boilerplate suffix.
+    The context already makes clear these are workflow openers.
+  - Use acronyms uppercase-friendly: mp (mortgage protection), fex (final expense),
+    aca (affordable care act), ca/nv/tx/... (states).
+  - Prefer the product + intent + hook pattern, e.g. "mp-aged-lead-reengagement",
+    "fex-rate-drop-pitch", "aca-renewal-reminder", "mp-ai-tool-intro".
+  - Same opener across batches must get the same label when possible.
 
 Output ONLY JSON: { "workflows": [{ "id": <n>, "label": "...", "description": "..." }, ...] }
 
@@ -311,8 +317,14 @@ async function labelWordTrackClusters(reporter) {
 
     const prompt = `Label these per-position SMS message templates within specific workflows. Each has its workflow label and the position in the drip sequence.
 
-For each: return a short kebab-case label (<=40 chars) describing the message's role at that position within that workflow.
-Examples: "budget-objection-response", "tie-down-confirmation", "health-probe-smoker", "ai-disclosure", "decision-maker-check", "rescheduling-offer", "dnc-acknowledgment".
+For each: return a short kebab-case label (<=40 chars) describing the message's role
+at that position within that workflow. The UI humanizes slugs at render time
+(budget-objection-response → "Budget Objection Response"), so write slugs as if they
+were a short readable title — 2-4 lowercase words separated by hyphens.
+
+Examples: "budget-objection-response", "tie-down-confirmation", "health-probe-smoker",
+"ai-disclosure", "decision-maker-check", "rescheduling-offer", "dnc-acknowledgment",
+"delivery-check", "coverage-target-probe", "value-prop-followup".
 
 Output ONLY JSON: { "clusters": [{ "id": <n>, "label": "...", "description": "..." }, ...] }
 
