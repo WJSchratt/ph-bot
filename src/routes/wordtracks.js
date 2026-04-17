@@ -103,7 +103,16 @@ router.get('/wordtracks/workflows', async (req, res) => {
                   COUNT(*) FILTER (WHERE terminal_outcome = ANY($4))::int AS opt_outs
              FROM last_out_per_conv GROUP BY workflow_cluster_id
          ) c ON c.workflow_cluster_id = wf.id
-         LEFT JOIN workflow_cluster_mapping map ON map.cluster_id = wf.id
+         -- Mapping by opener-pattern ILIKE — survives reclusters since
+         -- cluster IDs change but the opener text template doesn't.
+         LEFT JOIN LATERAL (
+           SELECT ghl_workflow_name, ghl_workflow_path
+             FROM workflow_opener_patterns
+            WHERE active = TRUE
+              AND wf.example_opener ILIKE '%' || pattern || '%'
+            ORDER BY priority DESC, LENGTH(pattern) DESC
+            LIMIT 1
+         ) map ON TRUE
         ORDER BY sends DESC, wf.conversation_count DESC`,
       [daysInt, winDays, BOOKED_OUTCOMES, OPTOUT_OUTCOMES]
     );
@@ -159,7 +168,14 @@ router.get('/wordtracks/workflow/:id', async (req, res) => {
       `SELECT wf.id, wf.label, wf.description, wf.conversation_count, wf.example_opener, wf.labeled_at,
               map.ghl_workflow_name, map.ghl_workflow_path
          FROM workflow_clusters wf
-         LEFT JOIN workflow_cluster_mapping map ON map.cluster_id = wf.id
+         LEFT JOIN LATERAL (
+           SELECT ghl_workflow_name, ghl_workflow_path
+             FROM workflow_opener_patterns
+            WHERE active = TRUE
+              AND wf.example_opener ILIKE '%' || pattern || '%'
+            ORDER BY priority DESC, LENGTH(pattern) DESC
+            LIMIT 1
+         ) map ON TRUE
         WHERE wf.id = $1`,
       [wfId]
     );
@@ -292,16 +308,22 @@ router.get('/wordtracks/path', async (req, res) => {
     const winDays = parseInt(req.query.window_days, 10) || (await getAttributionWindowDays());
 
     const params = [name, daysInt, winDays, BOOKED_OUTCOMES, OPTOUT_OUTCOMES];
-    let pathFilter = 'AND map.ghl_workflow_path IS NULL';
-    if (path) { params.push(path); pathFilter = `AND map.ghl_workflow_path = $${params.length}`; }
+    let pathFilter = 'AND p.ghl_workflow_path IS NULL';
+    if (path) { params.push(path); pathFilter = `AND p.ghl_workflow_path = $${params.length}`; }
     let locFilter = '';
-    if (locationId) { params.push(locationId); locFilter = `AND map.location_id = $${params.length}`; }
+    if (locationId) { params.push(locationId); locFilter = `AND (p.location_id IS NULL OR p.location_id = $${params.length})`; }
 
     const q = await db.query(
+      // Resolve (workflow_name, path) → matching workflow_clusters via the
+      // pattern table. Each cluster is picked if its example_opener ILIKE
+      // ANY active pattern with the given (name, path).
       `WITH path_clusters AS (
-         SELECT map.cluster_id AS workflow_cluster_id
-           FROM workflow_cluster_mapping map
-          WHERE map.ghl_workflow_name = $1
+         SELECT wf.id AS workflow_cluster_id
+           FROM workflow_clusters wf
+           JOIN workflow_opener_patterns p
+             ON p.active = TRUE
+            AND wf.example_opener ILIKE '%' || p.pattern || '%'
+          WHERE p.ghl_workflow_name = $1
             ${pathFilter}
             ${locFilter}
        ),

@@ -435,6 +435,51 @@ async function applyMigrations() {
       params
     );
     console.log('[migrate] workflow_cluster_mapping ensured + 31 Veronica mappings seeded');
+
+    // workflow_opener_patterns — pattern-based mapping that SURVIVES reclusters.
+    // Old design (workflow_cluster_mapping keyed on cluster_id) broke on every
+    // recluster because TRUNCATE wiped workflow_clusters and reassigned IDs,
+    // orphaning the mappings. Patterns match against workflow_clusters.example_opener
+    // via ILIKE, so new cluster IDs auto-resolve to the right workflow name + path.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS workflow_opener_patterns (
+        id SERIAL PRIMARY KEY,
+        pattern TEXT NOT NULL,
+        ghl_workflow_name TEXT NOT NULL,
+        ghl_workflow_path TEXT,
+        location_id TEXT,
+        priority INTEGER DEFAULT 0,
+        active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_wop_loc ON workflow_opener_patterns(location_id);
+      CREATE INDEX IF NOT EXISTS idx_wop_active ON workflow_opener_patterns(active) WHERE active = TRUE;
+    `);
+
+    // Seed the 5 patterns the user provided (Iteration earlier). Idempotent:
+    // a (pattern, location_id) pair is inserted only if not already present.
+    const PATTERN_SEEDS = [
+      // A2 - Fresh Mortgage Protection Lead Drip (no path) — both CA and NV
+      // licensed-agent variants share this phrase.
+      ['Just saw a request about some possible coverage', 'A2 - Fresh Mortgage Protection Lead Drip', null, 100],
+      // A4 - Aged MP · Path A — classic re-engagement opener
+      ['Looks like a while back there was a request to look at some Mortgage Protection', 'A4 - Aged Mortgage Protection Lead Drip', 'Path A', 100],
+      // Path B — rate-change hook
+      ['rates have changed amidst the current administration', 'A4 - Aged Mortgage Protection Lead Drip', 'Path B', 100],
+      // Path C — AI tool intro (70% stat)
+      ['did you know 70% of families are now using Ai to find Mortgage Protection', 'A4 - Aged Mortgage Protection Lead Drip', 'Path C', 100],
+      // Path D — AI phone offer
+      ['No need talk to a human for Mortgage Protection anymore', 'A4 - Aged Mortgage Protection Lead Drip', 'Path D', 100]
+    ];
+    for (const [pattern, name, path, priority] of PATTERN_SEEDS) {
+      await pool.query(
+        `INSERT INTO workflow_opener_patterns (pattern, ghl_workflow_name, ghl_workflow_path, location_id, priority)
+         SELECT $1, $2, $3, NULL, $4
+         WHERE NOT EXISTS (SELECT 1 FROM workflow_opener_patterns WHERE pattern = $1 AND ghl_workflow_name = $2 AND COALESCE(ghl_workflow_path,'') = COALESCE($3,''))`,
+        [pattern, name, path, priority]
+      );
+    }
+    console.log('[migrate] workflow_opener_patterns ensured + 5 patterns seeded (A2 + A4 paths A/B/C/D)');
 }
 
 // CLI entry point — when run as `node src/db/migrate.js` or `npm run migrate`.
