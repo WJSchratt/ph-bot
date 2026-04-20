@@ -2110,12 +2110,49 @@ async function expandWtCluster(id) {
       const negFlag = s.negative_flag ? '<span class="pill r" style="margin-left:6px;">NEG</span>' : '';
       const outcome = s.terminal_outcome ? '<span class="pill ' + (s.terminal_outcome === 'appointment_booked' ? 'g' : (s.terminal_outcome === 'dnc' ? 'r' : 'a')) + '" style="margin-left:6px;">' + esc(s.terminal_outcome) + '</span>' : '';
       const replySec = s.reply_seconds ? (' · reply in ' + Math.round(s.reply_seconds) + 's') : '';
-      return '<div style="padding:10px 0;border-bottom:1px solid var(--border);">' +
-        '<div style="font-size:11px;color:var(--muted);margin-bottom:4px;">' + esc(s.contact_name || 'unknown') + ' · ' + esc(s.source || '-') + ' · ' + fmtDate(s.created_at) + replySec + outcome + negFlag + '</div>' +
+      // Clickable — opens the full thread inline. Escape quoted args for the onclick.
+      const clickArgs = "'" + esc(s.ghl_conversation_id) + "','" + esc(s.location_id) + "','" + esc(s.contact_name || 'unknown').replace(/'/g, "\\'") + "'";
+      return '<div class="wt-sample-row" style="padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer;" onclick="showWtSampleThread(' + clickArgs + ')" title="Click to view full conversation thread">' +
+        '<div style="font-size:11px;color:var(--muted);margin-bottom:4px;">' + esc(s.contact_name || 'unknown') + ' · ' + esc(s.source || '-') + ' · ' + fmtDate(s.created_at) + replySec + outcome + negFlag + ' <span style="color:var(--amber);margin-left:6px;">→ click to inspect</span></div>' +
         '<div class="bubble bot" style="max-width:100%;">' + esc(s.content) + '</div>' +
         (s.reply_content ? '<div class="bubble lead" style="max-width:100%;margin-top:6px;">' + esc(s.reply_content) + '</div>' : '<div style="color:var(--muted);font-size:11px;margin-top:4px;">(no reply within ' + data.attribution_window_days + 'd window)</div>') +
       '</div>';
     }).join('') +
+  '</div>';
+}
+
+// Open the full conversation thread for a word track sample, rendered in the
+// wt-stage-detail area below the cluster summary. Uses the same QC thread
+// endpoint so the view matches what the reviewer sees in the QC Portal.
+async function showWtSampleThread(ghlConversationId, locationId, contactName) {
+  const el = document.getElementById('wt-stage-detail');
+  if (!el) return;
+  const backBtn = '<button class="btn" style="margin-bottom:10px;" onclick="el_=document.getElementById(\'wt-stage-detail\');el_.scrollIntoView({behavior:\'smooth\'});history.back();">← back</button>';
+  el.innerHTML = '<div class="card"><div class="card-title">' + esc(contactName) + ' — loading full thread…</div></div>';
+  const qp = new URLSearchParams({ location_id: locationId });
+  const data = await api('/api/qc/conversation-thread/' + encodeURIComponent(ghlConversationId) + '?' + qp);
+  if (!data) { el.innerHTML = '<div class="card"><div class="card-title">Failed to load thread.</div></div>'; return; }
+  const thread = data.thread || [];
+  const conv = data.conversation || {};
+  const meta = (conv.source || 'claude') + (conv.terminal_outcome ? ' · ' + conv.terminal_outcome : '');
+  const sourceBadge = (src) => {
+    const map = { user: 'pill c', claude: 'pill b', botpress: 'pill a', ghl_workflow: 'pill g', unknown: 'pill' };
+    const label = { user: 'Lead', claude: 'Claude', botpress: 'BotPress', ghl_workflow: 'Drip', unknown: 'Manual' }[src] || src;
+    return '<span class="' + (map[src] || 'pill') + '" style="margin-right:6px;font-size:10px;">' + label + '</span>';
+  };
+  el.innerHTML = '<div class="card">' +
+    '<div class="card-title">' + esc(contactName) + ' — full thread (' + thread.length + ' msgs) <span style="font-size:11px;color:var(--muted);margin-left:8px;">' + esc(meta) + '</span></div>' +
+    '<div style="margin-bottom:10px;font-size:12px;color:var(--muted);">' + esc(conv.contact_phone || '') + '</div>' +
+    (thread.length === 0 ? '<div style="color:var(--muted);padding:20px;text-align:center;">No messages in thread.</div>' :
+      thread.map(m => {
+        const isOut = m.direction === 'outbound';
+        const ts = m.created_at ? new Date(m.created_at).toLocaleString() : '';
+        return '<div style="padding:8px 0;border-bottom:1px solid var(--border);">' +
+          '<div style="font-size:11px;color:var(--muted);margin-bottom:3px;">' + sourceBadge(m.source || (isOut ? 'unknown' : 'user')) + esc(ts) + '</div>' +
+          '<div class="bubble ' + (isOut ? 'bot' : 'lead') + '" style="max-width:100%;">' + esc(m.content || '') + '</div>' +
+        '</div>';
+      }).join('')
+    ) +
   '</div>';
 }
 
