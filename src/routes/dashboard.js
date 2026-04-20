@@ -288,10 +288,14 @@ router.get('/dashboard', async (req, res) => {
     let usageWhere = `created_at >= NOW() - ($1 || ' days')::interval`;
     if (locIds.length) {
       usageParams.push(locIds);
-      // Note: many call categories don't attach a location_id (analyzer cross-account,
-      // dev_console). When a location filter is applied, include only rows matching
-      // one of those locations.
-      usageWhere += ` AND location_id = ANY($${usageParams.length})`;
+      // Cross-account categories (dev_console, sandbox_sim, qc_batch_apply,
+      // word_track_clustering, analyzer_*) don't attach a location_id. Include
+      // those NULL-location rows regardless of filter so the breakdown accurately
+      // reflects every Claude call, not just per-sub bot replies. Without this
+      // the Dashboard hides the entire non-bot-response spend whenever any
+      // location is selected — including the default "All Subaccounts" mode
+      // which sends every known location_id.
+      usageWhere += ` AND (location_id = ANY($${usageParams.length}) OR location_id IS NULL)`;
     }
 
     // Diagnostic first: does the table even exist? If the migration hasn't
