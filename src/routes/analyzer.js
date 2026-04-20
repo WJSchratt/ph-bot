@@ -319,6 +319,12 @@ async function saveCurrentPrompt(text) {
      ON CONFLICT (section, key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
     [text]
   );
+  // Invalidate the prompts-module in-process cache so the live bot picks up
+  // the new prompt on the next message instead of waiting for the 30s TTL.
+  try {
+    const prompts = require('../prompts');
+    if (typeof prompts.clearOverrideCache === 'function') prompts.clearOverrideCache();
+  } catch { /* non-fatal */ }
 }
 
 router.get('/prompt', async (req, res) => {

@@ -1,8 +1,9 @@
-const standard = require('./standard');
-const california = require('./california');
+const standardDefault = require('./standard');
+const californiaDefault = require('./california');
 const client = require('./client');
 const application = require('./application');
 const knowledgeBase = require('./knowledgeBase');
+const db = require('../db');
 
 const RESPONSE_FORMAT = `---
 RESPONSE FORMAT REQUIREMENT:
@@ -41,11 +42,50 @@ RULES FOR THE JSON:
 - "message_type": categorize what this turn was about (for analytics).
 - Only include non-null values in collected_data.`;
 
-function selectBasePrompt(contactStage, isCa) {
+// In-process cache of the DB-saved override to avoid hitting Postgres on every
+// webhook. 30-second TTL — short enough that apply-pending changes go live
+// quickly without a deploy, long enough that burst traffic doesn't hammer the
+// DB. Cleared explicitly by the QC apply-pending route after it writes.
+let overrideCache = { text: null, fetchedAt: 0, exists: false };
+const OVERRIDE_TTL_MS = 30 * 1000;
+
+async function getSavedOverride() {
+  const now = Date.now();
+  if (now - overrideCache.fetchedAt < OVERRIDE_TTL_MS) return overrideCache;
+  try {
+    const q = await db.query(
+      `SELECT value FROM app_settings WHERE section = 'analyzer_prompt' AND key = 'current'`
+    );
+    const v = q.rows[0]?.value;
+    overrideCache = { text: v || null, fetchedAt: now, exists: !!v };
+  } catch {
+    overrideCache = { text: null, fetchedAt: now, exists: false };
+  }
+  return overrideCache;
+}
+
+function clearOverrideCache() {
+  overrideCache = { text: null, fetchedAt: 0, exists: false };
+}
+
+async function selectBasePrompt(contactStage, isCa) {
+  // Client and application variants are NOT overridden by apply-pending —
+  // those are smaller, purpose-built prompts and QC flow targets the lead
+  // qualifier only.
   if (contactStage === 'client') return client;
   if (contactStage === 'application') return application;
-  if (isCa) return california;
-  return standard;
+
+  const override = await getSavedOverride();
+  // Lead qualifier: use DB override if one has been saved via apply-pending,
+  // else fall back to the hardcoded standard.js.
+  const standardBase = override.exists ? override.text : standardDefault;
+
+  if (isCa) {
+    // Rebuild the CA variant on top of whichever standard base is active so
+    // QC corrections flow through to California leads without a deploy.
+    return californiaDefault.CA_PREAMBLE + californiaDefault.stripStandardVersionBlock(standardBase);
+  }
+  return standardBase;
 }
 
 function buildContextBlock(conv) {
@@ -82,10 +122,10 @@ ${conv.ghl_message_history || '(none)'}
 `;
 }
 
-function buildSystemPrompt(conv) {
-  const base = selectBasePrompt(conv.contact_stage, conv.is_ca);
+async function buildSystemPrompt(conv) {
+  const base = await selectBasePrompt(conv.contact_stage, conv.is_ca);
   const context = buildContextBlock(conv);
   return `${base}\n\n${context}\n\n${RESPONSE_FORMAT}\n\n=== KNOWLEDGE BASE ===\n\n${knowledgeBase}`;
 }
 
-module.exports = { buildSystemPrompt, selectBasePrompt };
+module.exports = { buildSystemPrompt, selectBasePrompt, clearOverrideCache };

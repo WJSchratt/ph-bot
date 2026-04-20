@@ -44,7 +44,7 @@ function normalizeResponse(parsed) {
 }
 
 async function generateResponse(conversation, history, newUserMessage, contact_id, extraContext) {
-  const baseSystem = buildSystemPrompt(conversation);
+  const baseSystem = await buildSystemPrompt(conversation);
   const system = extraContext ? `${baseSystem}\n\n${extraContext}` : baseSystem;
 
   const messages = [

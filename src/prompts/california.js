@@ -15,9 +15,16 @@ CALIFORNIA LAW requires a brief AI disclosure in your VERY FIRST bot message. Ru
 
 `;
 
-const withoutStandardVersion = standard.replace(
-  /VERSION: STANDARD \(ALL STATES EXCEPT CA\)[\s\S]*?Do not disclose AI upfront\. Answer honestly if asked\. Full AI disclosure at END after appointment is confirmed\./,
-  'VERSION: CALIFORNIA (SEE PREAMBLE ABOVE FOR AI DISCLOSURE REQUIREMENT)'
-);
+function stripStandardVersionBlock(text) {
+  return text.replace(
+    /VERSION: STANDARD \(ALL STATES EXCEPT CA\)[\s\S]*?Do not disclose AI upfront\. Answer honestly if asked\. Full AI disclosure at END after appointment is confirmed\./,
+    'VERSION: CALIFORNIA (SEE PREAMBLE ABOVE FOR AI DISCLOSURE REQUIREMENT)'
+  );
+}
 
-module.exports = CA_PREAMBLE + withoutStandardVersion;
+// Module default (used when no DB override is active).
+module.exports = CA_PREAMBLE + stripStandardVersionBlock(standard);
+// Named exports so index.js can rebuild the CA variant on top of a DB-saved
+// standard prompt after apply-pending runs.
+module.exports.CA_PREAMBLE = CA_PREAMBLE;
+module.exports.stripStandardVersionBlock = stripStandardVersionBlock;
