@@ -2102,6 +2102,10 @@ async function expandWtCluster(id) {
   if (!el) return;
   const windowDays = parseInt(document.getElementById('wt-window')?.value, 10) || 7;
   el.innerHTML = '<div class="card"><div class="card-title">Loading cluster samples…</div></div>';
+  // Scroll the detail panel into view so the click is visibly responsive.
+  // Previously the panel lived below the fold and expanding a cluster looked
+  // like nothing happened unless the user scrolled down manually.
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   const params = new URLSearchParams({ days: getDays(), window_days: windowDays, limit: 30 });
   const data = await api('/api/wordtracks/cluster/' + id + '?' + params);
   if (!data) return;
@@ -2132,8 +2136,8 @@ async function expandWtCluster(id) {
 async function showWtSampleThread(ghlConversationId, locationId, contactName) {
   const el = document.getElementById('wt-stage-detail');
   if (!el) return;
-  const backBtn = '<button class="btn" style="margin-bottom:10px;" onclick="el_=document.getElementById(\'wt-stage-detail\');el_.scrollIntoView({behavior:\'smooth\'});history.back();">← back</button>';
   el.innerHTML = '<div class="card"><div class="card-title">' + esc(contactName) + ' — loading full thread…</div></div>';
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   const qp = new URLSearchParams({ location_id: locationId });
   const data = await api('/api/qc/conversation-thread/' + encodeURIComponent(ghlConversationId) + '?' + qp);
   if (!data) { el.innerHTML = '<div class="card"><div class="card-title">Failed to load thread.</div></div>'; return; }
