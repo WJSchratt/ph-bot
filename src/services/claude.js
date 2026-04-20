@@ -20,6 +20,34 @@ function extractJson(text) {
   return null;
 }
 
+// Outcomes where 2 bubbles is the intended shape (appointment confirmation +
+// AI opt-in prompt, or booking confirmation + business-card link). Everywhere
+// else, collapse to one bubble.
+const KEEP_TWO_BUBBLES_WHEN_OUTCOME = new Set([
+  'appointment_booked',
+  'fex_immediate',
+  'mp_immediate'
+]);
+
+function collapseMessages(messages, terminalOutcome) {
+  const trimmed = messages.map((m) => String(m || '').trim()).filter(Boolean);
+  if (trimmed.length <= 1) return trimmed;
+  // Keep 2 only when the outcome explicitly requires it (confirm + opt-in).
+  if (KEEP_TWO_BUBBLES_WHEN_OUTCOME.has(terminalOutcome)) return trimmed.slice(0, 2);
+  const [a, b] = trimmed;
+  // Substantial content overlap → drop the duplicate, keep the longer one.
+  const fpA = a.slice(0, 60).toLowerCase();
+  const fpB = b.slice(0, 60).toLowerCase();
+  if (fpA === fpB || a.toLowerCase().includes(b.toLowerCase()) || b.toLowerCase().includes(a.toLowerCase())) {
+    return [a.length >= b.length ? a : b];
+  }
+  // Two distinct short bubbles → merge with a single space so the lead sees
+  // one text instead of two fragments arriving seconds apart.
+  const joiner = /[.!?]\s*$/.test(a) ? ' ' : ' — ';
+  const merged = (a + joiner + b).slice(0, 320);
+  return [merged];
+}
+
 function normalizeResponse(parsed) {
   if (!parsed || typeof parsed !== 'object') {
     return {
@@ -29,12 +57,11 @@ function normalizeResponse(parsed) {
       message_type: 'general'
     };
   }
-  const messages = Array.isArray(parsed.messages)
+  const rawMessages = Array.isArray(parsed.messages)
     ? parsed.messages.filter((m) => typeof m === 'string' && m.trim()).slice(0, 2)
     : [];
-  if (!messages.length) {
-    messages.push("ok - let me get back to you in a moment");
-  }
+  let messages = rawMessages.length ? rawMessages : ["ok - let me get back to you in a moment"];
+  messages = collapseMessages(messages, parsed.terminal_outcome || null);
   return {
     messages: messages.map((m) => m.slice(0, 320)),
     collected_data: (parsed.collected_data && typeof parsed.collected_data === 'object') ? parsed.collected_data : {},

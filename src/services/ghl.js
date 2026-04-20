@@ -36,12 +36,19 @@ async function sendSms(token, contactId, message) {
   );
 }
 
+// When two bubbles DO get through (appointment confirmation + opt-in prompt),
+// space them out enough that they don't arrive as a wall of two pings a
+// couple seconds apart. Old delay was 2s — Anthony got both bubbles within
+// 3s of each other and it looked spammy. 6s is enough for the lead to see
+// the first one and start reading before the second arrives.
+const INTER_MESSAGE_DELAY_MS = 6000;
+
 async function sendMessagesSequentially(token, contactId, messages, contact_id_for_log) {
   const cid = contact_id_for_log || contactId;
   logger.log('ghl_send', 'info', cid, 'Sending to GHL', { message_count: messages.length });
   const results = [];
   for (let i = 0; i < messages.length; i++) {
-    if (i > 0) await sleep(2000);
+    if (i > 0) await sleep(INTER_MESSAGE_DELAY_MS);
     try {
       const res = await sendSms(token, contactId, messages[i]);
       results.push({ ok: true, status: res.status });
