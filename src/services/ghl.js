@@ -264,6 +264,33 @@ async function setContactDnd(token, contactId) {
   }
 }
 
+// Outcome → tag mapping for GHL pipeline routing. Workflows in each sub-account
+// can listen for these tags to move the contact into the right pipeline stage
+// (e.g. `sms-bot-handoff` → "Needs Human Contact" stage).
+const OUTCOME_TAGS = {
+  appointment_booked: ['sms-bot-booked'],
+  fex_immediate: ['sms-bot-handoff', 'fex-immediate'],
+  mp_immediate: ['sms-bot-handoff', 'mp-immediate'],
+  human_handoff: ['sms-bot-handoff', 'needs-human']
+  // dnc handled separately via setContactDnd, which already tags 'DNC' + 'sms-opt-out'.
+};
+
+async function tagContactForOutcome(token, contactId, outcome) {
+  const tags = OUTCOME_TAGS[outcome];
+  if (!tags || !tags.length) return { ok: true, skipped: true };
+  try {
+    const res = await axios.put(
+      `${GHL_BASE}/contacts/${contactId}`,
+      { tags },
+      { headers: authHeaders(token), timeout: 15000 }
+    );
+    return { ok: true, status: res.status, tags };
+  } catch (err) {
+    console.error('[ghl] tagContactForOutcome failed', err.response?.status, err.response?.data || err.message);
+    return { ok: false, error: err.response?.data || err.message };
+  }
+}
+
 module.exports = {
   sendMessagesSequentially,
   updateContactFields,
@@ -271,6 +298,7 @@ module.exports = {
   setContactDnd,
   clearContactDnd,
   removeContactTags,
+  tagContactForOutcome,
   calculateSegments,
   sleep
 };

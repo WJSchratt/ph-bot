@@ -356,6 +356,20 @@ router.post('/inbound', async (req, res) => {
         await ghl.setContactDnd(parsed.ghl_token, conv.contact_id);
       }
 
+      // Tag-based pipeline routing. DNC already tags via setContactDnd above.
+      // For other outcomes, push the matching tag so GHL workflows can move
+      // the contact into the right pipeline stage (booked / needs-human / etc.).
+      if (newOutcome !== 'dnc' && parsed.ghl_token) {
+        try {
+          const tagRes = await ghl.tagContactForOutcome(parsed.ghl_token, conv.contact_id, newOutcome);
+          if (tagRes && !tagRes.skipped) {
+            logger.log('ghl_tag', tagRes.ok ? 'info' : 'warn', contactId, 'Tagged contact for outcome', { outcome: newOutcome, tags: tagRes.tags, ok: tagRes.ok });
+          }
+        } catch (tagErr) {
+          logger.log('ghl_tag', 'error', contactId, 'Tag contact threw', { outcome: newOutcome, error: tagErr.message });
+        }
+      }
+
       // Skip firing PCR again on a reschedule (the first booking already fired it)
       if (!isReschedule) {
         await firePostCallRouter(mergedConv, newOutcome);
