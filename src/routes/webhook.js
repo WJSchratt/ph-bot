@@ -5,6 +5,7 @@ const claude = require('../services/claude');
 const ghl = require('../services/ghl');
 const calendar = require('../services/calendar');
 const { firePostCallRouter } = require('../services/postCallRouter');
+const ghlPipeline = require('../services/ghlPipeline');
 const logger = require('../services/logger');
 
 const router = express.Router();
@@ -396,9 +397,8 @@ router.post('/inbound', async (req, res) => {
         await ghl.setContactDnd(parsed.ghl_token, conv.contact_id);
       }
 
-      // Tag-based pipeline routing. DNC already tags via setContactDnd above.
-      // For other outcomes, push the matching tag so GHL workflows can move
-      // the contact into the right pipeline stage (booked / needs-human / etc.).
+      // Tag-based pipeline routing (kept for workflow triggers that still watch tags).
+      // DNC already tags via setContactDnd above.
       if (newOutcome !== 'dnc' && parsed.ghl_token) {
         try {
           const tagRes = await ghl.tagContactForOutcome(parsed.ghl_token, conv.contact_id, newOutcome);
@@ -407,6 +407,39 @@ router.post('/inbound', async (req, res) => {
           }
         } catch (tagErr) {
           logger.log('ghl_tag', 'error', contactId, 'Tag contact threw', { outcome: newOutcome, error: tagErr.message });
+        }
+      }
+
+      // Direct opportunity stage move. Translates the bot's internal outcome
+      // into the feature routing label, then moves the contact's opportunity
+      // into the Sales Pipeline at the right stage. Cross-pipeline moves are
+      // supported by GHL — the PUT sets both pipelineId and pipelineStageId.
+      if (parsed.ghl_token && parsed.location_id) {
+        const routeOutcome = ghlPipeline.TERMINAL_TO_ROUTE_OUTCOME[newOutcome];
+        if (routeOutcome) {
+          try {
+            const routeRes = await ghlPipeline.routeOpportunity(
+              parsed.ghl_token,
+              parsed.location_id,
+              conv.contact_id,
+              routeOutcome,
+              { logCtx: contactId }
+            );
+            logger.log('pipeline_route', 'info', contactId, 'routeOpportunity result', {
+              terminal_outcome: newOutcome,
+              route_outcome: routeOutcome,
+              opportunityId: routeRes.opportunityId,
+              prior: routeRes.prior,
+              target: routeRes.target,
+              handoff_reason: routeRes.handoffReason,
+              skipped: routeRes.skipped || null,
+              error: routeRes.error || null
+            });
+          } catch (routeErr) {
+            logger.log('pipeline_route', 'error', contactId, 'routeOpportunity threw', {
+              terminal_outcome: newOutcome, error: routeErr.message
+            });
+          }
         }
       }
 

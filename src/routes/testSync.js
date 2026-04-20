@@ -1,10 +1,53 @@
 const express = require('express');
 const store = require('../services/conversationStore');
 const ghl = require('../services/ghl');
+const ghlPipeline = require('../services/ghlPipeline');
 const logger = require('../services/logger');
 const db = require('../db');
 
 const router = express.Router();
+
+async function findGhlTokenForLocation(locationId) {
+  try {
+    const fromSub = await db.query(
+      `SELECT ghl_api_key FROM subaccounts WHERE ghl_location_id = $1 AND ghl_api_key IS NOT NULL AND ghl_api_key <> ''`,
+      [locationId]
+    );
+    if (fromSub.rows[0]?.ghl_api_key) return fromSub.rows[0].ghl_api_key;
+  } catch {}
+  try {
+    const fromConv = await db.query(
+      `SELECT ghl_token FROM conversations
+       WHERE location_id = $1 AND ghl_token IS NOT NULL AND ghl_token <> ''
+       ORDER BY updated_at DESC LIMIT 1`,
+      [locationId]
+    );
+    if (fromConv.rows[0]?.ghl_token) return fromConv.rows[0].ghl_token;
+  } catch {}
+  return null;
+}
+
+// Test hook: trigger routeOpportunity for a contact without running a full
+// conversation. Defaults to dryRun=true so accidental hits don't mutate GHL.
+// Body: { contactId, locationId, outcome, ghlToken?, dryRun? }
+router.post('/test/route-opportunity', async (req, res) => {
+  try {
+    const { contactId, locationId, outcome } = req.body || {};
+    const dryRun = req.body?.dryRun !== false;
+    if (!contactId || !locationId || !outcome) {
+      return res.status(400).json({ error: 'contactId, locationId, outcome required' });
+    }
+    let token = req.body?.ghlToken || null;
+    if (!token) token = await findGhlTokenForLocation(locationId);
+    if (!token) return res.status(400).json({ error: 'No GHL token found for this location' });
+
+    const result = await ghlPipeline.routeOpportunity(token, locationId, contactId, outcome, { dryRun });
+    res.json(result);
+  } catch (err) {
+    logger.log('pipeline_route', 'error', req.body?.contactId || null, 'test/route-opportunity threw', { error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
 
 // Manual field-sync trigger for verification. Open endpoint — guard later if left in prod.
 router.post('/test-sync/:contactId/:locationId', async (req, res) => {
