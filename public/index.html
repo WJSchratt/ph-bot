@@ -474,6 +474,11 @@ textarea.form-input{resize:vertical;min-height:80px;}
 
 <!-- ====== DASHBOARD ====== -->
 <div class="tab-content active" id="tab-dashboard">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:13px;flex-wrap:wrap;">
+    <button class="btn pri" id="dash-pull-btn" onclick="dashboardPullAll(false)" title="Fetch new conversations + messages from GHL for every sub-account. Incremental — fast.">Pull New Conversations (All Sub-accounts)</button>
+    <button class="btn amb" id="dash-repull-btn" onclick="dashboardPullAll(true)" title="Full repull: re-fetches every conversation's complete message history. Takes several minutes.">Full Repull (All)</button>
+    <span id="dash-pull-status" style="font-size:12px;color:var(--muted);"></span>
+  </div>
   <div class="grid c5" style="margin-bottom:13px;" id="kpi-row1"></div>
   <div class="grid c5" style="margin-bottom:13px;" id="kpi-row2"></div>
   <div class="grid c3" style="margin-bottom:13px;">
@@ -634,14 +639,18 @@ textarea.form-input{resize:vertical;min-height:80px;}
     </button>
   </div>
 
-  <!-- Prominent source tabs (Claude / Archive / Cluster). -->
+  <!-- Prominent source tabs (All / Claude / Archive / Cluster). -->
   <div class="qc-tabs-row">
-    <div class="itab active" data-qctab="claude" onclick="setQcTab('claude', this)">Claude Bot</div>
+    <div class="itab active" data-qctab="all" onclick="setQcTab('all', this)">All</div>
+    <div class="itab" data-qctab="claude" onclick="setQcTab('claude', this)">Claude Bot</div>
     <div class="itab" data-qctab="botpress" onclick="setQcTab('botpress', this)">Archive (Botpress)</div>
     <div class="itab" data-qctab="cluster" onclick="setQcTab('cluster', this)">Filter by Word Track</div>
   </div>
   <div id="qc-cluster-filter-row" style="display:none;margin-bottom:14px;">
     <select class="fsel" id="qc-cluster-sel" onchange="loadQcByCluster()"><option value="">-- pick a cluster --</option></select>
+  </div>
+  <div id="qc-search-row" style="margin-bottom:10px;">
+    <input type="text" id="qc-search-input" placeholder="Search by name or phone..." class="form-input" style="max-width:320px;" oninput="qcSearchDebounced()">
   </div>
 
   <div class="conv-wrap">
@@ -1431,6 +1440,50 @@ function loadCurrentTab() {
 }
 
 // ========== DASHBOARD ==========
+async function dashboardPullAll(fullRepull) {
+  if (fullRepull && !confirm('Full repull across ALL sub-accounts re-fetches every conversation\'s complete message history. Can take several minutes. Continue?')) return;
+  const subs = await api('/api/subaccounts');
+  // /api/subaccounts returns ghl_api_key_preview (truthy when a key is set);
+  // the actual key is never sent to the client. Server uses stored key during pull.
+  const list = (subs?.subaccounts || subs || []).filter(s => s.ghl_location_id && s.ghl_api_key_preview);
+  if (!list.length) { toast('No sub-accounts with GHL tokens found.', 'err'); return; }
+  const btn = document.getElementById(fullRepull ? 'dash-repull-btn' : 'dash-pull-btn');
+  const origLabel = btn.textContent;
+  btn.disabled = true;
+  const status = document.getElementById('dash-pull-status');
+  let ok = 0; let failed = 0;
+  for (let i = 0; i < list.length; i++) {
+    const sub = list[i];
+    btn.textContent = (fullRepull ? 'Repulling' : 'Pulling') + ' ' + (i + 1) + '/' + list.length + '...';
+    if (status) status.textContent = 'Working on ' + (sub.name || sub.ghl_location_id);
+    try {
+      const res = await fetch('/api/analyzer/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (getAuthToken() || '') },
+        body: JSON.stringify({ locationId: sub.ghl_location_id, fullRepull: !!fullRepull })
+      });
+      if (!res.ok) { failed++; continue; }
+      const data = await res.json().catch(() => null);
+      if (!data?.jobId) { ok++; continue; }
+      // Poll until job finishes or 10 min timeout.
+      const deadline = Date.now() + 10 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 3000));
+        const resp = await api('/api/jobs/' + data.jobId);
+        const job = resp?.job || resp;
+        if (!job) break;
+        if (status) status.textContent = (sub.name || sub.ghl_location_id) + ': ' + (job.progress_message || job.status);
+        if (job.status === 'completed') { ok++; break; }
+        if (job.status === 'failed') { failed++; break; }
+      }
+    } catch (e) { failed++; }
+  }
+  btn.disabled = false; btn.textContent = origLabel;
+  if (status) status.textContent = 'Done. ' + ok + ' ok, ' + failed + ' failed.';
+  toast('Pull complete: ' + ok + ' ok, ' + failed + ' failed', failed ? 'err' : 'ok');
+  loadDashboard();
+}
+
 async function loadDashboard() {
   const params = new URLSearchParams({ days: getDays() });
   const locParam = getLocationParam();
@@ -2198,7 +2251,11 @@ async function refreshPipelineData() {
 }
 
 // ========== QC PORTAL ==========
-async function loadQC() {
+async function loadQC(opts) {
+  opts = opts || {};
+  const mode = opts.mode || qcTab; // 'claude' (pending only) or 'all'
+  const search = opts.search != null ? opts.search : (document.getElementById('qc-search-input')?.value || '').trim();
+
   // Load stats — write into the per-number spans in the new hero row.
   const stats = await api('/api/qc/stats');
   if (stats) {
@@ -2211,17 +2268,28 @@ async function loadQC() {
     if (stats.pending > 0) { badge.textContent = stats.pending; } else { badge.textContent = ''; }
   }
 
-  // Load pending conversations
-  const data = await api('/api/qc/pending?page=1&limit=20');
+  // Build query: 'all' mode drops the terminal_outcome + qc_reviewed filters.
+  const params = new URLSearchParams({ page: '1', limit: '50' });
+  if (mode === 'all') params.set('all', 'true');
+  if (search) params.set('search', search);
+
+  const data = await api('/api/qc/pending?' + params.toString());
   if (!data) return;
   const list = document.getElementById('qc-conv-list');
   list.innerHTML = '';
-  document.getElementById('qc-list-header').textContent = 'Pending Review (' + (data.total || 0) + ')';
+  const headerLbl = mode === 'all' ? 'All Conversations' : 'Pending Review';
+  document.getElementById('qc-list-header').textContent = headerLbl + ' (' + (data.total || 0) + ')';
+  if (!(data.conversations || []).length) {
+    list.innerHTML = '<div style="color:var(--muted);padding:24px;text-align:center;font-size:13px;">No conversations match.</div>';
+    return;
+  }
   (data.conversations || []).forEach(c => {
     const item = document.createElement('div');
     item.className = 'conv-item';
-    item.innerHTML = '<div class="ci-name">' + esc(c.first_name || '') + ' ' + esc(c.last_name || '') + ' -- ' + esc(c.subaccount_name || c.product_type || '') + '</div>' +
-      '<div class="ci-meta">' + fmtNum(c.message_count) + ' msgs' + (c.terminal_outcome ? ' -- ' + c.terminal_outcome : '') + '</div>';
+    const reviewedTag = c.qc_reviewed ? ' <span class="pill g" style="margin-left:4px;">reviewed</span>' : '';
+    const outcomeTag = c.terminal_outcome ? ' -- ' + c.terminal_outcome : ' -- in-progress';
+    item.innerHTML = '<div class="ci-name">' + esc(c.first_name || '') + ' ' + esc(c.last_name || '') + ' -- ' + esc(c.subaccount_name || c.product_type || '') + reviewedTag + '</div>' +
+      '<div class="ci-meta">' + fmtNum(c.message_count) + ' msgs' + outcomeTag + '</div>';
     item.onclick = () => {
       list.querySelectorAll('.conv-item').forEach(i => i.classList.remove('active'));
       item.classList.add('active');
@@ -2229,6 +2297,12 @@ async function loadQC() {
     };
     list.appendChild(item);
   });
+}
+
+let qcSearchTimer = null;
+function qcSearchDebounced() {
+  clearTimeout(qcSearchTimer);
+  qcSearchTimer = setTimeout(() => loadQC(), 250);
 }
 
 async function loadConversation(id, convMeta) {
@@ -2338,13 +2412,16 @@ async function qcApplyPending() {
 }
 
 // ----- Tabs within QC Portal -----
-let qcTab = 'claude';
+let qcTab = 'all';
 function setQcTab(which, el) {
   qcTab = which;
   document.querySelectorAll('#tab-qc .itab').forEach(i => i.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('qc-cluster-filter-row').style.display = (which === 'cluster') ? '' : 'none';
-  if (which === 'claude') loadQC();
+  // Search box only meaningful for the conversation list modes.
+  const searchRow = document.getElementById('qc-search-row');
+  if (searchRow) searchRow.style.display = (which === 'cluster') ? 'none' : '';
+  if (which === 'all' || which === 'claude') loadQC({ mode: which });
   else if (which === 'botpress') loadQcBotpress();
   else if (which === 'cluster') loadQcClusterPicker();
 }
