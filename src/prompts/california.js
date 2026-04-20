@@ -22,9 +22,8 @@ function stripStandardVersionBlock(text) {
   );
 }
 
-// Module default (used when no DB override is active).
-module.exports = CA_PREAMBLE + stripStandardVersionBlock(standard);
-// Named exports so index.js can rebuild the CA variant on top of a DB-saved
-// standard prompt after apply-pending runs.
-module.exports.CA_PREAMBLE = CA_PREAMBLE;
-module.exports.stripStandardVersionBlock = stripStandardVersionBlock;
+module.exports = {
+  fullText: CA_PREAMBLE + stripStandardVersionBlock(standard),
+  CA_PREAMBLE,
+  stripStandardVersionBlock
+};

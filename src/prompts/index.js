@@ -76,16 +76,16 @@ async function selectBasePrompt(contactStage, isCa) {
   if (contactStage === 'application') return application;
 
   const override = await getSavedOverride();
-  // Lead qualifier: use DB override if one has been saved via apply-pending,
-  // else fall back to the hardcoded standard.js.
-  const standardBase = override.exists ? override.text : standardDefault;
 
   if (isCa) {
     // Rebuild the CA variant on top of whichever standard base is active so
     // QC corrections flow through to California leads without a deploy.
-    return californiaDefault.CA_PREAMBLE + californiaDefault.stripStandardVersionBlock(standardBase);
+    // When no override exists, use the precomputed fullText so we don't
+    // re-run the regex on every request.
+    if (!override.exists) return californiaDefault.fullText;
+    return californiaDefault.CA_PREAMBLE + californiaDefault.stripStandardVersionBlock(override.text);
   }
-  return standardBase;
+  return override.exists ? override.text : standardDefault;
 }
 
 function buildContextBlock(conv) {
