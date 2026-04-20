@@ -152,6 +152,27 @@ router.post('/inbound', async (req, res) => {
       return res.status(200).json({ ok: true, skipped: 'empty message' });
     }
 
+    // Non-SMS message-type guard. GHL fires this webhook on EVERY conversation
+    // event — inbound calls, missed calls, voicemails, email activity, custom
+    // activities — not just SMS. If we don't filter, the bot ends up replying
+    // to call logs as if they were texts. Example from prod: "📞 Inbound call
+    // to (801) 348-2482 - Answered (00:03)" was being fed to Claude and the
+    // bot kept texting leads right after they hung up with 11labs.
+    const rawMessageType = String(req.body?.message?.type || req.body?.body?.message?.type || req.body?.type || '').toUpperCase();
+    const nonSmsTypeMarkers = ['CALL', 'VOICEMAIL', 'EMAIL', 'FACEBOOK', 'INSTAGRAM', 'WEBCHAT', 'LIVE_CHAT', 'REVIEW', 'GMB', 'ACTIVITY', 'CUSTOM_EMAIL'];
+    if (rawMessageType && nonSmsTypeMarkers.some((m) => rawMessageType.includes(m))) {
+      logger.log('webhook', 'info', contactId, 'Skipped non-SMS inbound by message.type', { type: rawMessageType });
+      return res.status(200).json({ ok: true, skipped: 'non-sms type', type: rawMessageType });
+    }
+    // Body-pattern guard for when GHL omits message.type but the content is
+    // clearly an activity log (emoji prefix + "Inbound call" / "Missed call" /
+    // "Voicemail" / "Answered" / "Thanks for calling"). If a real lead ever
+    // literally types "📞 Inbound call..." into SMS, they deserve weird.
+    if (/^📞|inbound call to |missed call (to|from) |voicemail from |answered \(\d+/i.test(trimmedBody)) {
+      logger.log('webhook', 'info', contactId, 'Skipped non-SMS inbound by body pattern', { body_preview: trimmedBody.slice(0, 100) });
+      return res.status(200).json({ ok: true, skipped: 'call/activity log body' });
+    }
+
     const conv = await store.upsertConversation(parsed);
 
     // Terminal cooldown handling — gate on the outcome itself, not is_active.
