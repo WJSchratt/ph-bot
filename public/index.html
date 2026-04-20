@@ -669,12 +669,17 @@ textarea.form-input{resize:vertical;min-height:80px;}
       <div class="conv-messages" id="qc-messages">
         <div style="color:var(--muted);text-align:center;padding:60px 20px;font-size:14px;">Select a conversation from the left panel.</div>
       </div>
-      <div class="qc-acts">
-        <button class="btn grn" onclick="qcAction('approved')">Approve</button>
-        <button class="btn dan" onclick="qcAction('failed')">Mark Failed</button>
-        <input type="text" placeholder="Type corrected response..." id="qc-edit-input">
-        <button class="btn amb" onclick="qcAction('modified')">Save &amp; Train</button>
-        <span class="qc-score" id="qc-accuracy-display"></span>
+      <div class="qc-acts" style="flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;gap:8px;align-items:center;width:100%;flex-wrap:wrap;">
+          <button class="btn grn" onclick="qcAction('approved')">Approve</button>
+          <button class="btn dan" onclick="qcAction('failed')">Mark Failed</button>
+          <button class="btn amb" onclick="qcAction('modified')">Save &amp; Train</button>
+          <span class="qc-score" id="qc-accuracy-display" style="margin-left:auto;"></span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;width:100%;">
+          <input type="text" placeholder="Corrected response text (what the bot SHOULD have said)..." id="qc-edit-input" style="width:100%;">
+          <input type="text" placeholder="What the bot did wrong (e.g. 'sent 3 messages at once', 'asked the same question twice', 'revealed it was an AI unprompted')..." id="qc-feedback-input" style="width:100%;">
+        </div>
       </div>
     </div>
   </div>
@@ -2391,30 +2396,57 @@ function renderQcThread(thread) {
 
 async function qcAction(outcome) {
   if (!selectedQcConvId) { toast('Select a conversation first.'); return; }
+  const modText = document.getElementById('qc-edit-input').value.trim();
+  const feedbackText = document.getElementById('qc-feedback-input').value.trim();
+
   const body = { conversation_id: selectedQcConvId, reviewer: 'admin', outcome };
   if (outcome === 'modified' || outcome === 'failed') {
-    const modText = document.getElementById('qc-edit-input').value.trim();
-    if (outcome === 'modified' && !modText) { toast('Enter a corrected response to save.'); return; }
+    if (outcome === 'modified' && !modText && !feedbackText) {
+      toast('Enter a corrected response OR describe what the bot did wrong to save.');
+      return;
+    }
     if (modText) body.modified_response = modText;
+    if (feedbackText) body.notes = feedbackText;
   }
   const res = await api('/api/qc/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!res) { toast('Failed to submit QC review.'); return; }
 
-  // Queue an edit for batched flush (so the reviewer can do many reviews,
-  // then click the one "apply" button to merge them all in a single Claude call).
+  // Queue pending-changes rows. Replacement (specific text) and behavioral
+  // feedback (general rule) are separate change_types so the apply-pending
+  // Claude call can treat them differently — replacements = word-level swap,
+  // behavioral = prompt-rule additions.
+  const queued = [];
   if (outcome === 'failed' || outcome === 'modified') {
-    const desc = outcome === 'modified'
-      ? `Replace the flagged bot response with: "${body.modified_response}"`
-      : 'Reviewer marked the bot response failed without a replacement — revise to avoid this pattern.';
+    if (modText) {
+      queued.push({
+        change_type: 'correction',
+        description: `Replace the flagged bot response with: "${modText}"`
+      });
+    }
+    if (feedbackText) {
+      queued.push({
+        change_type: 'behavioral_feedback',
+        description: `Reviewer feedback on the flagged bot turn: ${feedbackText}. Adjust the system prompt so the bot avoids this pattern going forward.`
+      });
+    }
+    if (!modText && !feedbackText && outcome === 'failed') {
+      queued.push({
+        change_type: 'correction',
+        description: 'Reviewer marked the bot response failed without a replacement or feedback — revise to avoid this pattern.'
+      });
+    }
+  }
+  for (const entry of queued) {
     await api('/api/pending-changes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source: 'qc', change_type: 'correction', description: desc, example_conversation_id: selectedQcConvId })
+      body: JSON.stringify({ source: 'qc', ...entry, example_conversation_id: selectedQcConvId })
     });
   }
 
-  toast('QC review submitted: ' + outcome);
+  toast('QC review submitted: ' + outcome + (queued.length ? ' (' + queued.length + ' edit' + (queued.length > 1 ? 's' : '') + ' queued)' : ''));
   document.getElementById('qc-edit-input').value = '';
+  document.getElementById('qc-feedback-input').value = '';
   loadQC();
   refreshPendingEditsCounter();
 }
