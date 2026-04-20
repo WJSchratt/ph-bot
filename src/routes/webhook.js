@@ -418,12 +418,14 @@ router.post('/inbound', async (req, res) => {
         const routeOutcome = ghlPipeline.TERMINAL_TO_ROUTE_OUTCOME[newOutcome];
         if (routeOutcome) {
           try {
+            const contactName = [conv.first_name || parsed.first_name, conv.last_name || parsed.last_name]
+              .filter(Boolean).join(' ').trim() || null;
             const routeRes = await ghlPipeline.routeOpportunity(
               parsed.ghl_token,
               parsed.location_id,
               conv.contact_id,
               routeOutcome,
-              { logCtx: contactId }
+              { logCtx: contactId, contactName }
             );
             logger.log('pipeline_route', 'info', contactId, 'routeOpportunity result', {
               terminal_outcome: newOutcome,

@@ -169,11 +169,11 @@ const SALES_PIPELINE_ID = 'BSxRZNZTwAi1atb957Ev';
 const HANDOFF_REASON_FIELD_ID = 'pctRcbbTXCRK9t2toB4u';
 
 const OUTCOME_TO_STAGE = {
-  booked:          { stageId: '7f4b529f-f067-4535-88bd-06d45ae9852b', handoffReason: null },
-  requested_human: { stageId: 'c341c71e-9c68-4af9-aa9f-0471fceb3c51', handoffReason: 'Requested Human' },
-  opted_out:       { stageId: 'c341c71e-9c68-4af9-aa9f-0471fceb3c51', handoffReason: 'Opted Out of SMS' },
-  dnc:             { stageId: '1a298843-98b5-49ff-b787-40a21ed1a0a5', handoffReason: 'DNC' },
-  disqualified:    { stageId: '69c4bf2f-3564-4a8a-b51c-3aec4d430c1a', handoffReason: null }
+  booked:          { stageId: '7f4b529f-f067-4535-88bd-06d45ae9852b', handoffReason: null,               label: 'Appointment Booked' },
+  requested_human: { stageId: 'c341c71e-9c68-4af9-aa9f-0471fceb3c51', handoffReason: 'Requested Human',  label: 'Requested Human' },
+  opted_out:       { stageId: 'c341c71e-9c68-4af9-aa9f-0471fceb3c51', handoffReason: 'Opted Out of SMS', label: 'Opted Out of SMS' },
+  dnc:             { stageId: '1a298843-98b5-49ff-b787-40a21ed1a0a5', handoffReason: 'DNC',              label: 'DNC' },
+  disqualified:    { stageId: '69c4bf2f-3564-4a8a-b51c-3aec4d430c1a', handoffReason: null,               label: 'Disqualified' }
 };
 
 // Map internal terminal_outcome values the bot produces → feature outcome labels.
@@ -236,10 +236,36 @@ async function setHandoffReason(ghlToken, contactId, reasonValue) {
   return res.data;
 }
 
+async function createOpportunity(ghlToken, locationId, contactId, name, pipelineStageId, pipelineId = SALES_PIPELINE_ID) {
+  const res = await axios.post(
+    `${GHL_BASE}/opportunities/`,
+    { pipelineId, locationId, name, pipelineStageId, status: 'open', contactId },
+    { headers: v2Headers(ghlToken), timeout: 15000 }
+  );
+  return res.data?.opportunity || res.data;
+}
+
+async function fetchContactName(ghlToken, contactId) {
+  try {
+    const res = await axios.get(`${GHL_BASE}/contacts/${contactId}`, {
+      headers: v2Headers(ghlToken),
+      timeout: 10000
+    });
+    const c = res.data?.contact || {};
+    const full = [c.firstName, c.lastName].filter(Boolean).join(' ').trim();
+    return full || c.contactName || c.name || null;
+  } catch {
+    return null;
+  }
+}
+
 // Main routing tool. Never throws — returns a structured result with per-step
-// success/failure so a webhook handler can log-and-continue.
+// success/failure so a webhook handler can log-and-continue. When the contact
+// has no opportunity yet, one is created in the Sales Pipeline at the target
+// stage (step: 'create_opportunity'); otherwise the existing opp is moved
+// (step: 'update_stage').
 async function routeOpportunity(ghlToken, locationId, contactId, outcome, opts = {}) {
-  const { dryRun = false, logCtx = null } = opts;
+  const { dryRun = false, logCtx = null, contactName = null } = opts;
   const lc = logCtx || contactId;
   const result = {
     contactId,
@@ -249,6 +275,7 @@ async function routeOpportunity(ghlToken, locationId, contactId, outcome, opts =
     prior: null,
     target: null,
     handoffReason: null,
+    created: false,
     steps: []
   };
 
@@ -272,40 +299,66 @@ async function routeOpportunity(ghlToken, locationId, contactId, outcome, opts =
     return result;
   }
 
-  if (!opp) {
-    result.skipped = 'no_opportunity';
+  if (opp) {
+    result.opportunityId = opp.id;
+    result.prior = {
+      pipelineId: opp.pipelineId,
+      pipelineStageId: opp.pipelineStageId,
+      status: opp.status
+    };
+    result.steps.push({ step: 'search', ok: true, found: 1, opportunityId: opp.id, prior: result.prior });
+  } else {
     result.steps.push({ step: 'search', ok: true, found: 0 });
-    logger.log('pipeline_route', 'info', lc, 'No opportunity for contact, nothing to route', { outcome });
-    return result;
   }
 
-  result.opportunityId = opp.id;
-  result.prior = {
-    pipelineId: opp.pipelineId,
-    pipelineStageId: opp.pipelineStageId,
-    status: opp.status
-  };
-  result.steps.push({ step: 'search', ok: true, found: 1, opportunityId: opp.id, prior: result.prior });
+  // Resolve the opportunity name once (needed only if we end up creating).
+  async function buildOpportunityName() {
+    let name = contactName || null;
+    if (!name) name = await fetchContactName(ghlToken, contactId);
+    const base = (name && String(name).trim()) || `Contact ${contactId}`;
+    return `${base} - ${mapping.label}`;
+  }
 
   if (dryRun) {
-    result.steps.push({ step: 'update_stage', ok: true, dryRun: true, target: result.target });
+    if (opp) {
+      result.steps.push({ step: 'update_stage', ok: true, dryRun: true, target: result.target });
+    } else {
+      const plannedName = await buildOpportunityName();
+      result.steps.push({ step: 'create_opportunity', ok: true, dryRun: true, target: result.target, plannedName });
+    }
     if (mapping.handoffReason) {
       result.steps.push({ step: 'set_handoff_reason', ok: true, dryRun: true, value: mapping.handoffReason });
     }
     logger.log('pipeline_route', 'info', lc, 'routeOpportunity dryRun', {
-      outcome, opportunityId: opp.id, target: result.target, handoff_reason: mapping.handoffReason
+      outcome, opportunityId: opp?.id || null, will_create: !opp, target: result.target, handoff_reason: mapping.handoffReason
     });
     return result;
   }
 
-  try {
-    await updateOpportunityStage(ghlToken, opp.id, mapping.stageId, SALES_PIPELINE_ID);
-    result.steps.push({ step: 'update_stage', ok: true, target: result.target });
-  } catch (err) {
-    const error = err.response?.data || err.message;
-    logger.log('pipeline_route', 'error', lc, 'Stage update failed', { outcome, opportunityId: opp.id, error });
-    result.steps.push({ step: 'update_stage', ok: false, error });
-    result.error = error;
+  if (opp) {
+    try {
+      await updateOpportunityStage(ghlToken, opp.id, mapping.stageId, SALES_PIPELINE_ID);
+      result.steps.push({ step: 'update_stage', ok: true, target: result.target });
+    } catch (err) {
+      const error = err.response?.data || err.message;
+      logger.log('pipeline_route', 'error', lc, 'Stage update failed', { outcome, opportunityId: opp.id, error });
+      result.steps.push({ step: 'update_stage', ok: false, error });
+      result.error = error;
+    }
+  } else {
+    try {
+      const name = await buildOpportunityName();
+      const newOpp = await createOpportunity(ghlToken, locationId, contactId, name, mapping.stageId, SALES_PIPELINE_ID);
+      const newId = newOpp?.id || newOpp?._id || null;
+      result.opportunityId = newId;
+      result.created = true;
+      result.steps.push({ step: 'create_opportunity', ok: true, target: result.target, opportunityId: newId, name });
+    } catch (err) {
+      const error = err.response?.data || err.message;
+      logger.log('pipeline_route', 'error', lc, 'Opportunity create failed', { outcome, error });
+      result.steps.push({ step: 'create_opportunity', ok: false, error });
+      result.error = error;
+    }
   }
 
   if (mapping.handoffReason) {
@@ -321,7 +374,8 @@ async function routeOpportunity(ghlToken, locationId, contactId, outcome, opts =
 
   logger.log('pipeline_route', 'info', lc, 'routeOpportunity complete', {
     outcome,
-    opportunityId: opp.id,
+    opportunityId: result.opportunityId,
+    created: result.created,
     target: result.target,
     handoff_reason: mapping.handoffReason,
     steps: result.steps.map((s) => ({ step: s.step, ok: s.ok }))
@@ -338,6 +392,8 @@ module.exports = {
   findContactOpportunity,
   updateOpportunityStage,
   setHandoffReason,
+  createOpportunity,
+  fetchContactName,
   routeOpportunity,
   OUTCOME_TO_STAGE,
   TERMINAL_TO_ROUTE_OUTCOME,
