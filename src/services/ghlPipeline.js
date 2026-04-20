@@ -168,12 +168,23 @@ async function pullAll(ghlToken, locationId, progressCb) {
 const SALES_PIPELINE_ID = 'BSxRZNZTwAi1atb957Ev';
 const HANDOFF_REASON_FIELD_ID = 'pctRcbbTXCRK9t2toB4u';
 
+// Stages that represent "past engagement" — don't downgrade a contact back
+// to "Engaging with AI" if they're already at any of these.
+const ENGAGING_SKIP_STAGES = [
+  '5319f2ca-f208-4416-bf75-3843ac6b0d67', // Engaging with AI itself (no-op to avoid thrash)
+  'c341c71e-9c68-4af9-aa9f-0471fceb3c51', // Needs Human Contact
+  '7f4b529f-f067-4535-88bd-06d45ae9852b', // Appointment Set
+  '1a298843-98b5-49ff-b787-40a21ed1a0a5', // DNC / Remove
+  '69c4bf2f-3564-4a8a-b51c-3aec4d430c1a'  // Disqualified
+];
+
 const OUTCOME_TO_STAGE = {
-  booked:          { stageId: '7f4b529f-f067-4535-88bd-06d45ae9852b', handoffReason: null,               label: 'Appointment Booked' },
-  requested_human: { stageId: 'c341c71e-9c68-4af9-aa9f-0471fceb3c51', handoffReason: 'Requested Human',  label: 'Requested Human' },
-  opted_out:       { stageId: 'c341c71e-9c68-4af9-aa9f-0471fceb3c51', handoffReason: 'Opted Out of SMS', label: 'Opted Out of SMS' },
-  dnc:             { stageId: '1a298843-98b5-49ff-b787-40a21ed1a0a5', handoffReason: 'DNC',              label: 'DNC' },
-  disqualified:    { stageId: '69c4bf2f-3564-4a8a-b51c-3aec4d430c1a', handoffReason: null,               label: 'Disqualified' }
+  booked:            { stageId: '7f4b529f-f067-4535-88bd-06d45ae9852b', handoffReason: null,               label: 'Appointment Booked' },
+  requested_human:   { stageId: 'c341c71e-9c68-4af9-aa9f-0471fceb3c51', handoffReason: 'Requested Human',  label: 'Requested Human' },
+  opted_out:         { stageId: 'c341c71e-9c68-4af9-aa9f-0471fceb3c51', handoffReason: 'Opted Out of SMS', label: 'Opted Out of SMS' },
+  dnc:               { stageId: '1a298843-98b5-49ff-b787-40a21ed1a0a5', handoffReason: 'DNC',              label: 'DNC' },
+  disqualified:      { stageId: '69c4bf2f-3564-4a8a-b51c-3aec4d430c1a', handoffReason: null,               label: 'Disqualified' },
+  engaging_with_ai:  { stageId: '5319f2ca-f208-4416-bf75-3843ac6b0d67', handoffReason: null,               label: 'Engaging with AI', skipIfAtStageIds: ENGAGING_SKIP_STAGES }
 };
 
 // Map internal terminal_outcome values the bot produces → feature outcome labels.
@@ -307,6 +318,20 @@ async function routeOpportunity(ghlToken, locationId, contactId, outcome, opts =
       status: opp.status
     };
     result.steps.push({ step: 'search', ok: true, found: 1, opportunityId: opp.id, prior: result.prior });
+
+    // Skip if already at-or-past the target stage. Used by "engaging_with_ai"
+    // to avoid downgrading contacts who've already progressed to Appointment
+    // Set / Needs Human Contact / DNC / Disqualified, and to no-op when
+    // already at Engaging with AI.
+    const skipSet = Array.isArray(mapping.skipIfAtStageIds) ? mapping.skipIfAtStageIds : null;
+    if (skipSet && skipSet.includes(opp.pipelineStageId)) {
+      result.skipped = 'already_at_or_past_stage';
+      result.steps.push({ step: 'skip_check', ok: true, reason: 'already_at_or_past_stage', currentStageId: opp.pipelineStageId });
+      logger.log('pipeline_route', 'info', lc, 'Opportunity already at/past target stage, skipping', {
+        outcome, opportunityId: opp.id, currentStageId: opp.pipelineStageId
+      });
+      return result;
+    }
   } else {
     result.steps.push({ step: 'search', ok: true, found: 0 });
   }

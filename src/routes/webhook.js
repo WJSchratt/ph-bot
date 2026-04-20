@@ -226,6 +226,35 @@ router.post('/inbound', async (req, res) => {
       conv.is_active = true;
     }
 
+    // First-reply pipeline move: if this is the contact's first inbound in
+    // our bot's conversation (jsonb history empty at read-time), mark the
+    // opportunity as "Engaging with AI" so the dashboard reflects active
+    // bot engagement. routeOpportunity handles no-op / skip-if-downstream
+    // internally, so this is safe to fire on every "first" inbound.
+    const isFirstReply = Array.isArray(conv.messages) && conv.messages.length === 0;
+    if (isFirstReply && parsed.ghl_token && parsed.location_id) {
+      try {
+        const contactName = [conv.first_name || parsed.first_name, conv.last_name || parsed.last_name]
+          .filter(Boolean).join(' ').trim() || null;
+        const engRes = await ghlPipeline.routeOpportunity(
+          parsed.ghl_token,
+          parsed.location_id,
+          conv.contact_id,
+          'engaging_with_ai',
+          { logCtx: contactId, contactName }
+        );
+        logger.log('pipeline_route', 'info', contactId, 'first-reply engaging_with_ai', {
+          opportunityId: engRes.opportunityId,
+          created: engRes.created,
+          skipped: engRes.skipped || null,
+          prior_stage: engRes.prior?.pipelineStageId || null,
+          error: engRes.error || null
+        });
+      } catch (engErr) {
+        logger.log('pipeline_route', 'error', contactId, 'first-reply engaging_with_ai threw', { error: engErr.message });
+      }
+    }
+
     // Log inbound
     await store.markReplyToPreviousOutbound(conv.id);
     await store.logMessage({
