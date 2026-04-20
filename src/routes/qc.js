@@ -237,12 +237,31 @@ async function buildUnifiedThread(ghlConversationId, locationId) {
   }
 
   // Fingerprint index for dedup when merging local messages. A message is "same"
-  // if content-first-80-chars matches AND timestamps are within 2 minutes.
-  // GHL's pulled timestamps can drift a few seconds vs. our local store.
-  const fpBucket = (content, ts) => {
+  // if content-first-80-chars matches AND timestamps are within a ~5-min window.
+  // GHL's pulled timestamps can drift a few seconds vs. our local store; short
+  // inbound replies like "STOP" or "Yes" also match on content alone since
+  // those are practically always unique per conversation.
+  const BUCKET_MS = 300000; // 5 minutes
+  const fpKey = (content, bucket) => {
     const body = String(content || '').trim().slice(0, 80).toLowerCase();
-    const bucket = Math.floor((ts || 0) / 120000); // 2-min bucket
     return body + '|' + bucket;
+  };
+  const fpAdd = (seen, content, ts) => {
+    const bucket = Math.floor((ts || 0) / BUCKET_MS);
+    seen.add(fpKey(content, bucket));
+    // Register adjacent buckets too so a sub-second spread across a boundary
+    // still dedups (e.g. one source at 21:47:59.999, other at 21:48:00.001).
+    seen.add(fpKey(content, bucket - 1));
+    seen.add(fpKey(content, bucket + 1));
+    const body = String(content || '').trim().toLowerCase();
+    if (body.length > 0 && body.length <= 12) seen.add('shortbody|' + body);
+  };
+  const fpHas = (seen, content, ts) => {
+    const bucket = Math.floor((ts || 0) / BUCKET_MS);
+    if (seen.has(fpKey(content, bucket))) return true;
+    const body = String(content || '').trim().toLowerCase();
+    if (body.length > 0 && body.length <= 12 && seen.has('shortbody|' + body)) return true;
+    return false;
   };
   const seenFp = new Set();
 
@@ -272,7 +291,7 @@ async function buildUnifiedThread(ghlConversationId, locationId) {
       firstOutboundFound = true;
     }
     const ts = r.created_at ? new Date(r.created_at).getTime() : 0;
-    seenFp.add(fpBucket(r.content, ts));
+    fpAdd(seenFp, r.content, ts);
     out.push({
       id: r.id,
       ghl_message_id: r.ghl_message_id,
@@ -314,9 +333,8 @@ async function buildUnifiedThread(ghlConversationId, locationId) {
             }
           } catch { /* fall through, keep raw */ }
         }
-        const fp = fpBucket(text, ts);
-        if (seenFp.has(fp)) continue;
-        seenFp.add(fp);
+        if (fpHas(seenFp, text, ts)) continue;
+        fpAdd(seenFp, text, ts);
         out.push({
           id: null,
           ghl_message_id: null,
@@ -341,9 +359,8 @@ async function buildUnifiedThread(ghlConversationId, locationId) {
       );
       for (const m of tableMsgsQ.rows) {
         const ts = m.created_at ? new Date(m.created_at).getTime() : 0;
-        const fp = fpBucket(m.content, ts);
-        if (seenFp.has(fp)) continue;
-        seenFp.add(fp);
+        if (fpHas(seenFp, m.content, ts)) continue;
+        fpAdd(seenFp, m.content, ts);
         out.push({
           id: null,
           ghl_message_id: null,
