@@ -480,6 +480,16 @@ async function applyMigrations() {
       );
     }
     console.log('[migrate] workflow_opener_patterns ensured + 5 patterns seeded (A2 + A4 paths A/B/C/D)');
+
+    // ElevenLabs post-call storage. Mirrored every agent's post-call webhook.
+    // Schema lives in db/migrations/001_create_elevenlabs_calls.sql so the SQL
+    // is reviewable as a single file; we just apply it here on boot.
+    const elMigrationPath = path.join(__dirname, '..', '..', 'db', 'migrations', '001_create_elevenlabs_calls.sql');
+    if (fs.existsSync(elMigrationPath)) {
+      const elSql = fs.readFileSync(elMigrationPath, 'utf8');
+      await pool.query(elSql);
+      console.log('[migrate] elevenlabs_calls ensured');
+    }
 }
 
 // CLI entry point — when run as `node src/db/migrate.js` or `npm run migrate`.

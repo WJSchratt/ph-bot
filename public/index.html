@@ -462,6 +462,8 @@ textarea.form-input{resize:vertical;min-height:80px;}
   <div class="nav-section">Tools</div>
   <div class="nav-item" data-tab="tab-sandbox" onclick="goTab('tab-sandbox')"><span class="nav-icon">&#9879;</span> Sandbox</div>
   <div class="nav-item" data-tab="tab-analyzer" onclick="goTab('tab-analyzer')"><span class="nav-icon">&#9881;</span> Analyzer <span class="nav-badge nb-cyan">NEW</span></div>
+  <div class="nav-item" data-tab="tab-elevenlabs" onclick="goTab('tab-elevenlabs')"><span class="nav-icon">&#9835;</span> 11 Labs Data <span class="nav-badge nb-cyan">NEW</span></div>
+  <div class="nav-item" data-tab="tab-ep" onclick="goTab('tab-ep')"><span class="nav-icon">&#9742;</span> EP <span class="nav-badge nb-amber">NEW</span></div>
   <div class="nav-section">System</div>
   <div class="nav-item" data-tab="tab-settings" onclick="goTab('tab-settings')"><span class="nav-icon">&#9881;</span> Settings</div>
   <div class="nav-item" data-tab="tab-devnotes" onclick="goTab('tab-devnotes')"><span class="nav-icon">&#128203;</span> Dev Notes <span class="nav-badge nb-cyan">NEW</span></div>
@@ -1151,6 +1153,33 @@ textarea.form-input{resize:vertical;min-height:80px;}
   </div>
 </div>
 
+<!-- ====== 11 LABS DATA ====== -->
+<div class="tab-content" id="tab-elevenlabs">
+  <div class="sh"><span class="sh-title">11 Labs Data</span><div class="sh-line"></div>
+    <select class="fsel" id="el-agent-filter" onchange="loadElevenLabs()" style="min-width:280px;"><option value="">All agents</option></select>
+    <input class="finput" id="el-start-date" type="date" onchange="loadElevenLabs()">
+    <input class="finput" id="el-end-date" type="date" onchange="loadElevenLabs()">
+    <button class="btn pri" onclick="loadElevenLabs()">Refresh</button>
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">All ElevenLabs post-call data. Every agent in the workspace writes here.</div>
+  <div id="el-meta" style="font-size:12px;color:var(--muted);margin-bottom:10px;"></div>
+  <div id="el-list"></div>
+  <div id="el-pager" style="margin-top:14px;display:flex;gap:8px;justify-content:center;"></div>
+</div>
+
+<!-- ====== EP ====== -->
+<div class="tab-content" id="tab-ep">
+  <div class="sh"><span class="sh-title">EP · After Hours Research Caller</span><div class="sh-line"></div>
+    <input class="finput" id="ep-start-date" type="date" onchange="loadEp()">
+    <input class="finput" id="ep-end-date" type="date" onchange="loadEp()">
+    <button class="btn pri" onclick="loadEp()">Refresh</button>
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">EP lead-gen flow. Voicemail rows are the highest-value (best sales play target) — highlighted below.</div>
+  <div id="ep-meta" style="font-size:12px;color:var(--muted);margin-bottom:10px;"></div>
+  <div id="ep-list"></div>
+  <div id="ep-pager" style="margin-top:14px;display:flex;gap:8px;justify-content:center;"></div>
+</div>
+
 <!-- ====== DEV CONSOLE ====== -->
 <div class="tab-content" id="tab-devconsole">
   <div class="dc-wrap">
@@ -1441,6 +1470,8 @@ function loadCurrentTab() {
     case 'tab-analyzer': loadAnalyzerAll(); break;
     case 'tab-devconsole': loadDevConsole(); break;
     case 'tab-weekly': loadWeeklyTab(); break;
+    case 'tab-elevenlabs': loadElevenLabs(); break;
+    case 'tab-ep': loadEp(); break;
   }
 }
 
@@ -4108,6 +4139,185 @@ function applyRoleVisibility(role) {
   setInterval(refreshHealthBadge, 60000);
   setInterval(refreshPendingChangesBadge, 30000);
 })();
+
+// ========== 11 LABS DATA + EP TABS ==========
+const EL_PAGE_SIZE = 25;
+let elState = { offset: 0 };
+let epState = { offset: 0 };
+let elAgentsLoaded = false;
+
+function fmtDuration(secs) {
+  if (secs === null || secs === undefined) return '-';
+  const s = parseInt(secs, 10);
+  if (!s) return '0s';
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return m ? `${m}m ${r}s` : `${r}s`;
+}
+function fmtDate(v) {
+  if (!v) return '-';
+  try { return new Date(v).toLocaleString(); } catch { return v; }
+}
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+function callResultPill(r) {
+  if (!r) return '<span class="pill">-</span>';
+  if (r === 'voicemail')        return '<span class="pill" style="background:rgba(34,197,94,.18);color:#4ade80;border-color:rgba(34,197,94,.4);">voicemail</span>';
+  if (r === 'dispatcher_blown') return '<span class="pill" style="background:rgba(251,191,36,.18);color:#fbbf24;border-color:rgba(251,191,36,.4);">dispatcher_blown</span>';
+  if (r === 'live_pickup')      return '<span class="pill" style="background:rgba(59,130,246,.16);color:#60a5fa;border-color:rgba(59,130,246,.4);">live_pickup</span>';
+  return `<span class="pill">${escapeHtml(r)}</span>`;
+}
+function ghlStatusPill(s) {
+  if (!s) return '';
+  const color = s === 'success' ? '#4ade80' : s === 'pending' ? '#fbbf24' : s === 'failed' ? '#ff4560' : '#9ca3af';
+  return `<span class="pill" style="color:${color};border-color:${color}40;">${escapeHtml(s)}</span>`;
+}
+
+async function loadElAgents() {
+  if (elAgentsLoaded) return;
+  const sel = document.getElementById('el-agent-filter');
+  if (!sel) return;
+  try {
+    const r = await api('/api/elevenlabs/agents');
+    if (r && r.agents) {
+      for (const a of r.agents) {
+        const opt = document.createElement('option');
+        opt.value = a.agent_name;
+        opt.textContent = `${a.agent_name} (${a.count})`;
+        sel.appendChild(opt);
+      }
+      elAgentsLoaded = true;
+    }
+  } catch {}
+}
+
+function renderCallRow(c, { epMode }) {
+  const phone = escapeHtml(c.external_number || '');
+  const dur = fmtDuration(c.duration_secs);
+  const successCls = c.call_successful === 'success' ? 'color:#4ade80;' : c.call_successful === 'failure' ? 'color:#fbbf24;' : '';
+  const rowId = `el-row-${escapeHtml(c.conversation_id)}`;
+  const detailId = `el-det-${escapeHtml(c.conversation_id)}`;
+  const audio = c.has_audio && c.audio_url
+    ? `<audio controls preload="none" src="${escapeHtml(c.audio_url)}" style="height:28px;max-width:220px;"></audio>`
+    : c.has_audio
+      ? `<span class="pill" style="font-size:11px;">audio ${escapeHtml(c.audio_fetch_status || 'pending')}</span>`
+      : '<span style="color:var(--muted);font-size:11px;">no audio</span>';
+
+  let epCols = '';
+  let rowStyle = '';
+  if (epMode) {
+    if (c.call_result === 'voicemail') rowStyle = 'background:rgba(34,197,94,.07);';
+    epCols = `
+      <td>${callResultPill(c.call_result)}</td>
+      <td>${escapeHtml(c.day_of_week_called || '-')}</td>
+      <td>${c.ghl_contact_id ? `<a href="https://app.gohighlight.com/v2/location/K9xKBbQkhSOUZs6KzTAy/contacts/detail/${escapeHtml(c.ghl_contact_id)}" target="_blank" style="color:var(--cyan);">view</a>` : '-'} ${ghlStatusPill(c.ghl_update_status)}</td>`;
+  }
+
+  const commonLead = `
+    <td style="white-space:nowrap;">${fmtDate(c.start_time)}</td>
+    <td>${escapeHtml(c.agent_name || '-')}</td>
+    <td>${escapeHtml(c.call_direction || '-')}</td>
+    <td style="white-space:nowrap;">${phone}</td>
+    <td>${dur}</td>`;
+
+  const nonEpCols = epMode ? '' : `
+    <td>${c.cost_credits || '-'}</td>
+    <td style="${successCls}">${escapeHtml(c.call_successful || '-')}</td>
+    <td>${escapeHtml(c.termination_reason || '-')}</td>`;
+
+  return `
+    <tr id="${rowId}" style="${rowStyle}">
+      ${commonLead}
+      ${nonEpCols}
+      ${epCols}
+      <td>${audio}</td>
+      <td>
+        <span style="font-size:12px;cursor:pointer;color:var(--cyan);" onclick="toggleElDetail('${escapeHtml(c.conversation_id)}')">summary</span>
+      </td>
+    </tr>
+    <tr id="${detailId}" style="display:none;"><td colspan="${epMode ? 9 : 10}" style="background:rgba(255,255,255,.02);padding:12px 14px;">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">${escapeHtml(c.call_summary_title || '')} · <code>${escapeHtml(c.conversation_id)}</code></div>
+      <div style="font-size:13px;white-space:pre-wrap;">${escapeHtml(c.transcript_summary || '(no summary)')}</div>
+    </td></tr>`;
+}
+
+function toggleElDetail(convId) {
+  const el = document.getElementById(`el-det-${convId}`);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? 'table-row' : 'none';
+}
+
+function buildPager(container, state, total, reloadFn) {
+  if (!container) return;
+  container.innerHTML = '';
+  const page = Math.floor(state.offset / EL_PAGE_SIZE) + 1;
+  const pages = Math.max(1, Math.ceil(total / EL_PAGE_SIZE));
+  const prev = document.createElement('button');
+  prev.className = 'btn';
+  prev.textContent = 'Prev';
+  prev.disabled = state.offset === 0;
+  prev.onclick = () => { state.offset = Math.max(0, state.offset - EL_PAGE_SIZE); reloadFn(); };
+  const next = document.createElement('button');
+  next.className = 'btn';
+  next.textContent = 'Next';
+  next.disabled = state.offset + EL_PAGE_SIZE >= total;
+  next.onclick = () => { state.offset += EL_PAGE_SIZE; reloadFn(); };
+  const lbl = document.createElement('span');
+  lbl.style.cssText = 'align-self:center;color:var(--muted);font-size:12px;';
+  lbl.textContent = `Page ${page} / ${pages} · ${total} calls`;
+  container.appendChild(prev); container.appendChild(lbl); container.appendChild(next);
+}
+
+async function loadElevenLabs() {
+  await loadElAgents();
+  const agent = document.getElementById('el-agent-filter')?.value || '';
+  const start = document.getElementById('el-start-date')?.value || '';
+  const end = document.getElementById('el-end-date')?.value || '';
+  const params = new URLSearchParams({ limit: EL_PAGE_SIZE, offset: elState.offset });
+  if (agent) params.set('agent_name', agent);
+  if (start) params.set('start_date', start);
+  if (end) params.set('end_date', end);
+  const listEl = document.getElementById('el-list');
+  listEl.innerHTML = '<div style="color:var(--muted);padding:20px;">Loading...</div>';
+  const r = await api('/api/elevenlabs/calls?' + params.toString());
+  if (!r || !r.ok) { listEl.innerHTML = '<div style="color:var(--red);padding:20px;">Failed to load.</div>'; return; }
+  document.getElementById('el-meta').textContent = `${r.total} total calls`;
+  if (!r.rows.length) { listEl.innerHTML = '<div style="color:var(--muted);padding:20px;">No calls yet.</div>'; return; }
+  listEl.innerHTML = `
+    <table class="t" style="width:100%;">
+      <thead><tr>
+        <th>Date</th><th>Agent</th><th>Direction</th><th>Phone</th><th>Duration</th>
+        <th>Cost</th><th>Successful</th><th>Termination</th><th>Audio</th><th></th>
+      </tr></thead>
+      <tbody>${r.rows.map((c) => renderCallRow(c, { epMode: false })).join('')}</tbody>
+    </table>`;
+  buildPager(document.getElementById('el-pager'), elState, r.total, loadElevenLabs);
+}
+
+async function loadEp() {
+  const start = document.getElementById('ep-start-date')?.value || '';
+  const end = document.getElementById('ep-end-date')?.value || '';
+  const params = new URLSearchParams({ ep: '1', limit: EL_PAGE_SIZE, offset: epState.offset });
+  if (start) params.set('start_date', start);
+  if (end) params.set('end_date', end);
+  const listEl = document.getElementById('ep-list');
+  listEl.innerHTML = '<div style="color:var(--muted);padding:20px;">Loading...</div>';
+  const r = await api('/api/elevenlabs/calls?' + params.toString());
+  if (!r || !r.ok) { listEl.innerHTML = '<div style="color:var(--red);padding:20px;">Failed to load.</div>'; return; }
+  document.getElementById('ep-meta').textContent = `${r.total} EP calls`;
+  if (!r.rows.length) { listEl.innerHTML = '<div style="color:var(--muted);padding:20px;">No EP calls yet.</div>'; return; }
+  listEl.innerHTML = `
+    <table class="t" style="width:100%;">
+      <thead><tr>
+        <th>Date</th><th>Agent</th><th>Direction</th><th>Phone</th><th>Duration</th>
+        <th>Result</th><th>Day</th><th>GHL</th><th>Audio</th><th></th>
+      </tr></thead>
+      <tbody>${r.rows.map((c) => renderCallRow(c, { epMode: true })).join('')}</tbody>
+    </table>`;
+  buildPager(document.getElementById('ep-pager'), epState, r.total, loadEp);
+}
 </script>
 </body>
 </html>

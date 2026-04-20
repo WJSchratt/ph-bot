@@ -24,6 +24,8 @@ const weeklySummaryModule = require('./routes/weeklySummary');
 const weeklySummaryRouter = weeklySummaryModule.router;
 const cronRoutes = require('./routes/cron');
 const jobsRouter = require('./routes/jobs');
+const elevenlabsWebhookRouter = require('./routes/elevenlabsWebhook');
+const elevenlabsApiRouter = require('./routes/elevenlabsApi');
 const conversationStore = require('./services/conversationStore');
 const ghl = require('./services/ghl');
 const logger = require('./services/logger');
@@ -41,6 +43,11 @@ app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 // Webhook (GHL-facing) stays unauthenticated. /api/auth has public endpoints
 // (login) and admin-only endpoints (users CRUD); those gate themselves inline.
 app.use('/webhook', webhookRouter);
+// ElevenLabs post-call webhook: mounted BEFORE /api requireAuth so the signed
+// webhook can reach us without an app session token. The route uses a raw
+// body parser internally for HMAC verification — don't move it under the
+// global express.json() path.
+app.use('/api/elevenlabs', elevenlabsWebhookRouter);
 app.use('/api/auth', authRouter);
 
 // Everything else under /api/*, /sandbox/*, /cron/* requires a valid session token.
@@ -95,6 +102,8 @@ app.use('/api', kbRouter);
 app.use('/api', weeklySummaryRouter);
 app.use('/api', testSyncRouter);
 app.use('/api', jobsRouter);
+// Dashboard-facing ElevenLabs endpoints (list/detail/audio stream). Requires auth.
+app.use('/api', elevenlabsApiRouter);
 app.use('/sandbox', sandboxRouter);
 app.use('/cron', cronRoutes.router);
 
