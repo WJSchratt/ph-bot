@@ -2391,7 +2391,11 @@ function renderQcThread(thread) {
       esc(m.content || '');
     msgsEl.appendChild(d);
   }
-  msgsEl.scrollTop = msgsEl.scrollHeight;
+  // Scroll to the TOP so reviewers read the conversation start-to-finish
+  // (drips → first lead reply → bot handling). Auto-scrolling to the bottom
+  // (like a live chat) hides the drip context and makes threads look like
+  // they're missing messages.
+  msgsEl.scrollTop = 0;
 }
 
 async function qcAction(outcome) {
