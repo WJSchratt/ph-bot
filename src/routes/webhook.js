@@ -142,7 +142,13 @@ router.post('/inbound', async (req, res) => {
     if (!parsed.contact_id || !parsed.location_id) {
       return res.status(400).json({ error: 'missing contact_id or location_id' });
     }
-    if (!parsed.messageBody) {
+    // Empty/null bodies must not trigger any bot response. GHL sometimes
+    // delivers MMS or empty SMS with body=null (serialized to the literal
+    // string "null") or just whitespace — don't feed those to Claude and
+    // don't trip the cooldown reply either.
+    const trimmedBody = String(parsed.messageBody || '').trim();
+    if (!trimmedBody || trimmedBody.toLowerCase() === 'null' || trimmedBody.toLowerCase() === 'undefined') {
+      logger.log('webhook', 'info', contactId, 'Skipped empty/null inbound', { raw_body: parsed.messageBody });
       return res.status(200).json({ ok: true, skipped: 'empty message' });
     }
 
@@ -154,8 +160,14 @@ router.post('/inbound', async (req, res) => {
     if (store.shouldDeactivateForOutcome(conv.terminal_outcome)) {
       const lastMsgAt = conv.last_message_at ? new Date(conv.last_message_at).getTime() : 0;
       const elapsed = Date.now() - lastMsgAt;
+      const outcomeKey = String(conv.terminal_outcome || '').toLowerCase();
+      const isDnc = outcomeKey === 'dnc' || outcomeKey === 'opted_out' || outcomeKey === 'opt_out' || outcomeKey === 'stop_requested';
       if (elapsed < TERMINAL_COOLDOWN_MS) {
-        const shortReply = `hey ${conv.first_name || 'there'}, ${conv.agent_name || 'our agent'} will be with you shortly`;
+        // DNC/opt-out: lead explicitly said stop. Log the inbound for
+        // audit, but NEVER send a "will be with you shortly" follow-up
+        // (that's what Steven Hedtke got — he opted out, then the system
+        // texted him again 20 minutes later saying "Jeremiah will be with
+        // you shortly" and he replied asking why we kept texting).
         await store.logMessage({
           conversationId: conv.id,
           contactId: conv.contact_id,
@@ -164,6 +176,13 @@ router.post('/inbound', async (req, res) => {
           content: parsed.messageBody,
           messageType: 'post_terminal'
         });
+        if (isDnc) {
+          logger.log('webhook', 'info', contactId, 'Post-DNC inbound — silent (no reply sent)', { outcome: outcomeKey });
+          return res.status(200).json({ ok: true, cooldown: true, silent_dnc: true });
+        }
+        // Non-DNC deactivating outcome (currently none, but future-proofing) —
+        // fall through to the canned cooldown reply.
+        const shortReply = `hey ${conv.first_name || 'there'}, ${conv.agent_name || 'our agent'} will be with you shortly`;
         if (parsed.ghl_token) {
           await ghl.sendMessagesSequentially(parsed.ghl_token, conv.contact_id, [shortReply]);
         }
