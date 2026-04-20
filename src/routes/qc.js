@@ -32,26 +32,47 @@ function scenarioFilter(scenario) {
 // Get pending QC conversations
 router.get('/qc/pending', async (req, res) => {
   try {
-    const { page = 1, limit = 20 } = req.query;
+    const { page = 1, limit = 20, search, all } = req.query;
     const lim = Math.min(parseInt(limit, 10) || 20, 100);
     const off = (Math.max(parseInt(page, 10) || 1, 1) - 1) * lim;
 
+    // `all=true` drops the qc_reviewed + terminal_outcome filters so reviewers
+    // can browse every conversation (including in-progress + already-reviewed).
+    // `search` matches first/last name OR phone, case-insensitive substring.
+    const includeAll = String(all || '') === 'true' || all === '1';
+    const clauses = ['c.is_sandbox = FALSE'];
+    const params = [];
+    let p = 1;
+    if (!includeAll) {
+      clauses.push('c.qc_reviewed = FALSE');
+      clauses.push('c.terminal_outcome IS NOT NULL');
+    }
+    if (search && String(search).trim()) {
+      params.push('%' + String(search).trim().toLowerCase() + '%');
+      clauses.push(`(LOWER(c.first_name) LIKE $${p} OR LOWER(c.last_name) LIKE $${p} OR LOWER(c.first_name || ' ' || c.last_name) LIKE $${p} OR c.phone LIKE $${p})`);
+      p++;
+    }
+    const where = 'WHERE ' + clauses.join(' AND ');
+    params.push(lim); const limIdx = p++;
+    params.push(off); const offIdx = p++;
+
     const result = await db.query(
-      `SELECT c.id, c.contact_id, c.location_id, c.first_name, c.last_name, c.product_type,
-              c.contact_stage, c.terminal_outcome, c.ai_self_score, c.last_message_at,
+      `SELECT c.id, c.contact_id, c.location_id, c.first_name, c.last_name, c.phone, c.product_type,
+              c.contact_stage, c.terminal_outcome, c.qc_reviewed, c.ai_self_score, c.last_message_at,
               jsonb_array_length(c.messages) AS message_count,
               COALESCE(s.name, c.location_id) AS subaccount_name
        FROM conversations c
        LEFT JOIN subaccounts s ON s.ghl_location_id = c.location_id
-       WHERE c.is_sandbox = FALSE AND c.qc_reviewed = FALSE AND c.terminal_outcome IS NOT NULL
-       ORDER BY c.last_message_at DESC
-       LIMIT $1 OFFSET $2`,
-      [lim, off]
+       ${where}
+       ORDER BY c.last_message_at DESC NULLS LAST
+       LIMIT $${limIdx} OFFSET $${offIdx}`,
+      params
     );
 
+    const countParams = params.slice(0, p - 3); // exclude limit+offset
     const countRes = await db.query(
-      `SELECT COUNT(*)::int AS total FROM conversations
-       WHERE is_sandbox = FALSE AND qc_reviewed = FALSE AND terminal_outcome IS NOT NULL`
+      `SELECT COUNT(*)::int AS total FROM conversations c ${where}`,
+      countParams
     );
 
     res.json({
@@ -87,11 +108,19 @@ router.get('/qc/stats', async (req, res) => {
     );
 
     const stats = result.rows[0];
-    const totalReviewed = stats.total_reviewed || 1;
+    const totalReviewed = stats.total_reviewed || 0;
+    // Accuracy: approved = 1.0, modified = 0.6 (partial credit), failed = 0.
+    // Previous bug: divided `stats.total_reviewed || 1` then *100, but the rest
+    // of the frontend already runs .toFixed(1)% on it — so when stats came
+    // back as "83.3" the UI showed 8330% or similar after another multiply.
+    // Now we return a plain 0–100 number and the UI formats it.
+    const accuracy = totalReviewed > 0
+      ? (stats.approved + stats.modified * 0.6) / totalReviewed * 100
+      : 0;
     res.json({
       ...stats,
       pending: pendingRes.rows[0].pending,
-      accuracy: ((stats.approved + stats.modified * 0.6) / totalReviewed * 100).toFixed(1)
+      accuracy: Number(accuracy.toFixed(1))
     });
   } catch (err) {
     console.error('[qc/stats] error', err);
@@ -207,6 +236,16 @@ async function buildUnifiedThread(ghlConversationId, locationId) {
     }
   }
 
+  // Fingerprint index for dedup when merging local messages. A message is "same"
+  // if content-first-80-chars matches AND timestamps are within 2 minutes.
+  // GHL's pulled timestamps can drift a few seconds vs. our local store.
+  const fpBucket = (content, ts) => {
+    const body = String(content || '').trim().slice(0, 80).toLowerCase();
+    const bucket = Math.floor((ts || 0) / 120000); // 2-min bucket
+    return body + '|' + bucket;
+  };
+  const seenFp = new Set();
+
   let firstOutboundFound = false;
   const out = [];
   for (const r of ghlRows) {
@@ -232,6 +271,8 @@ async function buildUnifiedThread(ghlConversationId, locationId) {
       }
       firstOutboundFound = true;
     }
+    const ts = r.created_at ? new Date(r.created_at).getTime() : 0;
+    seenFp.add(fpBucket(r.content, ts));
     out.push({
       id: r.id,
       ghl_message_id: r.ghl_message_id,
@@ -244,6 +285,86 @@ async function buildUnifiedThread(ghlConversationId, locationId) {
       editable: source === 'claude'
     });
   }
+
+  // --- Merge local conversations.messages JSONB + messages table ---
+  // When GHL pull is stale/incomplete (common — pulls are manual), the local
+  // store often has the actual bot turns that haven't synced back yet. We
+  // append anything not already represented in ghl_messages, then resort.
+  if (contactId) {
+    const localConvQ = await db.query(
+      `SELECT id, messages FROM conversations
+        WHERE contact_id = $1 AND location_id = $2
+        ORDER BY last_message_at DESC NULLS LAST
+        LIMIT 1`,
+      [contactId, locationId]
+    );
+    const convRow = localConvQ.rows[0];
+    if (convRow) {
+      const jsonbMsgs = Array.isArray(convRow.messages) ? convRow.messages : [];
+      for (const m of jsonbMsgs) {
+        const ts = m.timestamp ? new Date(m.timestamp).getTime() : 0;
+        const isOutbound = m.role === 'assistant';
+        let text = String(m.content || '');
+        if (isOutbound && text.includes('{') && text.includes('"messages"')) {
+          // Claude responses store as raw JSON; extract the messages array.
+          try {
+            const parsed = JSON.parse(text);
+            if (parsed && Array.isArray(parsed.messages) && parsed.messages.length) {
+              text = parsed.messages.join('\n');
+            }
+          } catch { /* fall through, keep raw */ }
+        }
+        const fp = fpBucket(text, ts);
+        if (seenFp.has(fp)) continue;
+        seenFp.add(fp);
+        out.push({
+          id: null,
+          ghl_message_id: null,
+          direction: isOutbound ? 'outbound' : 'inbound',
+          content: text,
+          message_type: null,
+          created_at: m.timestamp || null,
+          cluster_id: null,
+          source: isOutbound ? 'claude' : 'user',
+          editable: isOutbound
+        });
+      }
+
+      // Also merge rows from messages table (keyed by conversation_id) — these
+      // are the persisted per-turn rows that may include cluster_ids the JSONB
+      // doesn't have. Dedup against everything we've already collected.
+      const tableMsgsQ = await db.query(
+        `SELECT id, direction, content, message_type, created_at
+           FROM messages WHERE conversation_id = $1
+          ORDER BY created_at ASC`,
+        [convRow.id]
+      );
+      for (const m of tableMsgsQ.rows) {
+        const ts = m.created_at ? new Date(m.created_at).getTime() : 0;
+        const fp = fpBucket(m.content, ts);
+        if (seenFp.has(fp)) continue;
+        seenFp.add(fp);
+        out.push({
+          id: null,
+          ghl_message_id: null,
+          direction: m.direction,
+          content: m.content,
+          message_type: m.message_type,
+          created_at: m.created_at,
+          cluster_id: null,
+          source: m.direction === 'inbound' ? 'user' : 'claude',
+          editable: m.direction === 'outbound'
+        });
+      }
+    }
+  }
+
+  // Sort merged results by timestamp ascending so the thread reads naturally.
+  out.sort((a, b) => {
+    const at = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const bt = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return at - bt;
+  });
   return out;
 }
 

@@ -2206,7 +2206,7 @@ async function loadQC() {
     document.getElementById('qc-stat-approved').textContent = fmtNum(stats.approved);
     document.getElementById('qc-stat-failed').textContent = fmtNum(stats.failed);
     document.getElementById('qc-stat-modified').textContent = fmtNum(stats.modified);
-    document.getElementById('qc-accuracy-display').innerHTML = 'Accuracy: <strong style="color:var(--green);">' + fmtPct(stats.accuracy) + '</strong>';
+    document.getElementById('qc-accuracy-display').innerHTML = 'Accuracy: <strong style="color:var(--green);">' + fmtPct2(stats.accuracy) + '</strong>';
     const badge = document.getElementById('nav-qc-badge');
     if (stats.pending > 0) { badge.textContent = stats.pending; } else { badge.textContent = ''; }
   }
