@@ -2572,22 +2572,13 @@ async function loadQcByCluster() {
 async function pullRandomConv() {
   const data = await api('/api/qc/pull-random', { method: 'POST' });
   if (!data || !data.conversation) { toast('No random conversation available.'); return; }
-  selectedQcConvId = data.conversation.id;
+  // Route through the same merged-thread renderer the list click uses, so
+  // random pulls ALSO show drip history + pulled GHL messages, not just
+  // the local bot turns. Previously pull-random rendered data.messages
+  // (local-only), hiding every pre-bot drip and making threads look short.
   const conv = data.conversation;
-  document.getElementById('qc-lead-name').textContent = (conv.first_name || '') + ' ' + (conv.last_name || '');
-  document.getElementById('qc-lead-meta').textContent = 'Random pull -- ' + (conv.product_type || '');
-
-  const msgsEl = document.getElementById('qc-messages');
-  msgsEl.innerHTML = '';
-  (data.messages || []).forEach(m => {
-    const d = document.createElement('div');
-    const isBot = m.direction === 'outbound';
-    d.className = 'bubble ' + (isBot ? 'bot' : 'lead');
-    d.innerHTML = '<div class="bubble-lbl">' + (isBot ? 'AI Bot' : 'Lead') + '</div>' + esc(m.content || '');
-    msgsEl.appendChild(d);
-  });
-  msgsEl.scrollTop = msgsEl.scrollHeight;
   toast('Random conversation pulled: ' + (conv.first_name || 'Unknown'));
+  loadConversation(conv.id, conv);
 }
 
 // ========== AI REVIEW QUEUE ==========
