@@ -107,10 +107,12 @@ async function upsertBase(row, rawPayload) {
   return r.rows[0];
 }
 
-async function setEpMetadata(conversationId, { is_ep, call_result, day_of_week_called }) {
+async function setEpMetadata(conversationId, { is_ep, call_result, day_of_week_called, call_number }) {
   await db.query(
-    `UPDATE elevenlabs_calls SET is_ep=$2, call_result=$3, day_of_week_called=$4, updated_at=NOW() WHERE conversation_id=$1`,
-    [conversationId, !!is_ep, call_result || null, day_of_week_called || null]
+    `UPDATE elevenlabs_calls
+        SET is_ep=$2, call_result=$3, day_of_week_called=$4, call_number=$5, updated_at=NOW()
+      WHERE conversation_id=$1`,
+    [conversationId, !!is_ep, call_result || null, day_of_week_called || null, Number.isFinite(call_number) ? call_number : null]
   );
 }
 
@@ -133,7 +135,7 @@ async function setAudio(conversationId, { status, mime, bytes, url }) {
 
 async function findRecentByPhone(externalNumber, windowMinutes = 10, excludeConversationId = null) {
   const sql = `
-    SELECT conversation_id, call_result, ghl_update_status, start_time
+    SELECT conversation_id, call_result, ghl_update_status, start_time, duration_secs, call_number
       FROM elevenlabs_calls
      WHERE external_number = $1
        AND start_time >= NOW() - ($2 || ' minutes')::interval
@@ -176,7 +178,7 @@ async function list({ isEp, agentName, startDate, endDate, limit = 50, offset = 
            call_summary_title, evaluation_criteria, dynamic_variables,
            has_audio, audio_url, audio_fetch_status,
            ghl_contact_id, ghl_update_status,
-           is_ep, call_result, day_of_week_called, received_at
+           is_ep, call_result, day_of_week_called, call_number, received_at
       FROM elevenlabs_calls
      ${where}
      ORDER BY start_time DESC NULLS LAST, received_at DESC

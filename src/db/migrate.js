@@ -490,6 +490,13 @@ async function applyMigrations() {
       await pool.query(elSql);
       console.log('[migrate] elevenlabs_calls ensured');
     }
+
+    const el2Path = path.join(__dirname, '..', '..', 'db', 'migrations', '002_add_call_number.sql');
+    if (fs.existsSync(el2Path)) {
+      const el2Sql = fs.readFileSync(el2Path, 'utf8');
+      await pool.query(el2Sql);
+      console.log('[migrate] elevenlabs_calls.call_number ensured');
+    }
 }
 
 // CLI entry point — when run as `node src/db/migrate.js` or `npm run migrate`.

@@ -102,7 +102,8 @@ const FIELD_NAME_HINTS = {
   call_recording:   ['call recording', 'recording url', 'audio url', 'audio link'],
   call_summary:     ['call summary', 'transcript summary', 'transcript', 'summary'],
   conversation_id:  ['conversation id', 'conv id', 'elevenlabs id'],
-  concurrent_call:  ['concurrent call', 'concurrent calls', 'concurrent', 'multi call', 'multi-call', 'burst']
+  concurrent_call:  ['concurrent call', 'concurrent calls', 'concurrent', 'multi call', 'multi-call', 'burst'],
+  call_number:      ['call number', 'call #', 'call count', 'attempt number', 'attempt #', 'nth call']
 };
 
 function pickFieldIdByHints(fields, hints) {
@@ -139,15 +140,29 @@ async function updateContactCustomFields(contactId, customFields) {
 
 // Given pre-fetched siblings (same phone, last 10 min, self excluded), decide
 // whether the current call's result should overwrite the existing GHL update.
-// Voicemail beats live_pickup beats unknown, etc. Ties: newer wins so the
-// latest audio/transcript replaces an earlier tied result.
-function shouldProceedGivenSiblings(callResult, siblings) {
+// Voicemail beats live_pickup beats unknown, etc. On ties, the shorter
+// duration wins — a shorter voicemail is more awkward/raw in the VSL video,
+// which Jeremiah wants to feature. Strict tie goes to the existing update
+// so we don't thrash for identical-duration pairs.
+function shouldProceedGivenSiblings(callResult, currentDurationSecs, siblings) {
   if (!siblings.length) return true;
   const myRank = RESULT_PRIORITY[callResult] ?? 0;
   const existingUpdates = siblings.filter((s) => s.ghl_update_status === 'success');
   if (!existingUpdates.length) return true;
   const highestExisting = Math.max(...existingUpdates.map((s) => RESULT_PRIORITY[s.call_result] ?? 0));
-  return myRank >= highestExisting;
+  if (myRank > highestExisting) return true;
+  if (myRank < highestExisting) return false;
+  // Tied on result rank: pick shortest duration for VSL impact.
+  const peers = existingUpdates.filter((s) => (RESULT_PRIORITY[s.call_result] ?? 0) === myRank);
+  const shortestPeer = peers.reduce((min, s) => {
+    const d = Number(s.duration_secs);
+    if (!Number.isFinite(d)) return min;
+    return min === null || d < min ? d : min;
+  }, null);
+  const myDur = Number(currentDurationSecs);
+  if (!Number.isFinite(myDur)) return false;
+  if (shortestPeer === null) return true;
+  return myDur < shortestPeer;
 }
 
 async function processEpCall({ payload, row, conversationId, dryRun }) {
@@ -157,23 +172,26 @@ async function processEpCall({ payload, row, conversationId, dryRun }) {
   const startSecs = payload?.metadata?.start_time_unix_secs;
   const dow = dayOfWeekFromUnix(startSecs, tz);
 
-  await store.setEpMetadata(conversationId, {
-    is_ep: true,
-    call_result: callResult,
-    day_of_week_called: dow
-  });
-
   const siblings = row.external_number
     ? await store.findRecentByPhone(row.external_number, 10, conversationId)
     : [];
   const concurrentCall = siblings.length > 0 ? 'yes' : 'no';
+  const callNumber = siblings.length + 1;
+
+  await store.setEpMetadata(conversationId, {
+    is_ep: true,
+    call_result: callResult,
+    day_of_week_called: dow,
+    call_number: callNumber
+  });
 
   if (dryRun) {
     logger.log('ep', 'info', conversationId, 'EP dryRun — skipping GHL lookup/update', {
-      call_result: callResult, day_of_week_called: dow, phone: row.external_number, concurrent_call: concurrentCall
+      call_result: callResult, day_of_week_called: dow, phone: row.external_number,
+      concurrent_call: concurrentCall, call_number: callNumber
     });
     await store.setGhlContact(conversationId, null, 'skipped_dry_run');
-    return { dryRun: true, call_result: callResult, day_of_week_called: dow, concurrent_call: concurrentCall };
+    return { dryRun: true, call_result: callResult, day_of_week_called: dow, concurrent_call: concurrentCall, call_number: callNumber };
   }
 
   const contact = await lookupContactByPhone(row.external_number);
@@ -188,7 +206,7 @@ async function processEpCall({ payload, row, conversationId, dryRun }) {
   const folderFields = await listEpFolderFields();
   const fieldMap = buildFieldMapping(folderFields);
 
-  const proceed = shouldProceedGivenSiblings(callResult, siblings);
+  const proceed = shouldProceedGivenSiblings(callResult, row.duration_secs, siblings);
   if (!proceed) {
     logger.log('ep', 'info', conversationId, 'Skipping main GHL update — sibling with better result already synced', {
       phone: row.external_number, call_result: callResult
@@ -225,6 +243,7 @@ async function processEpCall({ payload, row, conversationId, dryRun }) {
   push('call_summary', row.transcript_summary);
   push('conversation_id', conversationId);
   push('concurrent_call', concurrentCall);
+  push('call_number', callNumber);
   // call_recording populated later by elevenlabsAudio.finalizeEpRecording
 
   if (unmatched.length) {
