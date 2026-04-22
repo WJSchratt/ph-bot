@@ -2,7 +2,10 @@ const axios = require('axios');
 const db = require('../db');
 const logger = require('./logger');
 
-const CHECK_INTERVAL_MS = 60 * 1000;
+// 5-min interval instead of 60s: cuts background DB writes + outbound HTTP
+// by 5x without breaking the uptime % math (which is ratio-based, not count-based).
+// Hourly-bucket resolution is still 12 data points per hour — plenty for charts.
+const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const GHL_BASE = 'https://services.leadconnectorhq.com';
 
 let intervalHandle = null;
