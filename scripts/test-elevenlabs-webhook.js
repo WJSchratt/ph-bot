@@ -45,6 +45,9 @@ function applyScenario(s) {
   else if (scenario === 'unknown')      setAll('failure', 'failure', 'failure');
   // Vary conversation_id per scenario so every test upserts a distinct row
   s.conversation_id = `${s.conversation_id}_${scenario}_${Date.now().toString(36)}`;
+  // Stamp a fresh call start time so findRecentByPhone's 10-min window sees
+  // sequential test runs as siblings (the checked-in sample is frozen at Apr 2026).
+  if (s.metadata) s.metadata.start_time_unix_secs = Math.floor(Date.now() / 1000);
 }
 
 applyScenario(sample);
