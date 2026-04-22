@@ -4216,7 +4216,7 @@ function renderCallRow(c, { epMode }) {
     epCols = `
       <td>${callResultPill(c.call_result)}</td>
       <td>${escapeHtml(c.day_of_week_called || '-')}</td>
-      <td>${c.ghl_contact_id ? `<a href="https://app.gohighlight.com/v2/location/K9xKBbQkhSOUZs6KzTAy/contacts/detail/${escapeHtml(c.ghl_contact_id)}" target="_blank" style="color:var(--cyan);">view</a>` : '-'} ${ghlStatusPill(c.ghl_update_status)}</td>`;
+      <td>${c.ghl_contact_id ? `<a href="https://app.gohighlevel.com/v2/location/K9xKBbQkhSOUZs6KzTAy/contacts/detail/${escapeHtml(c.ghl_contact_id)}" target="_blank" style="color:var(--cyan);">view</a>` : '-'} ${ghlStatusPill(c.ghl_update_status)}</td>`;
   }
 
   const commonLead = `
