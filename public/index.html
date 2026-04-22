@@ -4136,8 +4136,17 @@ function applyRoleVisibility(role) {
   loadDashboard();
   refreshHealthBadge();
   refreshPendingChangesBadge();
-  setInterval(refreshHealthBadge, 60000);
-  setInterval(refreshPendingChangesBadge, 30000);
+  // Background badge refreshers — longer intervals + pause when tab is hidden
+  // so an open-but-inactive dashboard tab doesn't hammer Postgres all night.
+  const badgeTick = () => {
+    if (document.visibilityState !== 'visible') return;
+    refreshHealthBadge();
+    refreshPendingChangesBadge();
+  };
+  setInterval(badgeTick, 5 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') badgeTick();
+  });
 })();
 
 // ========== 11 LABS DATA + EP TABS ==========
