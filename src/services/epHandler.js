@@ -101,7 +101,8 @@ const FIELD_NAME_HINTS = {
   day_of_week:      ['day of week', 'dow'],
   call_recording:   ['call recording', 'recording url', 'audio url', 'audio link'],
   call_summary:     ['call summary', 'transcript summary', 'summary'],
-  conversation_id:  ['conversation id', 'conv id', 'elevenlabs id']
+  conversation_id:  ['conversation id', 'conv id', 'elevenlabs id'],
+  concurrent_call:  ['concurrent call', 'concurrent calls', 'concurrent', 'multi call', 'multi-call', 'burst']
 };
 
 function pickFieldIdByHints(fields, hints) {
@@ -136,19 +137,16 @@ async function updateContactCustomFields(contactId, customFields) {
   }
 }
 
-// Pick the latest EP call + any sibling calls to the same number within the
-// 10-min window. Return the worst (highest-priority) so GHL reflects the
-// best sales outcome across the 4-concurrent-call burst.
-async function shouldUpdateGhl(conversationId, row, externalNumber) {
-  if (!externalNumber) return true;
-  const siblings = await store.findRecentByPhone(externalNumber, 10, conversationId);
+// Given pre-fetched siblings (same phone, last 10 min, self excluded), decide
+// whether the current call's result should overwrite the existing GHL update.
+// Voicemail beats live_pickup beats unknown, etc. Ties: newer wins so the
+// latest audio/transcript replaces an earlier tied result.
+function shouldProceedGivenSiblings(callResult, siblings) {
   if (!siblings.length) return true;
-  const myRank = RESULT_PRIORITY[row.call_result] ?? 0;
+  const myRank = RESULT_PRIORITY[callResult] ?? 0;
   const existingUpdates = siblings.filter((s) => s.ghl_update_status === 'success');
   if (!existingUpdates.length) return true;
   const highestExisting = Math.max(...existingUpdates.map((s) => RESULT_PRIORITY[s.call_result] ?? 0));
-  // Tie: prefer later call (the one currently being processed) so the newest
-  // audio/transcript wins. Strictly worse: don't overwrite.
   return myRank >= highestExisting;
 }
 
@@ -165,12 +163,17 @@ async function processEpCall({ payload, row, conversationId, dryRun }) {
     day_of_week_called: dow
   });
 
+  const siblings = row.external_number
+    ? await store.findRecentByPhone(row.external_number, 10, conversationId)
+    : [];
+  const concurrentCall = siblings.length > 0 ? 'yes' : 'no';
+
   if (dryRun) {
     logger.log('ep', 'info', conversationId, 'EP dryRun — skipping GHL lookup/update', {
-      call_result: callResult, day_of_week_called: dow, phone: row.external_number
+      call_result: callResult, day_of_week_called: dow, phone: row.external_number, concurrent_call: concurrentCall
     });
     await store.setGhlContact(conversationId, null, 'skipped_dry_run');
-    return { dryRun: true, call_result: callResult, day_of_week_called: dow };
+    return { dryRun: true, call_result: callResult, day_of_week_called: dow, concurrent_call: concurrentCall };
   }
 
   const contact = await lookupContactByPhone(row.external_number);
@@ -182,17 +185,29 @@ async function processEpCall({ payload, row, conversationId, dryRun }) {
 
   await store.setGhlContact(conversationId, contact.id, 'pending');
 
-  const proceed = await shouldUpdateGhl(conversationId, { call_result: callResult }, row.external_number);
-  if (!proceed) {
-    logger.log('ep', 'info', conversationId, 'Skipping GHL update — sibling with better result already synced', {
-      phone: row.external_number, call_result: callResult
-    });
-    await store.setGhlContact(conversationId, contact.id, 'skipped_dedup');
-    return { contact, call_result: callResult, day_of_week_called: dow, dedup: true };
-  }
-
   const folderFields = await listEpFolderFields();
   const fieldMap = buildFieldMapping(folderFields);
+
+  const proceed = shouldProceedGivenSiblings(callResult, siblings);
+  if (!proceed) {
+    logger.log('ep', 'info', conversationId, 'Skipping main GHL update — sibling with better result already synced', {
+      phone: row.external_number, call_result: callResult
+    });
+    // Still push concurrent_call=yes so a late-arriving low-priority call doesn't
+    // leave the contact marked as non-concurrent when it actually was a burst.
+    if (fieldMap.concurrent_call) {
+      const flagRes = await updateContactCustomFields(contact.id, [
+        { id: fieldMap.concurrent_call.id, key: fieldMap.concurrent_call.key, field_value: 'yes' }
+      ]);
+      if (!flagRes.ok) {
+        logger.log('ep', 'warn', conversationId, 'concurrent_call-only GHL update failed', {
+          contact_id: contact.id, status: flagRes.status, error: flagRes.error
+        });
+      }
+    }
+    await store.setGhlContact(conversationId, contact.id, 'skipped_dedup');
+    return { contact, call_result: callResult, day_of_week_called: dow, dedup: true, concurrent_call: concurrentCall };
+  }
 
   const customFields = [];
   const unmatched = [];
@@ -209,6 +224,7 @@ async function processEpCall({ payload, row, conversationId, dryRun }) {
   push('day_of_week', dow);
   push('call_summary', row.transcript_summary);
   push('conversation_id', conversationId);
+  push('concurrent_call', concurrentCall);
   // call_recording populated later by elevenlabsAudio.finalizeEpRecording
 
   if (unmatched.length) {
@@ -217,7 +233,7 @@ async function processEpCall({ payload, row, conversationId, dryRun }) {
 
   if (!customFields.length) {
     await store.setGhlContact(conversationId, contact.id, 'skipped_no_fields');
-    return { contact, call_result: callResult, day_of_week_called: dow, unmatched };
+    return { contact, call_result: callResult, day_of_week_called: dow, concurrent_call: concurrentCall, unmatched };
   }
 
   const res = await updateContactCustomFields(contact.id, customFields);
@@ -232,7 +248,7 @@ async function processEpCall({ payload, row, conversationId, dryRun }) {
       contact_id: contact.id, status: res.status, error: res.error
     });
   }
-  return { contact, call_result: callResult, day_of_week_called: dow, ghlResult: res, unmatched };
+  return { contact, call_result: callResult, day_of_week_called: dow, concurrent_call: concurrentCall, ghlResult: res, unmatched };
 }
 
 async function finalizeEpRecording(conversationId, audioUrl) {
