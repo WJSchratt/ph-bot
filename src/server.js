@@ -35,6 +35,12 @@ const authService = require('./services/auth');
 const health = require('./services/health');
 
 const app = express();
+
+// Must mount BEFORE global express.json(): this router's POST handlers use
+// express.raw() to preserve the exact bytes for HMAC verification. If the
+// global JSON parser runs first it consumes the stream and HMAC fails.
+app.use('/api/elevenlabs', elevenlabsWebhookRouter);
+
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
@@ -43,11 +49,6 @@ app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 // Webhook (GHL-facing) stays unauthenticated. /api/auth has public endpoints
 // (login) and admin-only endpoints (users CRUD); those gate themselves inline.
 app.use('/webhook', webhookRouter);
-// ElevenLabs post-call webhook: mounted BEFORE /api requireAuth so the signed
-// webhook can reach us without an app session token. The route uses a raw
-// body parser internally for HMAC verification — don't move it under the
-// global express.json() path.
-app.use('/api/elevenlabs', elevenlabsWebhookRouter);
 app.use('/api/auth', authRouter);
 
 // Everything else under /api/*, /sandbox/*, /cron/* requires a valid session token.
