@@ -4199,8 +4199,12 @@ function renderCallRow(c, { epMode }) {
   const successCls = c.call_successful === 'success' ? 'color:#4ade80;' : c.call_successful === 'failure' ? 'color:#fbbf24;' : '';
   const rowId = `el-row-${escapeHtml(c.conversation_id)}`;
   const detailId = `el-det-${escapeHtml(c.conversation_id)}`;
-  const audio = c.has_audio && c.audio_url
-    ? `<audio controls preload="none" src="${escapeHtml(c.audio_url)}" style="height:28px;max-width:220px;"></audio>`
+  const audioSrc = c.has_audio && c.audio_url
+    ? c.audio_url + (c.audio_url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(getAuthToken() || '')
+    : '';
+  const audio = audioSrc
+    ? `<audio controls preload="none" src="${escapeHtml(audioSrc)}" style="height:28px;max-width:220px;"></audio>
+       <a href="${escapeHtml(audioSrc)}" download="${escapeHtml(c.conversation_id)}.mp3" style="font-size:11px;color:var(--cyan);margin-left:6px;">download</a>`
     : c.has_audio
       ? `<span class="pill" style="font-size:11px;">audio ${escapeHtml(c.audio_fetch_status || 'pending')}</span>`
       : '<span style="color:var(--muted);font-size:11px;">no audio</span>';
@@ -4239,7 +4243,10 @@ function renderCallRow(c, { epMode }) {
     </tr>
     <tr id="${detailId}" style="display:none;"><td colspan="${epMode ? 9 : 10}" style="background:rgba(255,255,255,.02);padding:12px 14px;">
       <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">${escapeHtml(c.call_summary_title || '')} · <code>${escapeHtml(c.conversation_id)}</code></div>
-      <div style="font-size:13px;white-space:pre-wrap;">${escapeHtml(c.transcript_summary || '(no summary)')}</div>
+      <div style="font-size:13px;white-space:pre-wrap;margin-bottom:10px;">${escapeHtml(c.transcript_summary || '(no summary)')}</div>
+      <details style="margin-top:4px;"><summary style="cursor:pointer;color:var(--cyan);font-size:12px;" onclick="loadElTranscript('${escapeHtml(c.conversation_id)}')">Full transcript</summary>
+        <div id="el-trans-${escapeHtml(c.conversation_id)}" style="margin-top:8px;font-size:12px;max-height:360px;overflow:auto;padding:8px;background:rgba(0,0,0,.2);border-radius:4px;"><span style="color:var(--muted);">click to load…</span></div>
+      </details>
     </td></tr>`;
 }
 
@@ -4247,6 +4254,30 @@ function toggleElDetail(convId) {
   const el = document.getElementById(`el-det-${convId}`);
   if (!el) return;
   el.style.display = el.style.display === 'none' ? 'table-row' : 'none';
+}
+
+async function loadElTranscript(convId) {
+  const host = document.getElementById(`el-trans-${convId}`);
+  if (!host || host.dataset.loaded) return;
+  host.textContent = 'Loading…';
+  try {
+    const r = await fetch('/api/elevenlabs/calls/' + encodeURIComponent(convId), {
+      headers: { Authorization: 'Bearer ' + (getAuthToken() || '') }
+    });
+    const data = await r.json();
+    const t = data?.call?.transcript;
+    if (!Array.isArray(t) || !t.length) {
+      host.innerHTML = '<span style="color:var(--muted);">(no transcript turns stored)</span>';
+    } else {
+      host.innerHTML = t.map((turn) => {
+        const color = turn.role === 'agent' ? '#60a5fa' : '#4ade80';
+        return `<div style="margin-bottom:6px;"><span style="color:${color};font-weight:600;">${escapeHtml(turn.role || '?')}:</span> ${escapeHtml(turn.message || '')}</div>`;
+      }).join('');
+    }
+    host.dataset.loaded = '1';
+  } catch (err) {
+    host.innerHTML = '<span style="color:#fbbf24;">Error loading transcript</span>';
+  }
 }
 
 function buildPager(container, state, total, reloadFn) {

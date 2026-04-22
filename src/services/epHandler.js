@@ -96,11 +96,11 @@ async function listEpFolderFields() {
 // against substrings so e.g. "EP Call Result" and "call_result" both resolve.
 const FIELD_NAME_HINTS = {
   call_result:      ['call result', 'call outcome', 'ep result'],
-  call_duration:    ['call duration', 'duration'],
-  call_date:        ['call date', 'day called', 'date called'],
-  day_of_week:      ['day of week', 'dow'],
+  call_duration:    ['call duration', 'duration', 'duraction', 'recording duraction', 'recording duration'],
+  call_date:        ['call date', 'day called', 'date called', 'call timestamp', 'timestamp'],
+  day_of_week:      ['day of week', 'dow', 'day / time of call', 'day of call', 'day / time'],
   call_recording:   ['call recording', 'recording url', 'audio url', 'audio link'],
-  call_summary:     ['call summary', 'transcript summary', 'summary'],
+  call_summary:     ['call summary', 'transcript summary', 'transcript', 'summary'],
   conversation_id:  ['conversation id', 'conv id', 'elevenlabs id'],
   concurrent_call:  ['concurrent call', 'concurrent calls', 'concurrent', 'multi call', 'multi-call', 'burst']
 };
