@@ -1117,14 +1117,32 @@ router.post('/qc/console', async (req, res) => {
     const { message, history = [], conversation_id } = req.body || {};
     if (!message) return res.status(400).json({ error: 'message required' });
 
-    // Gather context: current prompt snippet + top underperforming word tracks + recent QC failures
+    // ── Full dashboard context ──────────────────────────────────────────────
     let promptSnippet = '';
     try {
       const analyzerModule = require('./analyzer');
-      const currentPrompt = await analyzerModule.getCurrentPrompt();
-      promptSnippet = currentPrompt ? currentPrompt.slice(0, 3000) : '';
+      const cur = await analyzerModule.getCurrentPrompt();
+      promptSnippet = cur ? cur.slice(0, 4000) : '';
     } catch {}
 
+    // Overall conversation outcomes (last 30 days)
+    let overallCtx = '';
+    try {
+      const oQ = await db.query(`
+        SELECT COUNT(*)::int AS total,
+               COUNT(*) FILTER (WHERE terminal_outcome = 'appointment_booked')::int AS booked,
+               COUNT(*) FILTER (WHERE terminal_outcome = 'human_handoff')::int AS handoffs,
+               COUNT(*) FILTER (WHERE terminal_outcome = 'dnc')::int AS dnc,
+               COUNT(*) FILTER (WHERE terminal_outcome IS NULL AND is_active)::int AS active,
+               COUNT(*) FILTER (WHERE terminal_outcome = 'disqualified')::int AS disqualified
+          FROM conversations
+         WHERE created_at >= NOW() - '30 days'::interval AND is_sandbox = FALSE`);
+      const o = oQ.rows[0] || {};
+      const bookRate = o.total > 0 ? ((o.booked / o.total) * 100).toFixed(1) : '0';
+      overallCtx = `Total convos: ${o.total} | Booked: ${o.booked} (${bookRate}%) | Handoffs: ${o.handoffs} | DNC: ${o.dnc} | Active: ${o.active}`;
+    } catch {}
+
+    // All word track clusters with reply rates (sorted best→worst)
     const wtCtx = [];
     try {
       const wtQ = await db.query(`
@@ -1137,34 +1155,58 @@ router.post('/qc/console', async (req, res) => {
                )::int AS replies
           FROM workflow_clusters wf
           JOIN ghl_messages m ON m.workflow_cluster_id = wf.id
-         WHERE m.direction = 'outbound'
-           AND m.created_at >= NOW() - '30 days'::interval
+         WHERE m.direction = 'outbound' AND m.created_at >= NOW() - '30 days'::interval
          GROUP BY wf.id, wf.label, wf.example_opener
-        HAVING COUNT(DISTINCT m.ghl_conversation_id) >= 10
-         ORDER BY replies::float / NULLIF(COUNT(DISTINCT m.ghl_conversation_id), 0) ASC
-         LIMIT 5`
-      );
+        HAVING COUNT(DISTINCT m.ghl_conversation_id) >= 3
+         ORDER BY replies::float / NULLIF(COUNT(DISTINCT m.ghl_conversation_id), 0) DESC`);
       for (const r of wtQ.rows) {
         const rate = r.sends > 0 ? ((r.replies / r.sends) * 100).toFixed(1) : '0';
-        wtCtx.push(`"${r.label}": ${rate}% reply rate (${r.sends} sends). Example: "${(r.example_opener || '').slice(0, 100)}"`);
+        wtCtx.push(`"${r.label}": ${rate}% reply rate (${r.sends} sends) — "${(r.example_opener || '').slice(0, 120)}"`);
       }
     } catch {}
 
+    // QC review history (last 30 days)
     const qcCtx = [];
     try {
       const qcQ = await db.query(`
-        SELECT qr.outcome, qr.notes, qr.modified_response
-          FROM qc_reviews qr
-         WHERE qr.outcome IN ('failed','modified') AND qr.created_at >= NOW() - '14 days'::interval
-         ORDER BY qr.created_at DESC LIMIT 5`
-      );
+        SELECT outcome, notes, modified_response, created_at
+          FROM qc_reviews
+         WHERE created_at >= NOW() - '30 days'::interval
+         ORDER BY created_at DESC LIMIT 20`);
       for (const r of qcQ.rows) {
-        const note = [r.notes, r.modified_response].filter(Boolean).join(' | ').slice(0, 120);
+        const note = [r.notes, r.modified_response].filter(Boolean).join(' | ').slice(0, 150);
         if (note) qcCtx.push(`[${r.outcome}] ${note}`);
       }
     } catch {}
 
-    // If reviewing a specific conversation, load its thread for context
+    // Pending changes queue
+    let pendingCtx = '';
+    try {
+      const pQ = await db.query(`SELECT COUNT(*)::int AS n FROM pending_prompt_changes WHERE status = 'pending'`);
+      const n = pQ.rows[0]?.n || 0;
+      if (n > 0) {
+        const listQ = await db.query(`SELECT change_type, description FROM pending_prompt_changes WHERE status = 'pending' ORDER BY created_at ASC LIMIT 10`);
+        pendingCtx = `\n\nPENDING QUEUED CHANGES (${n} total):\n` + listQ.rows.map(r => `[${r.change_type}] ${r.description.slice(0, 120)}`).join('\n');
+      }
+    } catch {}
+
+    // Sub-account breakdown
+    let subCtx = '';
+    try {
+      const sQ = await db.query(`
+        SELECT COALESCE(s.name, c.location_id) AS name,
+               COUNT(*)::int AS convos,
+               COUNT(*) FILTER (WHERE c.terminal_outcome = 'appointment_booked')::int AS booked
+          FROM conversations c
+          LEFT JOIN subaccounts s ON s.ghl_location_id = c.location_id
+         WHERE c.created_at >= NOW() - '30 days'::interval AND c.is_sandbox = FALSE
+         GROUP BY c.location_id, s.name ORDER BY convos DESC LIMIT 10`);
+      if (sQ.rows.length) {
+        subCtx = '\n\nSUB-ACCOUNT BREAKDOWN (last 30 days):\n' + sQ.rows.map(r => `${r.name}: ${r.convos} convos, ${r.booked} booked`).join('\n');
+      }
+    } catch {}
+
+    // If reviewing a specific conversation, load its thread
     let convCtx = '';
     if (conversation_id) {
       try {
@@ -1177,16 +1219,19 @@ router.post('/qc/console', async (req, res) => {
       } catch {}
     }
 
-    const systemPrompt = `You are the bot management assistant for PH Insurance's SMS qualification bot. You help Walt and the team understand bot performance, diagnose issues, and improve word tracks and scripts.
+    const systemPrompt = `You are the bot management assistant for PH Insurance's SMS qualification bot. You help Walt and the team understand performance, diagnose issues, and improve word tracks and scripts.
 
-CURRENT SYSTEM PROMPT (first 3000 chars):
+CURRENT SYSTEM PROMPT (first 4000 chars):
 ${promptSnippet || '(unavailable)'}
 
-TOP UNDERPERFORMING WORD TRACKS (last 30 days):
-${wtCtx.length ? wtCtx.join('\n') : '(no data)'}
+OVERALL PERFORMANCE (last 30 days):
+${overallCtx || '(no data)'}${subCtx}
 
-RECENT QC FAILURES/MODIFICATIONS (last 14 days):
-${qcCtx.length ? qcCtx.join('\n') : '(none)'}${convCtx}
+WORD TRACK REPLY RATES — all clusters, best to worst (last 30 days):
+${wtCtx.length ? wtCtx.join('\n') : '(no cluster data — messages may not be assigned to clusters yet)'}
+
+QC REVIEW HISTORY (last 30 days):
+${qcCtx.length ? qcCtx.join('\n') : '(none)'}${pendingCtx}${convCtx}
 
 ---
 When the user asks for a change or improvement, respond with JSON in this exact format:
