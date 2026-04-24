@@ -1087,11 +1087,11 @@ router.get('/qc/alerts', async (req, res) => {
 });
 
 // POST /qc/console — Claude chat for bot management
-// Body: { message, history: [{role,content}] }
+// Body: { message, history: [{role,content}], conversation_id?: number }
 // Returns: { reply, actions: [{type,description,details}], queued_ids }
 router.post('/qc/console', async (req, res) => {
   try {
-    const { message, history = [] } = req.body || {};
+    const { message, history = [], conversation_id } = req.body || {};
     if (!message) return res.status(400).json({ error: 'message required' });
 
     // Gather context: current prompt snippet + top underperforming word tracks + recent QC failures
@@ -1141,6 +1141,19 @@ router.post('/qc/console', async (req, res) => {
       }
     } catch {}
 
+    // If reviewing a specific conversation, load its thread for context
+    let convCtx = '';
+    if (conversation_id) {
+      try {
+        const convR = await db.query(`SELECT first_name, last_name, product_type, terminal_outcome, messages FROM conversations WHERE id = $1`, [conversation_id]);
+        if (convR.rows[0]) {
+          const cv = convR.rows[0];
+          const msgs = (cv.messages || []).map((m) => `[${m.role === 'user' ? 'Lead' : 'Bot'}]: ${String(m.content || '').slice(0, 300)}`).join('\n');
+          convCtx = `\n\nCONVERSATION BEING REVIEWED:\nContact: ${cv.first_name || ''} ${cv.last_name || ''} | Product: ${cv.product_type || ''} | Outcome: ${cv.terminal_outcome || 'in-progress'}\nThread:\n${msgs || '(no messages)'}`;
+        }
+      } catch {}
+    }
+
     const systemPrompt = `You are the bot management assistant for PH Insurance's SMS qualification bot. You help Walt and the team understand bot performance, diagnose issues, and improve word tracks and scripts.
 
 CURRENT SYSTEM PROMPT (first 3000 chars):
@@ -1150,7 +1163,7 @@ TOP UNDERPERFORMING WORD TRACKS (last 30 days):
 ${wtCtx.length ? wtCtx.join('\n') : '(no data)'}
 
 RECENT QC FAILURES/MODIFICATIONS (last 14 days):
-${qcCtx.length ? qcCtx.join('\n') : '(none)'}
+${qcCtx.length ? qcCtx.join('\n') : '(none)'}${convCtx}
 
 ---
 When the user asks for a change or improvement, respond with JSON in this exact format:

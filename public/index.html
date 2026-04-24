@@ -205,6 +205,16 @@ tr:last-child td{border-bottom:none;}
 .qc-acts .btn,.qc-acts .btn-sm{font-size:14px;padding:10px 18px;}
 .qc-acts input{flex:1;min-width:220px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:8px;font-family:'Rajdhani';font-size:14px;outline:none;}
 .qc-acts input:focus{border-color:var(--cyan);}
+.qcp-chat{border-top:1px solid var(--border);background:var(--surface);flex-shrink:0;display:flex;flex-direction:column;}
+.qcp-chat-header{display:flex;align-items:center;justify-content:space-between;padding:8px 16px 4px;}
+.qcp-chat-label{font-size:11px;font-weight:700;color:var(--cyan);text-transform:uppercase;letter-spacing:.5px;}
+.qcp-chat-ctx{font-size:11px;color:var(--muted);margin-left:8px;}
+.qcp-messages{max-height:160px;overflow-y:auto;padding:4px 16px 4px;display:flex;flex-direction:column;gap:4px;}
+.qcp-messages .dc-msg{padding:5px 10px;font-size:12px;}
+.qcp-input-row{display:flex;gap:6px;padding:6px 12px 10px;align-items:flex-end;}
+.qcp-input-row textarea{flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:7px;font-family:'Rajdhani';font-size:13px;outline:none;resize:none;min-height:36px;}
+.qcp-input-row textarea:focus{border-color:var(--cyan);}
+.qcp-input-row textarea::placeholder{color:var(--muted);}
 .qc-score{margin-left:auto;font-size:13px;color:var(--muted);}
 
 /* QC top bar — hero stats + clearer tabs. */
@@ -702,6 +712,18 @@ textarea.form-input{resize:vertical;min-height:80px;}
         <div style="display:flex;flex-direction:column;gap:6px;width:100%;">
           <input type="text" placeholder="Corrected response text (what the bot SHOULD have said)..." id="qc-edit-input" style="width:100%;">
           <input type="text" placeholder="What the bot did wrong (e.g. 'sent 3 messages at once', 'asked the same question twice', 'revealed it was an AI unprompted')..." id="qc-feedback-input" style="width:100%;">
+        </div>
+      </div>
+      <div class="qcp-chat">
+        <div class="qcp-chat-header">
+          <span class="qcp-chat-label">Ask Claude</span>
+          <span class="qcp-chat-ctx" id="qcp-ctx-label">— select a conversation to ask about it</span>
+          <button class="btn-sm" style="margin-left:auto;" onclick="qcpClear()">Clear</button>
+        </div>
+        <div id="qcp-messages" class="qcp-messages"></div>
+        <div class="qcp-input-row">
+          <textarea id="qcp-input" rows="2" placeholder="Why did the bot ask this twice? What should it have said instead? Ctrl+Enter to send." onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();qcpSend();}"></textarea>
+          <button class="btn pri" id="qcp-send-btn" onclick="qcpSend()">Ask</button>
         </div>
       </div>
     </div>
@@ -2476,15 +2498,14 @@ function qcSearchDebounced() {
 
 async function loadConversation(id, convMeta) {
   selectedQcConvId = id;
-  // Unified thread: pulls the full ghl_messages history merged with the local
-  // Claude messages table, so the reviewer sees every message (including
-  // pre-bot Botpress drips) with source tags.
   const data = await api('/api/qc/conversation-thread-by-local/' + id);
   if (!data) return;
   const conv = data.conversation || convMeta || {};
-  document.getElementById('qc-lead-name').textContent = (conv.first_name || '') + ' ' + (conv.last_name || '');
+  const name = ((conv.first_name || '') + ' ' + (conv.last_name || '')).trim();
+  document.getElementById('qc-lead-name').textContent = name;
   document.getElementById('qc-lead-meta').textContent = (conv.product_type || '') + ' -- ' + fmtNum((data.thread || []).length) + ' msgs' + (conv.terminal_outcome ? ' -- ' + conv.terminal_outcome : '') + (data.fallback === 'local_only' ? ' · local-only (not yet pulled)' : '');
   renderQcThread(data.thread || []);
+  qcpSetConv(id, name || 'this conversation');
 }
 
 // Source → badge style + label.
@@ -2704,6 +2725,85 @@ async function loadQcAll() {
   });
 }
 
+// ========== QC INLINE CHAT (below conversation thread) ==========
+let qcpHistory = [];
+let qcpConvId = null;
+
+function qcpSetConv(id, label) {
+  if (qcpConvId !== id) {
+    qcpConvId = id;
+    qcpHistory = [];
+    const el = document.getElementById('qcp-messages');
+    if (el) el.innerHTML = '';
+  }
+  const ctx = document.getElementById('qcp-ctx-label');
+  if (ctx) ctx.textContent = label ? '— ' + label : '— select a conversation to ask about it';
+}
+
+async function qcpSend() {
+  const input = document.getElementById('qcp-input');
+  const msg = (input.value || '').trim();
+  if (!msg) return;
+  input.value = '';
+  const sendBtn = document.getElementById('qcp-send-btn');
+  sendBtn.disabled = true;
+  const messagesEl = document.getElementById('qcp-messages');
+
+  const userBubble = document.createElement('div');
+  userBubble.className = 'dc-msg user';
+  userBubble.innerHTML = '<span class="dc-msg-role">You</span><div class="dc-msg-body">' + esc(msg) + '</div>';
+  messagesEl.appendChild(userBubble);
+
+  const thinkBubble = document.createElement('div');
+  thinkBubble.className = 'dc-msg assistant';
+  thinkBubble.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--muted);">Thinking…</div>';
+  messagesEl.appendChild(thinkBubble);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  qcpHistory.push({ role: 'user', content: msg });
+
+  try {
+    const body = { message: msg, history: qcpHistory.slice(-20) };
+    if (qcpConvId) body.conversation_id = qcpConvId;
+    const res = await api('/api/qc/console', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    thinkBubble.remove();
+    if (!res) {
+      const eb = document.createElement('div');
+      eb.className = 'dc-msg assistant';
+      eb.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--red);">Request failed.</div>';
+      messagesEl.appendChild(eb);
+    } else {
+      qcpHistory.push({ role: 'assistant', content: res.reply || '' });
+      const ab = document.createElement('div');
+      ab.className = 'dc-msg assistant';
+      let body2 = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body">' + esc(res.reply || '') + '</div>';
+      if (res.queued_ids && res.queued_ids.length) {
+        body2 += '<div style="margin-top:5px;font-size:11px;color:var(--amber);">✓ Queued ' + res.queued_ids.length + ' change(s).</div>';
+      }
+      ab.innerHTML = body2;
+      messagesEl.appendChild(ab);
+    }
+  } catch (e) {
+    thinkBubble.remove();
+    const eb = document.createElement('div');
+    eb.className = 'dc-msg assistant';
+    eb.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--red);">Error: ' + esc(e.message) + '</div>';
+    messagesEl.appendChild(eb);
+  }
+  sendBtn.disabled = false;
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function qcpClear() {
+  qcpHistory = [];
+  const el = document.getElementById('qcp-messages');
+  if (el) el.innerHTML = '';
+}
+
 // ========== QC BOT CONSOLE (inline within QC Portal) ==========
 let qbcHistory = [];
 
@@ -2840,15 +2940,15 @@ async function qbcApplyChanges() {
 }
 
 async function loadBotpressConversation(convId, locationId, meta) {
-  // Use the unified thread endpoint so Botpress-era conversations also get
-  // per-message source tagging (inbound=user, outbound=botpress/workflow/etc).
   const data = await api('/api/qc/conversation-thread/' + encodeURIComponent(convId) + '?location_id=' + encodeURIComponent(locationId));
   if (!data) return;
-  selectedQcConvId = null; // ghl_messages-backed convs can't flush to local qc_reviews.
+  selectedQcConvId = null;
   const conv = data.conversation || {};
-  document.getElementById('qc-lead-name').innerHTML = esc(conv.contact_name || '(no name)') + ' <span class="pill a" style="margin-left:6px;">ARCHIVE</span>';
+  const name = conv.contact_name || '(no name)';
+  document.getElementById('qc-lead-name').innerHTML = esc(name) + ' <span class="pill a" style="margin-left:6px;">ARCHIVE</span>';
   document.getElementById('qc-lead-meta').textContent = (conv.contact_phone || '') + ' -- ' + fmtNum((data.thread || []).length) + ' msgs' + (conv.terminal_outcome ? ' -- ' + conv.terminal_outcome : '');
   renderQcThread(data.thread || []);
+  qcpSetConv(null, name); // no local conv id for archive, but still set the label
 }
 
 async function loadQcClusterPicker() {
