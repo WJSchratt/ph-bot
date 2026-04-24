@@ -16,7 +16,7 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 // Backfill historical ElevenLabs calls into the DB by polling the
 // Conversations API. Runs async — responds immediately with a job summary
 // once the fetch loop finishes. Cap at 90 days max.
-router.post('/elevenlabs/backfill', async (req, res) => {
+router.post('/elevenlabs-backfill', async (req, res) => {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) return res.status(500).json({ ok: false, error: 'ELEVENLABS_API_KEY not set' });
 
