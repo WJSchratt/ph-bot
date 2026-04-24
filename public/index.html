@@ -668,6 +668,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
     <div class="itab" data-qctab="claude" onclick="setQcTab('claude', this)">Claude Bot</div>
     <div class="itab" data-qctab="botpress" onclick="setQcTab('botpress', this)">Archive (Botpress)</div>
     <div class="itab" data-qctab="cluster" onclick="setQcTab('cluster', this)">Filter by Word Track</div>
+    <div class="itab" data-qctab="console" onclick="setQcTab('console', this)">&#9881; Bot Console</div>
   </div>
   <div id="qc-cluster-filter-row" style="display:none;margin-bottom:14px;">
     <select class="fsel" id="qc-cluster-sel" onchange="loadQcByCluster()"><option value="">-- pick a cluster --</option></select>
@@ -702,6 +703,34 @@ textarea.form-input{resize:vertical;min-height:80px;}
         <div style="display:flex;flex-direction:column;gap:6px;width:100%;">
           <input type="text" placeholder="Corrected response text (what the bot SHOULD have said)..." id="qc-edit-input" style="width:100%;">
           <input type="text" placeholder="What the bot did wrong (e.g. 'sent 3 messages at once', 'asked the same question twice', 'revealed it was an AI unprompted')..." id="qc-feedback-input" style="width:100%;">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bot Console panel — shown when Console sub-tab is active -->
+  <div id="qc-console-panel" style="display:none;">
+    <div class="bc-wrap">
+      <div class="bc-alerts" id="qbc-alerts-strip">
+        <div style="color:var(--muted);font-size:12px;padding:8px;">Loading alerts…</div>
+      </div>
+      <div class="bc-main">
+        <div class="bc-chat">
+          <div class="dc-chat-top">
+            <strong style="color:#fff;">Ask Claude</strong>
+            <span style="font-size:11px;color:var(--muted);margin-left:8px;">Ask about performance, request word track rewrites, or queue prompt changes</span>
+            <button class="btn-sm" style="margin-left:auto;" onclick="qbcClearChat()">Clear</button>
+          </div>
+          <div class="dc-messages" id="qbc-messages"></div>
+          <div class="dc-input-row">
+            <textarea class="dc-input" id="qbc-input" rows="2" placeholder="e.g. Why is our opener being ignored? Rewrite the tie-down. Ctrl+Enter to send." onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();qbcSend();}"></textarea>
+            <button class="btn pri" id="qbc-send-btn" onclick="qbcSend()">Send</button>
+          </div>
+        </div>
+        <div class="bc-sidebar">
+          <div class="bc-sidebar-title">Pending Changes <span id="qbc-pending-count" style="color:var(--amber);"></span></div>
+          <div id="qbc-pending-list"><div class="bc-no-changes">No queued changes</div></div>
+          <button class="btn amb" id="qbc-apply-btn" style="display:none;margin-top:auto;" onclick="qbcApplyChanges()">Apply All Changes to Bot</button>
         </div>
       </div>
     </div>
@@ -1516,7 +1545,14 @@ function loadCurrentTab() {
     case 'tab-dashboard': loadDashboard(); break;
     case 'tab-wordtracks': loadWordtracks(); break;
     case 'tab-pipeline': loadPipeline(); break;
-    case 'tab-qc': loadQC(); refreshPendingEditsCounter(); break;
+    case 'tab-qc':
+      if (qcTab === 'all') loadQcAll();
+      else if (qcTab === 'claude') loadQC({ mode: 'claude' });
+      else if (qcTab === 'botpress') loadQcBotpress();
+      else if (qcTab === 'cluster') loadQcClusterPicker();
+      else if (qcTab === 'console') loadQcConsole();
+      refreshPendingEditsCounter();
+      break;
     case 'tab-review': loadReviewQueue(); break;
     case 'tab-logs': loadLogs(); startLogRefresh(); break;
     case 'tab-settings': loadSettingsData(); break;
@@ -2433,7 +2469,10 @@ async function loadQC(opts) {
 let qcSearchTimer = null;
 function qcSearchDebounced() {
   clearTimeout(qcSearchTimer);
-  qcSearchTimer = setTimeout(() => loadQC(), 250);
+  qcSearchTimer = setTimeout(() => {
+    if (qcTab === 'all') loadQcAll();
+    else loadQC();
+  }, 250);
 }
 
 async function loadConversation(id, convMeta) {
@@ -2579,13 +2618,19 @@ function setQcTab(which, el) {
   qcTab = which;
   document.querySelectorAll('#tab-qc .itab').forEach(i => i.classList.remove('active'));
   el.classList.add('active');
+  const isConsole = which === 'console';
+  const convWrap = document.querySelector('#tab-qc .conv-wrap');
+  const consolePanel = document.getElementById('qc-console-panel');
+  if (convWrap) convWrap.style.display = isConsole ? 'none' : '';
+  if (consolePanel) consolePanel.style.display = isConsole ? '' : 'none';
   document.getElementById('qc-cluster-filter-row').style.display = (which === 'cluster') ? '' : 'none';
-  // Search box only meaningful for the conversation list modes.
   const searchRow = document.getElementById('qc-search-row');
-  if (searchRow) searchRow.style.display = (which === 'cluster') ? 'none' : '';
-  if (which === 'all' || which === 'claude') loadQC({ mode: which });
+  if (searchRow) searchRow.style.display = (which === 'cluster' || isConsole) ? 'none' : '';
+  if (which === 'all') loadQcAll();
+  else if (which === 'claude') loadQC({ mode: 'claude' });
   else if (which === 'botpress') loadQcBotpress();
   else if (which === 'cluster') loadQcClusterPicker();
+  else if (which === 'console') loadQcConsole();
 }
 
 async function loadQcBotpress() {
@@ -2605,6 +2650,194 @@ async function loadQcBotpress() {
     };
     list.appendChild(item);
   });
+}
+
+async function loadQcAll() {
+  // Load QC stats (header numbers) + full unified conversation list
+  const stats = await api('/api/qc/stats');
+  if (stats) {
+    document.getElementById('qc-stat-pending').textContent = fmtNum(stats.pending);
+    document.getElementById('qc-stat-approved').textContent = fmtNum(stats.approved);
+    document.getElementById('qc-stat-failed').textContent = fmtNum(stats.failed);
+    document.getElementById('qc-stat-modified').textContent = fmtNum(stats.modified);
+    document.getElementById('qc-accuracy-display').innerHTML = 'Accuracy: <strong style="color:var(--green);">' + fmtPct2(stats.accuracy) + '</strong>';
+    const badge = document.getElementById('nav-qc-badge');
+    if (badge) badge.textContent = stats.pending > 0 ? stats.pending : '';
+  }
+  const search = (document.getElementById('qc-search-input')?.value || '').trim();
+  const params = new URLSearchParams({ page: '1', limit: '100' });
+  if (search) params.set('search', search);
+  const data = await api('/api/qc/all-conversations?' + params.toString());
+  if (!data) return;
+  const list = document.getElementById('qc-conv-list');
+  list.innerHTML = '';
+  document.getElementById('qc-list-header').textContent = 'All Conversations (' + (data.total || 0) + ')';
+  if (!(data.conversations || []).length) {
+    list.innerHTML = '<div style="color:var(--muted);padding:24px;text-align:center;font-size:13px;">No conversations found.</div>';
+    return;
+  }
+  (data.conversations || []).forEach(function(c) {
+    const item = document.createElement('div');
+    item.className = 'conv-item';
+    const srcLabel = c.source === 'claude' ? 'Claude' : c.source === 'botpress' ? 'BotPress' : 'Drip/GHL';
+    const srcCls = c.source === 'claude' ? 'pill b' : c.source === 'botpress' ? 'pill a' : 'pill g';
+    const outcomeTag = c.terminal_outcome ? ' -- ' + c.terminal_outcome : '';
+    item.innerHTML = '<div class="ci-name">' + esc(c.contact_name || '(no name)') + ' -- ' + esc(c.subaccount_name || c.location_id) +
+      ' <span class="' + srcCls + '" style="margin-left:4px;font-size:10px;">' + srcLabel + '</span></div>' +
+      '<div class="ci-meta">' + fmtNum(c.message_count || 0) + ' msgs' + outcomeTag + '</div>';
+    item.onclick = function() {
+      list.querySelectorAll('.conv-item').forEach(function(i) { i.classList.remove('active'); });
+      item.classList.add('active');
+      if (c.source === 'claude' && c.claude_conv_id) {
+        const nameParts = (c.contact_name || '').trim().split(/\s+/);
+        loadConversation(c.claude_conv_id, {
+          first_name: nameParts[0] || '',
+          last_name: nameParts.slice(1).join(' '),
+          product_type: c.product_type || '',
+          terminal_outcome: c.terminal_outcome,
+          message_count: c.message_count
+        });
+      } else {
+        loadBotpressConversation(c.ghl_conversation_id, c.location_id, c);
+      }
+    };
+    list.appendChild(item);
+  });
+}
+
+// ========== QC BOT CONSOLE (inline within QC Portal) ==========
+let qbcHistory = [];
+
+async function loadQcConsole() {
+  await Promise.all([loadQbcAlerts(), refreshQbcPending()]);
+}
+
+async function loadQbcAlerts() {
+  const strip = document.getElementById('qbc-alerts-strip');
+  strip.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px;">Loading alerts…</div>';
+  const data = await api('/api/qc/alerts');
+  const badge = document.getElementById('nav-console-badge');
+  if (!data || !data.alerts || !data.alerts.length) {
+    strip.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px;">No active alerts.</div>';
+    if (badge) badge.textContent = '';
+    return;
+  }
+  const critical = data.alerts.filter(function(a) { return a.severity === 'critical'; }).length;
+  if (badge) badge.textContent = critical > 0 ? critical : data.alerts.length;
+  strip.innerHTML = data.alerts.map(function(a) {
+    const icon = a.severity === 'critical' ? '⚠' : a.severity === 'warning' ? '●' : 'ℹ';
+    return '<div class="bc-alert ' + esc(a.severity) + '">' +
+      '<span class="bc-alert-icon">' + icon + '</span>' +
+      '<div><div class="bc-alert-title">' + esc(a.title) + '</div>' +
+      '<div class="bc-alert-detail">' + esc(a.detail || '') + '</div>' +
+      (a.example ? '<div class="bc-alert-example">&ldquo;' + esc(a.example) + '&rdquo;</div>' : '') +
+      '</div></div>';
+  }).join('');
+}
+
+async function refreshQbcPending() {
+  const r = await api('/api/qc/pending-edits-count');
+  if (!r) return;
+  const n = r.pending || 0;
+  const countEl = document.getElementById('qbc-pending-count');
+  const applyBtn = document.getElementById('qbc-apply-btn');
+  const listEl = document.getElementById('qbc-pending-list');
+  if (countEl) countEl.textContent = n ? '(' + n + ')' : '';
+  if (applyBtn) applyBtn.style.display = n > 0 ? '' : 'none';
+  if (n > 0) {
+    const edits = await api('/api/qc/pending-edits');
+    if (edits && edits.edits && edits.edits.length) {
+      listEl.innerHTML = edits.edits.map(function(e) {
+        const detail = e.description || '';
+        const snippet = detail.length > 100 ? esc(detail.slice(0, 100)) + '…' : esc(detail);
+        return '<div class="bc-change"><div class="bc-change-label">' + esc(detail || e.source || 'Change') + '</div>' +
+          (snippet && snippet !== esc(detail) ? '<div style="font-size:11px;color:var(--muted);margin-top:3px;">' + snippet + '</div>' : '') + '</div>';
+      }).join('');
+    } else {
+      listEl.innerHTML = '<div class="bc-no-changes">No queued changes</div>';
+    }
+  } else {
+    listEl.innerHTML = '<div class="bc-no-changes">No queued changes</div>';
+  }
+}
+
+async function qbcSend() {
+  const input = document.getElementById('qbc-input');
+  const msg = (input.value || '').trim();
+  if (!msg) return;
+  input.value = '';
+  const sendBtn = document.getElementById('qbc-send-btn');
+  sendBtn.disabled = true;
+  const messagesEl = document.getElementById('qbc-messages');
+  const userBubble = document.createElement('div');
+  userBubble.className = 'dc-msg user';
+  userBubble.innerHTML = '<span class="dc-msg-role">You</span><div class="dc-msg-body">' + esc(msg) + '</div>';
+  messagesEl.appendChild(userBubble);
+  const thinkBubble = document.createElement('div');
+  thinkBubble.className = 'dc-msg assistant';
+  thinkBubble.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--muted);">Thinking…</div>';
+  messagesEl.appendChild(thinkBubble);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  qbcHistory.push({ role: 'user', content: msg });
+  try {
+    const res = await api('/api/qc/console', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, history: qbcHistory.slice(-20) })
+    });
+    thinkBubble.remove();
+    if (!res) {
+      const errBubble = document.createElement('div');
+      errBubble.className = 'dc-msg assistant';
+      errBubble.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--red);">Request failed.</div>';
+      messagesEl.appendChild(errBubble);
+    } else {
+      qbcHistory.push({ role: 'assistant', content: res.reply || '' });
+      const aiBubble = document.createElement('div');
+      aiBubble.className = 'dc-msg assistant';
+      let body = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body">' + esc(res.reply || '') + '</div>';
+      if (res.queued_ids && res.queued_ids.length) {
+        body += '<div style="margin-top:8px;font-size:11px;color:var(--amber);">✓ Queued ' + res.queued_ids.length + ' change(s).</div>';
+      }
+      aiBubble.innerHTML = body;
+      messagesEl.appendChild(aiBubble);
+      if (res.queued_ids && res.queued_ids.length) refreshQbcPending();
+    }
+  } catch (e) {
+    thinkBubble.remove();
+    const errBubble = document.createElement('div');
+    errBubble.className = 'dc-msg assistant';
+    errBubble.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--red);">Error: ' + esc(e.message) + '</div>';
+    messagesEl.appendChild(errBubble);
+  }
+  sendBtn.disabled = false;
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function qbcClearChat() {
+  qbcHistory = [];
+  const el = document.getElementById('qbc-messages');
+  if (el) el.innerHTML = '';
+}
+
+async function qbcApplyChanges() {
+  const r = await api('/api/qc/pending-edits-count');
+  if (!r || !r.pending) { toast('No pending changes.'); return; }
+  if (!confirm('Apply ' + r.pending + ' pending change(s)? This rewrites the live system prompt.')) return;
+  const btn = document.getElementById('qbc-apply-btn');
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Applying…';
+  const res = await api('/api/qc/apply-pending', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dry_run: false })
+  });
+  btn.disabled = false; btn.textContent = orig;
+  if (!res) { toast('Apply failed.', 'err'); return; }
+  toast('Applied ' + (res.applied || 0) + ' change(s). Prompt updated.', 'ok');
+  refreshQbcPending();
+  refreshBotConsolePending();
+  refreshPendingEditsCounter();
 }
 
 async function loadBotpressConversation(convId, locationId, meta) {

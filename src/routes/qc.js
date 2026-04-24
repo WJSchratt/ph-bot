@@ -635,6 +635,71 @@ router.post('/qc/flag-wrong', async (req, res) => {
 });
 
 // ============================================================
+// Unified "All Conversations" — every ghl_conversations row with at least
+// one inbound reply, regardless of source (claude/botpress/other/drip).
+// Returns claude_conv_id so the frontend can route to the rich Claude detail
+// when source='claude', or fall back to the ghl_messages thread view.
+// ============================================================
+router.get('/qc/all-conversations', async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search, source } = req.query;
+    const lim = Math.min(parseInt(limit, 10) || 20, 200);
+    const off = (Math.max(parseInt(page, 10) || 1, 1) - 1) * lim;
+    const clauses = [
+      `EXISTS (SELECT 1 FROM ghl_messages im
+                WHERE im.ghl_conversation_id = gc.ghl_conversation_id
+                  AND im.location_id = gc.location_id
+                  AND im.direction = 'inbound')`
+    ];
+    const baseParams = [];
+    let p = 1;
+
+    if (source && source !== 'all') {
+      baseParams.push(source); clauses.push(`gc.source = $${p++}`);
+    }
+    if (search && String(search).trim()) {
+      baseParams.push('%' + String(search).trim().toLowerCase() + '%');
+      clauses.push(`LOWER(gc.contact_name) LIKE $${p++}`);
+    }
+
+    const where = 'WHERE ' + clauses.join(' AND ');
+    const params = [...baseParams, lim, off];
+    const limIdx = p; const offIdx = p + 1;
+
+    const q = await db.query(
+      `SELECT gc.id AS conv_pk,
+              gc.ghl_conversation_id,
+              gc.location_id,
+              gc.contact_id,
+              gc.contact_name,
+              gc.contact_phone,
+              gc.source,
+              gc.message_count,
+              gc.terminal_outcome,
+              gc.last_message_at,
+              COALESCE(s.name, gc.location_id) AS subaccount_name,
+              c.id AS claude_conv_id
+         FROM ghl_conversations gc
+         LEFT JOIN subaccounts s ON s.ghl_location_id = gc.location_id
+         LEFT JOIN conversations c ON c.contact_id = gc.contact_id AND c.location_id = gc.location_id
+        ${where}
+        ORDER BY gc.last_message_at DESC NULLS LAST
+        LIMIT $${limIdx} OFFSET $${offIdx}`,
+      params
+    );
+
+    const countQ = await db.query(
+      `SELECT COUNT(*)::int AS total FROM ghl_conversations gc ${where}`,
+      baseParams
+    );
+
+    res.json({ conversations: q.rows, total: countQ.rows[0]?.total || 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // Botpress archive tab — pulls from ghl_messages WHERE source='botpress'
 // AND the conversation had at least one inbound reply (not drip-into-void).
 // Tagged explicitly as archive in the UI; edits feed the same pending queue.
