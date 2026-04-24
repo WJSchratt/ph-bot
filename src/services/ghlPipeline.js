@@ -162,9 +162,9 @@ async function pullAll(ghlToken, locationId, progressCb) {
 }
 
 // --- Pipeline routing: move opportunity to stage matching a bot outcome ---
-// Target pipeline is "1 - Sales Pipeline" for the PH main sub-account. Each
-// outcome maps to a specific stage + (optional) Handoff Reason picklist value
-// on the contact. These IDs are location-specific; see summary.md for lookup.
+// Stage/pipeline IDs are location-specific. The constants below are the PH main
+// sub-account defaults. For all other locations, resolveLocationPipelineConfig()
+// auto-discovers the correct IDs from the ghl_pipelines cache by matching stage names.
 const SALES_PIPELINE_ID = 'BSxRZNZTwAi1atb957Ev';
 const HANDOFF_REASON_FIELD_ID = 'pctRcbbTXCRK9t2toB4u';
 
@@ -186,6 +186,79 @@ const OUTCOME_TO_STAGE = {
   disqualified:      { stageId: '69c4bf2f-3564-4a8a-b51c-3aec4d430c1a', handoffReason: null,               label: 'Disqualified' },
   engaging_with_ai:  { stageId: '5319f2ca-f208-4416-bf75-3843ac6b0d67', handoffReason: null,               label: 'Engaging with AI', skipIfAtStageIds: ENGAGING_SKIP_STAGES }
 };
+
+// Maps stage name patterns to outcome keys so we can match any sub-account's
+// stages by name regardless of their GHL-generated UUIDs.
+const STAGE_NAME_PATTERNS = [
+  { pattern: /engaging.with.ai/i,  outcome: 'engaging_with_ai' },
+  { pattern: /appointment.set/i,   outcome: 'booked' },
+  { pattern: /needs.human/i,       outcome: 'requested_human' },
+  { pattern: /^dnc$/i,             outcome: 'dnc' },
+  { pattern: /remove/i,            outcome: 'dnc' },
+  { pattern: /disqualif/i,         outcome: 'disqualified' },
+];
+
+// In-memory cache: locationId → {pipelineId, stageMap, cachedAt}
+const _pipelineConfigCache = new Map();
+const PIPELINE_CONFIG_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+// Looks up the Sales Pipeline for a location from the ghl_pipelines DB cache,
+// pulling from GHL if not yet cached. Returns {pipelineId, stageMap} where
+// stageMap keys are outcome names (e.g. "booked", "engaging_with_ai").
+// Returns null if the pipeline can't be resolved.
+async function resolveLocationPipelineConfig(locationId, ghlToken) {
+  const mem = _pipelineConfigCache.get(locationId);
+  if (mem && Date.now() - mem.cachedAt < PIPELINE_CONFIG_CACHE_TTL_MS) return mem;
+
+  let row = null;
+  try {
+    const r = await db.query(
+      `SELECT ghl_pipeline_id, stages FROM ghl_pipelines
+       WHERE location_id = $1 AND name ILIKE '%Sales%'
+       ORDER BY pulled_at DESC LIMIT 1`,
+      [locationId]
+    );
+    row = r.rows[0] || null;
+  } catch (err) {
+    logger.log('pipeline_route', 'warn', null, 'DB pipeline lookup failed', { locationId, error: err.message });
+  }
+
+  // Not in DB yet — pull fresh from GHL
+  if (!row && ghlToken) {
+    try {
+      await pullPipelines(ghlToken, locationId);
+      const r = await db.query(
+        `SELECT ghl_pipeline_id, stages FROM ghl_pipelines
+         WHERE location_id = $1 AND name ILIKE '%Sales%'
+         ORDER BY pulled_at DESC LIMIT 1`,
+        [locationId]
+      );
+      row = r.rows[0] || null;
+    } catch (err) {
+      logger.log('pipeline_route', 'warn', null, 'Pipeline pull failed', { locationId, error: err.message });
+    }
+  }
+
+  if (!row) return null;
+
+  const stages = Array.isArray(row.stages) ? row.stages : [];
+  const stageMap = {};
+  for (const stage of stages) {
+    for (const { pattern, outcome } of STAGE_NAME_PATTERNS) {
+      if (!stageMap[outcome] && pattern.test(stage.name || '')) {
+        stageMap[outcome] = stage.id;
+        break;
+      }
+    }
+  }
+
+  const config = { pipelineId: row.ghl_pipeline_id, stageMap, cachedAt: Date.now() };
+  _pipelineConfigCache.set(locationId, config);
+  logger.log('pipeline_route', 'info', null, 'Pipeline config resolved', {
+    locationId, pipelineId: config.pipelineId, stages: Object.keys(stageMap).length
+  });
+  return config;
+}
 
 // Map internal terminal_outcome values the bot produces → feature outcome labels.
 const TERMINAL_TO_ROUTE_OUTCOME = {
@@ -296,7 +369,23 @@ async function routeOpportunity(ghlToken, locationId, contactId, outcome, opts =
     logger.log('pipeline_route', 'warn', lc, 'Unknown outcome, skipping', { outcome });
     return result;
   }
-  result.target = { pipelineId: SALES_PIPELINE_ID, pipelineStageId: mapping.stageId };
+
+  // Resolve location-specific pipeline/stage IDs; fall back to PH main defaults
+  let resolvedPipelineId = SALES_PIPELINE_ID;
+  let resolvedStageId = mapping.stageId;
+  let resolvedSkipStageIds = Array.isArray(mapping.skipIfAtStageIds) ? mapping.skipIfAtStageIds : null;
+
+  const locCfg = await resolveLocationPipelineConfig(locationId, ghlToken);
+  if (locCfg) {
+    resolvedPipelineId = locCfg.pipelineId;
+    if (locCfg.stageMap[outcome]) resolvedStageId = locCfg.stageMap[outcome];
+    // For engaging_with_ai skip check: all resolved stage IDs count as "at or past"
+    if (mapping.skipIfAtStageIds) {
+      resolvedSkipStageIds = Object.values(locCfg.stageMap).filter(Boolean);
+    }
+  }
+
+  result.target = { pipelineId: resolvedPipelineId, pipelineStageId: resolvedStageId };
   result.handoffReason = mapping.handoffReason;
 
   let opp;
@@ -323,7 +412,7 @@ async function routeOpportunity(ghlToken, locationId, contactId, outcome, opts =
     // to avoid downgrading contacts who've already progressed to Appointment
     // Set / Needs Human Contact / DNC / Disqualified, and to no-op when
     // already at Engaging with AI.
-    const skipSet = Array.isArray(mapping.skipIfAtStageIds) ? mapping.skipIfAtStageIds : null;
+    const skipSet = resolvedSkipStageIds;
     if (skipSet && skipSet.includes(opp.pipelineStageId)) {
       result.skipped = 'already_at_or_past_stage';
       result.steps.push({ step: 'skip_check', ok: true, reason: 'already_at_or_past_stage', currentStageId: opp.pipelineStageId });
@@ -362,7 +451,7 @@ async function routeOpportunity(ghlToken, locationId, contactId, outcome, opts =
 
   if (opp) {
     try {
-      await updateOpportunityStage(ghlToken, opp.id, mapping.stageId, SALES_PIPELINE_ID);
+      await updateOpportunityStage(ghlToken, opp.id, resolvedStageId, resolvedPipelineId);
       result.steps.push({ step: 'update_stage', ok: true, target: result.target });
     } catch (err) {
       const error = err.response?.data || err.message;
@@ -373,7 +462,7 @@ async function routeOpportunity(ghlToken, locationId, contactId, outcome, opts =
   } else {
     try {
       const name = await buildOpportunityName();
-      const newOpp = await createOpportunity(ghlToken, locationId, contactId, name, mapping.stageId, SALES_PIPELINE_ID);
+      const newOpp = await createOpportunity(ghlToken, locationId, contactId, name, resolvedStageId, resolvedPipelineId);
       const newId = newOpp?.id || newOpp?._id || null;
       result.opportunityId = newId;
       result.created = true;
@@ -419,6 +508,7 @@ module.exports = {
   setHandoffReason,
   createOpportunity,
   fetchContactName,
+  resolveLocationPipelineConfig,
   routeOpportunity,
   OUTCOME_TO_STAGE,
   TERMINAL_TO_ROUTE_OUTCOME,
