@@ -344,6 +344,26 @@ textarea.form-input{resize:vertical;min-height:80px;}
 .acc-pct{width:40px;text-align:right;font-family:'JetBrains Mono';font-size:12px;font-weight:700;}
 
 /* DEV CONSOLE */
+.bc-wrap{display:flex;flex-direction:column;gap:12px;height:calc(100vh - 120px);}
+.bc-alerts{display:flex;flex-wrap:wrap;gap:8px;flex-shrink:0;}
+.bc-alert{display:flex;gap:10px;align-items:flex-start;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 13px;min-width:280px;max-width:420px;flex:1;}
+.bc-alert.critical{border-color:rgba(255,69,96,.5);background:rgba(255,69,96,.05);}
+.bc-alert.warning{border-color:rgba(255,191,0,.4);background:rgba(255,191,0,.04);}
+.bc-alert.info{border-color:rgba(0,212,255,.3);background:rgba(0,212,255,.04);}
+.bc-alert-icon{font-size:16px;flex-shrink:0;margin-top:1px;}
+.bc-alert-title{font-size:12px;font-weight:700;color:var(--text);margin-bottom:2px;}
+.bc-alert.critical .bc-alert-title{color:var(--red);}
+.bc-alert.warning .bc-alert-title{color:var(--amber);}
+.bc-alert.info .bc-alert-title{color:var(--cyan);}
+.bc-alert-detail{font-size:11px;color:var(--muted);line-height:1.5;}
+.bc-alert-example{font-size:10px;font-family:'JetBrains Mono';color:var(--muted);border-left:2px solid var(--border2);padding-left:7px;margin-top:5px;opacity:.8;}
+.bc-main{display:grid;grid-template-columns:1fr 300px;gap:12px;flex:1;min-height:0;}
+.bc-chat{background:var(--surface);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;min-height:0;}
+.bc-sidebar{background:var(--surface);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;padding:14px;gap:10px;overflow-y:auto;}
+.bc-sidebar-title{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:700;}
+.bc-change{background:var(--bg);border:1px solid var(--border2);border-radius:7px;padding:9px 11px;font-size:12px;line-height:1.5;color:var(--text);}
+.bc-change-label{font-size:10px;color:var(--amber);font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;}
+.bc-no-changes{font-size:12px;color:var(--muted);text-align:center;padding:20px 0;}
 .dc-wrap{display:grid;grid-template-columns:320px 1fr;gap:14px;height:calc(100vh - 120px);}
 .dc-left{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:13px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;}
 .dc-right{background:var(--surface);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;min-width:0;}
@@ -458,6 +478,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
   <div class="nav-item" data-tab="tab-weekly" onclick="goTab('tab-weekly')"><span class="nav-icon">&#9112;</span> Weekly Summary</div>
   <div class="nav-section">AI Management</div>
   <div class="nav-item" data-tab="tab-qc" onclick="goTab('tab-qc')"><span class="nav-icon">&#9678;</span> QC Portal <span class="nav-badge nb-amber" id="nav-qc-badge"></span></div>
+  <div class="nav-item" data-tab="tab-botconsole" onclick="goTab('tab-botconsole')"><span class="nav-icon">&#9881;</span> Bot Console <span class="nav-badge nb-red" id="nav-console-badge"></span></div>
   <div class="nav-item" data-tab="tab-review" onclick="goTab('tab-review')"><span class="nav-icon">&#8635;</span> AI Review Queue <span class="nav-badge nb-red" id="nav-review-badge"></span></div>
   <div class="nav-section">Tools</div>
   <div class="nav-item" data-tab="tab-sandbox" onclick="goTab('tab-sandbox')"><span class="nav-icon">&#9879;</span> Sandbox</div>
@@ -1181,6 +1202,38 @@ textarea.form-input{resize:vertical;min-height:80px;}
 </div>
 
 <!-- ====== DEV CONSOLE ====== -->
+<div class="tab-content" id="tab-botconsole">
+  <div class="sh" style="margin-bottom:10px;">
+    <span class="sh-title">Bot Console</span>
+    <span style="font-size:11px;color:var(--muted);margin-left:12px;">Alerts + Claude chat for word track & prompt changes</span>
+    <button class="btn-sm" style="margin-left:auto;" onclick="loadBotConsole()">&#8635; Refresh Alerts</button>
+  </div>
+  <div class="bc-wrap">
+    <div class="bc-alerts" id="bc-alerts-strip">
+      <div style="color:var(--muted);font-size:12px;padding:8px;">Loading alerts…</div>
+    </div>
+    <div class="bc-main">
+      <div class="bc-chat">
+        <div class="dc-chat-top">
+          <strong style="color:#fff;">Ask Claude</strong>
+          <span style="font-size:11px;color:var(--muted);margin-left:8px;">Ask about performance, request word track rewrites, or queue prompt changes</span>
+          <button class="btn-sm" style="margin-left:auto;" onclick="bcClearChat()">Clear</button>
+        </div>
+        <div class="dc-messages" id="bc-messages"></div>
+        <div class="dc-input-row">
+          <textarea class="dc-input" id="bc-input" rows="2" placeholder="e.g. Why is our opener getting ignored? Rewrite the tie-down to be less pushy. Ctrl+Enter to send." onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();bcSend();}"></textarea>
+          <button class="btn pri" id="bc-send-btn" onclick="bcSend()">Send</button>
+        </div>
+      </div>
+      <div class="bc-sidebar">
+        <div class="bc-sidebar-title">Pending Changes <span id="bc-pending-count" style="color:var(--amber);"></span></div>
+        <div id="bc-pending-list"><div class="bc-no-changes">No queued changes</div></div>
+        <button class="btn amb" id="bc-apply-btn" style="display:none;margin-top:auto;" onclick="bcApplyChanges()">Apply All Changes to Bot</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="tab-content" id="tab-devconsole">
   <div class="dc-wrap">
     <div class="dc-left">
@@ -1472,6 +1525,7 @@ function loadCurrentTab() {
     case 'tab-weekly': loadWeeklyTab(); break;
     case 'tab-elevenlabs': loadElevenLabs(); break;
     case 'tab-ep': loadEp(); break;
+    case 'tab-botconsole': loadBotConsole(); break;
   }
 }
 
@@ -2614,6 +2668,146 @@ async function pullRandomConv() {
   const conv = data.conversation;
   toast('Random conversation pulled: ' + (conv.first_name || 'Unknown'));
   loadConversation(conv.id, conv);
+}
+
+// ========== BOT CONSOLE ==========
+let bcHistory = [];
+
+async function loadBotConsole() {
+  await Promise.all([loadBcAlerts(), refreshBotConsolePending()]);
+}
+
+async function loadBcAlerts() {
+  const strip = document.getElementById('bc-alerts-strip');
+  strip.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px;">Loading alerts…</div>';
+  const data = await api('/api/qc/alerts');
+  const badge = document.getElementById('nav-console-badge');
+  if (!data || !data.alerts || !data.alerts.length) {
+    strip.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px;">No active alerts.</div>';
+    if (badge) badge.textContent = '';
+    return;
+  }
+  const critical = data.alerts.filter(a => a.severity === 'critical').length;
+  if (badge) badge.textContent = critical > 0 ? critical : data.alerts.length;
+  strip.innerHTML = data.alerts.map(a => {
+    const icon = a.severity === 'critical' ? '⚠' : a.severity === 'warning' ? '●' : 'ℹ';
+    return '<div class="bc-alert ' + esc(a.severity) + '">' +
+      '<span class="bc-alert-icon">' + icon + '</span>' +
+      '<div><div class="bc-alert-title">' + esc(a.title) + '</div>' +
+      '<div class="bc-alert-detail">' + esc(a.detail || '') + '</div>' +
+      (a.example ? '<div class="bc-alert-example">&ldquo;' + esc(a.example) + '&rdquo;</div>' : '') +
+      '</div></div>';
+  }).join('');
+}
+
+async function refreshBotConsolePending() {
+  const r = await api('/api/qc/pending-edits-count');
+  if (!r) return;
+  const countEl = document.getElementById('bc-pending-count');
+  const applyBtn = document.getElementById('bc-apply-btn');
+  const listEl = document.getElementById('bc-pending-list');
+  const n = r.pending || 0;
+  if (countEl) countEl.textContent = n ? '(' + n + ')' : '';
+  if (applyBtn) applyBtn.style.display = n > 0 ? '' : 'none';
+  if (n > 0) {
+    const edits = await api('/api/qc/pending-edits');
+    if (edits && edits.edits && edits.edits.length) {
+      listEl.innerHTML = edits.edits.map(function(e) {
+        const label = esc(e.description || e.source || 'Change');
+        const detail = e.description || '';
+        const snippet = detail.length > 100 ? esc(detail.slice(0, 100)) + '…' : esc(detail);
+        return '<div class="bc-change"><div class="bc-change-label">' + label + '</div>' +
+          (snippet ? '<div style="font-size:11px;color:var(--muted);margin-top:3px;">' + snippet + '</div>' : '') +
+          '</div>';
+      }).join('');
+    } else {
+      listEl.innerHTML = '<div class="bc-no-changes">No queued changes</div>';
+    }
+  } else {
+    listEl.innerHTML = '<div class="bc-no-changes">No queued changes</div>';
+  }
+}
+
+async function bcSend() {
+  const input = document.getElementById('bc-input');
+  const msg = (input.value || '').trim();
+  if (!msg) return;
+  input.value = '';
+  const sendBtn = document.getElementById('bc-send-btn');
+  sendBtn.disabled = true;
+  const messagesEl = document.getElementById('bc-messages');
+
+  const userBubble = document.createElement('div');
+  userBubble.className = 'dc-msg user';
+  userBubble.innerHTML = '<span class="dc-msg-role">You</span><div class="dc-msg-body">' + esc(msg) + '</div>';
+  messagesEl.appendChild(userBubble);
+
+  const thinkBubble = document.createElement('div');
+  thinkBubble.className = 'dc-msg assistant';
+  thinkBubble.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--muted);">Thinking…</div>';
+  messagesEl.appendChild(thinkBubble);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  bcHistory.push({ role: 'user', content: msg });
+
+  try {
+    const res = await api('/api/qc/console', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, history: bcHistory.slice(-20) })
+    });
+    thinkBubble.remove();
+    if (!res) {
+      const errBubble = document.createElement('div');
+      errBubble.className = 'dc-msg assistant';
+      errBubble.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--red);">Request failed.</div>';
+      messagesEl.appendChild(errBubble);
+    } else {
+      bcHistory.push({ role: 'assistant', content: res.reply || '' });
+      const aiBubble = document.createElement('div');
+      aiBubble.className = 'dc-msg assistant';
+      let body = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body">' + esc(res.reply || '') + '</div>';
+      if (res.queued_ids && res.queued_ids.length) {
+        body += '<div style="margin-top:8px;font-size:11px;color:var(--amber);">✓ Queued ' + res.queued_ids.length + ' change(s) to pending list.</div>';
+      }
+      aiBubble.innerHTML = body;
+      messagesEl.appendChild(aiBubble);
+      if (res.queued_ids && res.queued_ids.length) refreshBotConsolePending();
+    }
+  } catch (e) {
+    thinkBubble.remove();
+    const errBubble = document.createElement('div');
+    errBubble.className = 'dc-msg assistant';
+    errBubble.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--red);">Error: ' + esc(e.message) + '</div>';
+    messagesEl.appendChild(errBubble);
+  }
+  sendBtn.disabled = false;
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function bcClearChat() {
+  bcHistory = [];
+  const el = document.getElementById('bc-messages');
+  if (el) el.innerHTML = '';
+}
+
+async function bcApplyChanges() {
+  const r = await api('/api/qc/pending-edits-count');
+  if (!r || !r.pending) { toast('No pending changes.'); return; }
+  if (!confirm('Apply ' + r.pending + ' pending change(s)? This rewrites the live system prompt.')) return;
+  const btn = document.getElementById('bc-apply-btn');
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Applying…';
+  const res = await api('/api/qc/apply-pending', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dry_run: false })
+  });
+  btn.disabled = false; btn.textContent = orig;
+  if (!res) { toast('Apply failed.', 'err'); return; }
+  toast('Applied ' + (res.applied || 0) + ' change(s). Prompt updated.', 'ok');
+  refreshBotConsolePending();
+  refreshPendingEditsCounter();
 }
 
 // ========== AI REVIEW QUEUE ==========

@@ -772,6 +772,21 @@ router.get('/qc/pending-edits-count', async (req, res) => {
   }
 });
 
+router.get('/qc/pending-edits', async (req, res) => {
+  try {
+    const q = await db.query(
+      `SELECT id, source, change_type, description, instruction, proposed_by, created_at
+         FROM pending_prompt_changes
+        WHERE status = 'pending'
+        ORDER BY created_at ASC
+        LIMIT 50`
+    );
+    res.json({ ok: true, edits: q.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/qc/apply-pending', async (req, res) => {
   try {
     const { dry_run = false } = req.body || {};
@@ -838,6 +853,303 @@ router.post('/qc/apply-pending', async (req, res) => {
   } catch (err) {
     logger.log('qc', 'error', null, 'apply-pending failed', { error: err.message, stack: err.stack });
     res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
+// ============================================================
+// BOT CONSOLE — alerts + Claude chat for word track / prompt changes
+// ============================================================
+
+// GET /qc/alerts — auto-generated alerts from word track perf + QC failures
+router.get('/qc/alerts', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days, 10) || 30;
+    const alerts = [];
+
+    // Word track workflows with low reply rates (min 20 sends to be significant)
+    const wtQ = await db.query(`
+      SELECT wf.id, wf.label, wf.example_opener,
+             COALESCE(m.sends, 0) AS sends,
+             COALESCE(m.replies, 0) AS replies,
+             COALESCE(m.drop_offs, 0) AS drop_offs,
+             COALESCE(m.bookings, 0) AS bookings
+        FROM workflow_clusters wf
+        LEFT JOIN (
+          SELECT workflow_cluster_id,
+                 COUNT(DISTINCT ghl_conversation_id)::int AS sends,
+                 COUNT(DISTINCT ghl_conversation_id) FILTER (WHERE in_at IS NOT NULL)::int AS replies,
+                 COUNT(DISTINCT ghl_conversation_id) FILTER (WHERE in_at IS NULL)::int AS drop_offs,
+                 COUNT(DISTINCT ghl_conversation_id) FILTER (WHERE booked)::int AS bookings
+            FROM (
+              SELECT s.workflow_cluster_id, s.ghl_conversation_id, s.location_id,
+                     (SELECT MIN(created_at) FROM ghl_messages im
+                       WHERE im.ghl_conversation_id = s.ghl_conversation_id
+                         AND im.location_id = s.location_id
+                         AND im.direction = 'inbound'
+                         AND im.created_at > s.out_at) AS in_at,
+                     EXISTS (
+                       SELECT 1 FROM conversations c
+                        WHERE c.contact_id = (
+                          SELECT contact_id FROM ghl_conversations gc
+                           WHERE gc.ghl_conversation_id = s.ghl_conversation_id LIMIT 1)
+                          AND c.terminal_outcome = 'appointment_booked'
+                     ) AS booked
+                FROM (
+                  SELECT DISTINCT ON (m.ghl_conversation_id, m.location_id)
+                         m.workflow_cluster_id, m.ghl_conversation_id, m.location_id, m.created_at AS out_at
+                    FROM ghl_messages m
+                   WHERE m.workflow_cluster_id IS NOT NULL
+                     AND m.direction = 'outbound'
+                     AND m.created_at >= NOW() - ($1 || ' days')::interval
+                   ORDER BY m.ghl_conversation_id, m.location_id, m.created_at ASC
+                ) s
+            ) x GROUP BY workflow_cluster_id
+        ) m ON m.workflow_cluster_id = wf.id
+       WHERE COALESCE(m.sends, 0) >= 20
+       ORDER BY (COALESCE(m.replies,0)::float / NULLIF(m.sends,0)) ASC NULLS LAST
+       LIMIT 10`,
+      [days]
+    );
+
+    for (const r of wtQ.rows) {
+      const sends = Number(r.sends) || 0;
+      const replies = Number(r.replies) || 0;
+      const rate = sends > 0 ? replies / sends : 0;
+      if (rate < 0.12) {
+        alerts.push({
+          type: 'word_track',
+          severity: rate < 0.06 ? 'critical' : 'warning',
+          title: `Low reply rate: "${r.label || 'Unnamed workflow'}"`,
+          detail: `${(rate * 100).toFixed(1)}% reply rate on ${sends} sends. ${r.drop_offs} contacts dropped off without replying.`,
+          example: r.example_opener ? r.example_opener.slice(0, 120) : null,
+          workflow_id: r.id,
+          metric: { sends, replies, rate }
+        });
+      }
+    }
+
+    // Word track clusters (individual message clusters) with low reply rates
+    const clQ = await db.query(`
+      SELECT wtc.id, wtc.label, wtc.example_text,
+             COUNT(DISTINCT m.ghl_conversation_id)::int AS sends,
+             COUNT(DISTINCT m.ghl_conversation_id) FILTER (
+               WHERE EXISTS (
+                 SELECT 1 FROM ghl_messages ir
+                  WHERE ir.ghl_conversation_id = m.ghl_conversation_id
+                    AND ir.location_id = m.location_id
+                    AND ir.direction = 'inbound'
+                    AND ir.created_at > m.created_at
+               )
+             )::int AS replies
+        FROM word_track_clusters wtc
+        JOIN ghl_messages m ON m.cluster_id = wtc.id
+       WHERE m.direction = 'outbound'
+         AND m.created_at >= NOW() - ($1 || ' days')::interval
+       GROUP BY wtc.id, wtc.label, wtc.example_text
+      HAVING COUNT(DISTINCT m.ghl_conversation_id) >= 15
+       ORDER BY (COUNT(DISTINCT m.ghl_conversation_id) FILTER (
+                   WHERE EXISTS (
+                     SELECT 1 FROM ghl_messages ir
+                      WHERE ir.ghl_conversation_id = m.ghl_conversation_id
+                        AND ir.location_id = m.location_id
+                        AND ir.direction = 'inbound'
+                        AND ir.created_at > m.created_at
+                   )
+                 ))::float / NULLIF(COUNT(DISTINCT m.ghl_conversation_id), 0) ASC
+       LIMIT 8`,
+      [days]
+    );
+
+    for (const r of clQ.rows) {
+      const sends = Number(r.sends) || 0;
+      const replies = Number(r.replies) || 0;
+      const rate = sends > 0 ? replies / sends : 0;
+      if (rate < 0.10) {
+        alerts.push({
+          type: 'word_track_cluster',
+          severity: rate < 0.05 ? 'critical' : 'warning',
+          title: `Weak word track: "${r.label || 'Unlabeled cluster'}"`,
+          detail: `${(rate * 100).toFixed(1)}% reply rate on ${sends} sends.`,
+          example: r.example_text ? r.example_text.slice(0, 120) : null,
+          cluster_id: r.id,
+          metric: { sends, replies, rate }
+        });
+      }
+    }
+
+    // Recent QC failures
+    const qcQ = await db.query(`
+      SELECT COUNT(*)::int AS failed,
+             COUNT(*) FILTER (WHERE outcome = 'modified')::int AS modified
+        FROM qc_reviews
+       WHERE created_at >= NOW() - '7 days'::interval`
+    );
+    const qcRow = qcQ.rows[0];
+    if ((qcRow.failed || 0) >= 2) {
+      alerts.push({
+        type: 'qc_failures',
+        severity: qcRow.failed >= 5 ? 'critical' : 'warning',
+        title: `${qcRow.failed} QC failures in the last 7 days`,
+        detail: `${qcRow.modified} conversations were marked "Modified" (bot said something wrong). Review the QC portal for details.`,
+        example: null,
+        metric: { failed: qcRow.failed, modified: qcRow.modified }
+      });
+    }
+
+    // Pending prompt changes
+    const pendQ = await db.query(`SELECT COUNT(*)::int AS n FROM pending_prompt_changes WHERE status = 'pending'`);
+    const pendN = pendQ.rows[0]?.n || 0;
+    if (pendN > 0) {
+      alerts.push({
+        type: 'pending_changes',
+        severity: 'info',
+        title: `${pendN} prompt change${pendN === 1 ? '' : 's'} queued and waiting`,
+        detail: 'Go to the QC portal and hit "Apply Edits" to apply them to the live bot.',
+        example: null,
+        metric: { pending: pendN }
+      });
+    }
+
+    // Sort: critical first, then warning, then info
+    const order = { critical: 0, warning: 1, info: 2 };
+    alerts.sort((a, b) => (order[a.severity] || 0) - (order[b.severity] || 0));
+
+    res.json({ ok: true, alerts, days });
+  } catch (err) {
+    logger.log('qc', 'error', null, 'alerts failed', { error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /qc/console — Claude chat for bot management
+// Body: { message, history: [{role,content}] }
+// Returns: { reply, actions: [{type,description,details}], queued_ids }
+router.post('/qc/console', async (req, res) => {
+  try {
+    const { message, history = [] } = req.body || {};
+    if (!message) return res.status(400).json({ error: 'message required' });
+
+    // Gather context: current prompt snippet + top underperforming word tracks + recent QC failures
+    let promptSnippet = '';
+    try {
+      const analyzerModule = require('./analyzer');
+      const currentPrompt = await analyzerModule.getCurrentPrompt();
+      promptSnippet = currentPrompt ? currentPrompt.slice(0, 3000) : '';
+    } catch {}
+
+    const wtCtx = [];
+    try {
+      const wtQ = await db.query(`
+        SELECT wf.label, wf.example_opener,
+               COUNT(DISTINCT m.ghl_conversation_id)::int AS sends,
+               COUNT(DISTINCT m.ghl_conversation_id) FILTER (
+                 WHERE EXISTS (SELECT 1 FROM ghl_messages ir
+                   WHERE ir.ghl_conversation_id = m.ghl_conversation_id
+                     AND ir.direction = 'inbound' AND ir.created_at > m.created_at)
+               )::int AS replies
+          FROM workflow_clusters wf
+          JOIN ghl_messages m ON m.workflow_cluster_id = wf.id
+         WHERE m.direction = 'outbound'
+           AND m.created_at >= NOW() - '30 days'::interval
+         GROUP BY wf.id, wf.label, wf.example_opener
+        HAVING COUNT(DISTINCT m.ghl_conversation_id) >= 10
+         ORDER BY replies::float / NULLIF(COUNT(DISTINCT m.ghl_conversation_id), 0) ASC
+         LIMIT 5`
+      );
+      for (const r of wtQ.rows) {
+        const rate = r.sends > 0 ? ((r.replies / r.sends) * 100).toFixed(1) : '0';
+        wtCtx.push(`"${r.label}": ${rate}% reply rate (${r.sends} sends). Example: "${(r.example_opener || '').slice(0, 100)}"`);
+      }
+    } catch {}
+
+    const qcCtx = [];
+    try {
+      const qcQ = await db.query(`
+        SELECT qr.outcome, qr.notes, qr.modified_response
+          FROM qc_reviews qr
+         WHERE qr.outcome IN ('failed','modified') AND qr.created_at >= NOW() - '14 days'::interval
+         ORDER BY qr.created_at DESC LIMIT 5`
+      );
+      for (const r of qcQ.rows) {
+        const note = [r.notes, r.modified_response].filter(Boolean).join(' | ').slice(0, 120);
+        if (note) qcCtx.push(`[${r.outcome}] ${note}`);
+      }
+    } catch {}
+
+    const systemPrompt = `You are the bot management assistant for PH Insurance's SMS qualification bot. You help Walt and the team understand bot performance, diagnose issues, and improve word tracks and scripts.
+
+CURRENT SYSTEM PROMPT (first 3000 chars):
+${promptSnippet || '(unavailable)'}
+
+TOP UNDERPERFORMING WORD TRACKS (last 30 days):
+${wtCtx.length ? wtCtx.join('\n') : '(no data)'}
+
+RECENT QC FAILURES/MODIFICATIONS (last 14 days):
+${qcCtx.length ? qcCtx.join('\n') : '(none)'}
+
+---
+When the user asks for a change or improvement, respond with JSON in this exact format:
+{
+  "reply": "your conversational response here",
+  "actions": [
+    {
+      "type": "prompt_change",
+      "description": "Short label for this change",
+      "details": "Exact text or instruction for what to change in the prompt"
+    }
+  ]
+}
+
+If no changes are needed (just answering a question), set "actions" to [].
+Always return valid JSON. Keep "reply" friendly and specific.`;
+
+    const messages = [
+      ...history.slice(-10).map((h) => ({ role: h.role, content: h.content })),
+      { role: 'user', content: message }
+    ];
+
+    const resp = await callAnthropic(
+      {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1500,
+        system: systemPrompt,
+        messages
+      },
+      { category: 'qc_console', location_id: null, meta: { history_len: history.length } }
+    );
+
+    const raw = (resp.content.find((b) => b.type === 'text')?.text || '').trim();
+    let reply = raw;
+    let actions = [];
+    try {
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (m) {
+        const parsed = JSON.parse(m[0]);
+        reply = parsed.reply || raw;
+        actions = Array.isArray(parsed.actions) ? parsed.actions : [];
+      }
+    } catch {}
+
+    // Queue any prompt_change actions to pending_prompt_changes
+    const queuedIds = [];
+    for (const a of actions) {
+      if (a.type === 'prompt_change' && a.description) {
+        try {
+          const ins = await db.query(
+            `INSERT INTO pending_prompt_changes (source, change_type, description, proposed_by)
+             VALUES ('console', 'improvement', $1, 'bot_console')
+             RETURNING id`,
+            [`${a.description}${a.details ? ': ' + a.details : ''}`]
+          );
+          queuedIds.push(ins.rows[0].id);
+        } catch {}
+      }
+    }
+
+    res.json({ ok: true, reply, actions, queued_ids: queuedIds });
+  } catch (err) {
+    logger.log('qc', 'error', null, 'console chat failed', { error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
