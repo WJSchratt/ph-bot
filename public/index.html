@@ -734,8 +734,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
           <span class="qc-score" id="qc-accuracy-display" style="margin-left:auto;"></span>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;width:100%;">
-          <input type="text" placeholder="Corrected response text (what the bot SHOULD have said)..." id="qc-edit-input" style="width:100%;">
-          <input type="text" placeholder="What the bot did wrong (e.g. 'sent 3 messages at once', 'asked the same question twice', 'revealed it was an AI unprompted')..." id="qc-feedback-input" style="width:100%;">
+          <input type="text" placeholder="Notes — what the bot did wrong (e.g. 'asked the same question twice', 'revealed AI unprompted')..." id="qc-feedback-input" style="width:100%;">
         </div>
       </div>
       <div class="qcp-chat">
@@ -2576,16 +2575,10 @@ function renderQcThread(thread) {
 
 async function qcAction(outcome) {
   if (!selectedQcConvId) { toast('Select a conversation first.'); return; }
-  const modText = document.getElementById('qc-edit-input').value.trim();
   const feedbackText = document.getElementById('qc-feedback-input').value.trim();
 
   const body = { conversation_id: selectedQcConvId, reviewer: 'admin', outcome };
   if (outcome === 'modified' || outcome === 'failed') {
-    if (outcome === 'modified' && !modText && !feedbackText) {
-      toast('Enter a corrected response OR describe what the bot did wrong to save.');
-      return;
-    }
-    if (modText) body.modified_response = modText;
     if (feedbackText) body.notes = feedbackText;
   }
   const res = await api('/api/qc/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -2625,7 +2618,6 @@ async function qcAction(outcome) {
   }
 
   toast('QC review submitted: ' + outcome + (queued.length ? ' (' + queued.length + ' edit' + (queued.length > 1 ? 's' : '') + ' queued)' : ''));
-  document.getElementById('qc-edit-input').value = '';
   document.getElementById('qc-feedback-input').value = '';
   loadQC();
   refreshPendingEditsCounter();

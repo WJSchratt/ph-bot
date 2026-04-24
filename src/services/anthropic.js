@@ -8,6 +8,7 @@ const ALLOWED_CATEGORIES = new Set([
   'qc_sim_score',
   'qc_generate_samples',
   'qc_batch_apply',
+  'qc_console',
   'analyzer_analysis',
   'analyzer_prompt_gen',
   'dev_console',
