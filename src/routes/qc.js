@@ -1277,7 +1277,13 @@ router.post('/qc/console', async (req, res) => {
       } catch {}
     }
 
-    const systemPrompt = `You are the bot management assistant for PH Insurance's SMS qualification bot. You help Walt and the team understand performance, diagnose issues, and improve word tracks and scripts.
+    const systemPrompt = `You are the bot management assistant for PH Insurance's SMS qualification bot. You have FULL ABILITY to make changes to the live bot — just queue them in "actions" and they deploy when the user clicks Apply.
+
+HOW CHANGES WORK:
+- When you include a "prompt_change" action, it gets saved to a queue immediately.
+- The user sees the queued changes and clicks "Apply All Changes to Bot" to deploy them live.
+- You can queue multiple changes in one response.
+- Be specific in "details" — write the exact new text or instruction to add/replace/remove.
 
 CURRENT SYSTEM PROMPT (first 4000 chars):
 ${promptSnippet || '(unavailable)'}
@@ -1292,20 +1298,21 @@ QC REVIEW HISTORY (last 30 days):
 ${qcCtx.length ? qcCtx.join('\n') : '(none)'}${pendingCtx}${convCtx}
 
 ---
-When the user asks for a change or improvement, respond with JSON in this exact format:
+ALWAYS respond with JSON in this exact format (no exceptions, no markdown fences):
 {
-  "reply": "your conversational response here",
+  "reply": "your conversational response here — confirm what you queued, or answer the question",
   "actions": [
     {
       "type": "prompt_change",
-      "description": "Short label for this change",
-      "details": "Exact text or instruction for what to change in the prompt"
+      "description": "Short label shown in the pending changes list (e.g. 'Improve name collection message')",
+      "details": "Exact text or full instruction for the change — be specific enough that a developer can apply it precisely"
     }
   ]
 }
 
-If no changes are needed (just answering a question), set "actions" to [].
-Always return valid JSON. Keep "reply" friendly and specific.`;
+If no changes are needed, set "actions" to [].
+When you queue changes, tell the user what you queued and that they can click Apply to deploy.
+Always return valid JSON.`;
 
     const messages = [
       ...history.slice(-10).map((h) => ({ role: h.role, content: h.content })),

@@ -1951,7 +1951,10 @@ async function dashChatSend() {
       ab.className = 'dc-msg assistant';
       let body = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body">' + esc(res.reply || '') + '</div>';
       if (res.queued_ids && res.queued_ids.length) {
-        body += '<div style="margin-top:6px;font-size:11px;color:var(--amber);">✓ Queued ' + res.queued_ids.length + ' change(s) — go to QC Portal to apply.</div>';
+        body += '<div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+          + '<span style="font-size:11px;color:var(--amber);">✓ Queued ' + res.queued_ids.length + ' change(s)</span>'
+          + '<button class="btn amb" style="font-size:11px;padding:3px 10px;" onclick="qcpApplyNow()">Apply to Live Bot</button>'
+          + '</div>';
       }
       ab.innerHTML = body;
       messagesEl.appendChild(ab);
@@ -2940,7 +2943,10 @@ async function qcpSend() {
       ab.className = 'dc-msg assistant';
       let body2 = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body">' + esc(res.reply || '') + '</div>';
       if (res.queued_ids && res.queued_ids.length) {
-        body2 += '<div style="margin-top:5px;font-size:11px;color:var(--amber);">✓ Queued ' + res.queued_ids.length + ' change(s).</div>';
+        body2 += '<div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+          + '<span style="font-size:11px;color:var(--amber);">✓ Queued ' + res.queued_ids.length + ' change(s)</span>'
+          + '<button class="btn amb" style="font-size:11px;padding:3px 10px;" onclick="qcpApplyNow()">Apply to Live Bot</button>'
+          + '</div>';
       }
       ab.innerHTML = body2;
       messagesEl.appendChild(ab);
@@ -2960,6 +2966,22 @@ function qcpClear() {
   qcpHistory = [];
   const el = document.getElementById('qcp-messages');
   if (el) el.innerHTML = '';
+}
+
+async function qcpApplyNow() {
+  const r = await api('/api/qc/pending-edits-count');
+  if (!r || !r.pending) { toast('No pending changes to apply.'); return; }
+  if (!confirm('Apply ' + r.pending + ' pending change(s) to the live bot prompt?')) return;
+  const res = await api('/api/qc/apply-pending', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dry_run: false })
+  });
+  if (!res) { toast('Apply failed.', 'err'); return; }
+  toast('Applied ' + (res.applied || 0) + ' change(s). Bot prompt updated live.', 'ok');
+  refreshQbcPending && refreshQbcPending();
+  refreshBotConsolePending && refreshBotConsolePending();
+  refreshPendingEditsCounter && refreshPendingEditsCounter();
 }
 
 // ========== QC BOT CONSOLE (inline within QC Portal) ==========
