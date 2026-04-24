@@ -1142,26 +1142,33 @@ router.post('/qc/console', async (req, res) => {
       overallCtx = `Total convos: ${o.total} | Booked: ${o.booked} (${bookRate}%) | Handoffs: ${o.handoffs} | DNC: ${o.dnc} | Active: ${o.active}`;
     } catch {}
 
-    // All word track clusters with reply rates (sorted best→worst)
+    // Message reply rates — raw outbound messages grouped by content (first 160 chars as key).
+    // Sorted best→worst so Claude can directly answer "which message gets most replies".
     const wtCtx = [];
     try {
       const wtQ = await db.query(`
-        SELECT wf.label, wf.example_opener,
-               COUNT(DISTINCT m.ghl_conversation_id)::int AS sends,
-               COUNT(DISTINCT m.ghl_conversation_id) FILTER (
-                 WHERE EXISTS (SELECT 1 FROM ghl_messages ir
-                   WHERE ir.ghl_conversation_id = m.ghl_conversation_id
-                     AND ir.direction = 'inbound' AND ir.created_at > m.created_at)
+        SELECT LEFT(m.content, 160) AS snippet,
+               COUNT(*)::int AS sends,
+               COUNT(*) FILTER (
+                 WHERE EXISTS (
+                   SELECT 1 FROM ghl_messages ir
+                    WHERE ir.ghl_conversation_id = m.ghl_conversation_id
+                      AND ir.location_id = m.location_id
+                      AND ir.direction = 'inbound'
+                      AND ir.created_at > m.created_at
+                 )
                )::int AS replies
-          FROM workflow_clusters wf
-          JOIN ghl_messages m ON m.workflow_cluster_id = wf.id
-         WHERE m.direction = 'outbound' AND m.created_at >= NOW() - '30 days'::interval
-         GROUP BY wf.id, wf.label, wf.example_opener
-        HAVING COUNT(DISTINCT m.ghl_conversation_id) >= 3
-         ORDER BY replies::float / NULLIF(COUNT(DISTINCT m.ghl_conversation_id), 0) DESC`);
+          FROM ghl_messages m
+         WHERE m.direction = 'outbound'
+           AND m.created_at >= NOW() - '30 days'::interval
+           AND LENGTH(m.content) > 10
+         GROUP BY LEFT(m.content, 160)
+        HAVING COUNT(*) >= 3
+         ORDER BY replies::float / NULLIF(COUNT(*), 0) DESC
+         LIMIT 40`);
       for (const r of wtQ.rows) {
         const rate = r.sends > 0 ? ((r.replies / r.sends) * 100).toFixed(1) : '0';
-        wtCtx.push(`"${r.label}": ${rate}% reply rate (${r.sends} sends) — "${(r.example_opener || '').slice(0, 120)}"`);
+        wtCtx.push(`${rate}% reply rate (${r.sends} sends): "${r.snippet}"`);
       }
     } catch {}
 
@@ -1227,8 +1234,8 @@ ${promptSnippet || '(unavailable)'}
 OVERALL PERFORMANCE (last 30 days):
 ${overallCtx || '(no data)'}${subCtx}
 
-WORD TRACK REPLY RATES — all clusters, best to worst (last 30 days):
-${wtCtx.length ? wtCtx.join('\n') : '(no cluster data — messages may not be assigned to clusters yet)'}
+OUTBOUND MESSAGE REPLY RATES — top 40 by reply rate, best to worst (last 30 days, min 3 sends):
+${wtCtx.length ? wtCtx.join('\n') : '(no outbound message data yet)'}
 
 QC REVIEW HISTORY (last 30 days):
 ${qcCtx.length ? qcCtx.join('\n') : '(none)'}${pendingCtx}${convCtx}
