@@ -215,6 +215,15 @@ tr:last-child td{border-bottom:none;}
 .qcp-input-row textarea{flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:7px;font-family:'Rajdhani';font-size:13px;outline:none;resize:none;min-height:36px;}
 .qcp-input-row textarea:focus{border-color:var(--cyan);}
 .qcp-input-row textarea::placeholder{color:var(--muted);}
+.bubble.bot{cursor:pointer;transition:outline .1s;}
+.bubble.bot:hover{outline:1px dashed rgba(255,170,0,.5);outline-offset:3px;}
+.bubble.bot.flagged{outline:2px solid var(--amber);outline-offset:3px;}
+.bubble.bot .flag-hint{font-size:9px;color:var(--muted);margin-left:6px;opacity:0;transition:opacity .15s;}
+.bubble.bot:hover .flag-hint{opacity:1;}
+.qc-flag-panel{background:var(--surface2);border-top:2px solid var(--amber);flex-shrink:0;padding:10px 14px 12px;display:flex;flex-direction:column;gap:7px;}
+.qc-flag-original{background:var(--bg);border-left:3px solid var(--muted);padding:7px 10px;font-size:12px;color:var(--muted);border-radius:4px;font-style:italic;white-space:pre-wrap;}
+.qc-flag-input{background:var(--surface);border:1px solid var(--amber);color:var(--text);padding:8px 10px;border-radius:7px;font-size:13px;font-family:'Rajdhani';resize:none;width:100%;outline:none;min-height:52px;box-sizing:border-box;}
+.qc-flag-input:focus{border-color:var(--cyan);}
 .qc-score{margin-left:auto;font-size:13px;color:var(--muted);}
 
 /* QC top bar — hero stats + clearer tabs. */
@@ -702,6 +711,21 @@ textarea.form-input{resize:vertical;min-height:80px;}
       <div class="conv-messages" id="qc-messages">
         <div style="color:var(--muted);text-align:center;padding:60px 20px;font-size:14px;">Select a conversation from the left panel.</div>
       </div>
+
+      <!-- Click any bot bubble above to open this panel -->
+      <div id="qc-flag-panel" style="display:none;" class="qc-flag-panel">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span id="qc-flag-badge"></span>
+          <span id="qc-flag-type" style="font-size:11px;font-weight:700;color:var(--amber);"></span>
+          <button class="btn-sm" style="margin-left:auto;" onclick="qcFlagDismiss()">✕ Cancel</button>
+        </div>
+        <div id="qc-flag-original" class="qc-flag-original"></div>
+        <textarea id="qc-flag-replacement" class="qc-flag-input" placeholder="What it should have said instead... (Ctrl+Enter to save)" onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();qcFlagSubmit();}"></textarea>
+        <div style="display:flex;gap:8px;">
+          <button class="btn amb" id="qc-flag-submit-btn" onclick="qcFlagSubmit()">Queue Fix</button>
+        </div>
+      </div>
+
       <div class="qc-acts" style="flex-wrap:wrap;gap:8px;">
         <div style="display:flex;gap:8px;align-items:center;width:100%;flex-wrap:wrap;">
           <button class="btn grn" onclick="qcAction('approved')">Approve</button>
@@ -2532,11 +2556,15 @@ function renderQcThread(thread) {
     const isOutbound = m.direction === 'outbound';
     d.className = 'bubble ' + (isOutbound ? 'bot' : 'lead');
     const badge = qcSourceBadge(m.source || (isOutbound ? 'unknown' : 'user'));
-    const lockIcon = isOutbound && !m.editable ? ' <span style="color:var(--muted);font-size:9px;" title="Only Claude turns are editable">[archive — read-only]</span>' : '';
     const ts = m.created_at ? new Date(m.created_at).toLocaleString() : '';
+    const editHint = isOutbound ? ' <span class="flag-hint">click to replace</span>' : '';
     d.innerHTML =
-      '<div class="bubble-lbl"><span class="' + badge.cls + '" style="margin-right:6px;">' + esc(badge.label) + '</span>' + esc(ts) + lockIcon + '</div>' +
+      '<div class="bubble-lbl"><span class="' + badge.cls + '" style="margin-right:6px;">' + esc(badge.label) + '</span>' + esc(ts) + editHint + '</div>' +
       esc(m.content || '');
+    if (isOutbound) {
+      const msgSnap = { content: m.content, source: m.source, direction: m.direction };
+      d.addEventListener('click', function() { qcFlagOpen(msgSnap, d); });
+    }
     msgsEl.appendChild(d);
   }
   // Scroll to the TOP so reviewers read the conversation start-to-finish
@@ -2723,6 +2751,64 @@ async function loadQcAll() {
     };
     list.appendChild(item);
   });
+}
+
+// ========== QC MESSAGE FLAG (click a bot bubble to replace it) ==========
+let qcFlagMsg = null;
+let qcFlagEl = null;
+
+function qcFlagOpen(msg, el) {
+  if (qcFlagEl) qcFlagEl.classList.remove('flagged');
+  qcFlagMsg = msg;
+  qcFlagEl = el;
+  el.classList.add('flagged');
+
+  const isWordtrack = msg.source === 'botpress' || msg.source === 'ghl_workflow';
+  const badge = qcSourceBadge(msg.source || 'unknown');
+  document.getElementById('qc-flag-badge').innerHTML = '<span class="' + badge.cls + '">' + esc(badge.label) + '</span>';
+  document.getElementById('qc-flag-type').textContent = isWordtrack
+    ? '→ Dev queue (you\'ll fix this in GHL word tracks)'
+    : '→ Queues a prompt fix — hit Apply to push live';
+  document.getElementById('qc-flag-original').textContent = msg.content || '';
+  document.getElementById('qc-flag-replacement').value = '';
+  document.getElementById('qc-flag-submit-btn').textContent = isWordtrack ? 'Add to Dev Queue' : 'Queue Prompt Fix';
+  document.getElementById('qc-flag-panel').style.display = '';
+  // Scroll so the panel is visible
+  document.getElementById('qc-flag-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  document.getElementById('qc-flag-replacement').focus();
+}
+
+function qcFlagDismiss() {
+  if (qcFlagEl) qcFlagEl.classList.remove('flagged');
+  qcFlagMsg = null;
+  qcFlagEl = null;
+  document.getElementById('qc-flag-panel').style.display = 'none';
+}
+
+async function qcFlagSubmit() {
+  if (!qcFlagMsg) return;
+  const replacement = document.getElementById('qc-flag-replacement').value.trim();
+  if (!replacement) { toast('Enter what it should have said.'); return; }
+  const btn = document.getElementById('qc-flag-submit-btn');
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const res = await api('/api/qc/flag-message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      original: qcFlagMsg.content,
+      replacement,
+      source: qcFlagMsg.source,
+      conversation_id: selectedQcConvId
+    })
+  });
+  btn.disabled = false; btn.textContent = orig;
+  if (!res || !res.ok) { toast('Failed to save.', 'err'); return; }
+  toast(res.is_wordtrack ? 'Added to dev queue.' : 'Prompt fix queued — hit Apply Edits to push live.', 'ok');
+  qcFlagDismiss();
+  refreshPendingEditsCounter();
+  if (typeof refreshQbcPending === 'function') refreshQbcPending();
+  if (typeof refreshBotConsolePending === 'function') refreshBotConsolePending();
 }
 
 // ========== QC INLINE CHAT (below conversation thread) ==========

@@ -772,6 +772,29 @@ router.get('/qc/botpress-archive/:ghl_conversation_id', async (req, res) => {
   }
 });
 
+// POST /qc/flag-message — reviewer clicks a bot bubble and submits a replacement.
+// source='claude'        → prompt_fix, goes into pending_prompt_changes for Apply
+// source='botpress'|'ghl_workflow' → wordtrack_fix, dev-queue reminder for Walt
+router.post('/qc/flag-message', async (req, res) => {
+  try {
+    const { original, replacement, source, conversation_id } = req.body || {};
+    if (!original || !replacement) return res.status(400).json({ error: 'original and replacement required' });
+    const isWordtrack = source === 'botpress' || source === 'ghl_workflow';
+    const changeType = isWordtrack ? 'wordtrack_fix' : 'prompt_fix';
+    const description = (isWordtrack ? '[WORD TRACK FIX]\n' : '[PROMPT FIX]\n') +
+      `ORIGINAL:\n${original}\n\nREPLACEMENT:\n${replacement}`;
+    const r = await db.query(
+      `INSERT INTO pending_prompt_changes (source, change_type, description, proposed_by, example_conversation_id)
+       VALUES ($1, $2, $3, 'qc_flag', $4) RETURNING id`,
+      [isWordtrack ? 'wordtrack' : 'claude', changeType, description, conversation_id || null]
+    );
+    logger.log('qc', 'info', null, 'message flagged', { source, changeType, id: r.rows[0].id });
+    res.json({ ok: true, id: r.rows[0].id, change_type: changeType, is_wordtrack: isWordtrack });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ============================================================
 // Cluster filter — "show every attempt at word track X" across all
 // conversations. Pulls outbound cluster messages + their reply (if any).
