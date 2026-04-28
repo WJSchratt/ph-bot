@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Thank You — Profit Hexagon</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #080808;
+      color: rgba(255,255,255,0.88);
+      font-family: 'DM Sans', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 4rem 1.5rem 6rem;
+    }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='100'%3E%3Cpath d='M28 66L0 50V18L28 2l28 16v32L28 66zm0-8l22-12.7V29.7L28 17 6 29.7v15.6L28 58z' fill='none' stroke='rgba(234%2C179%2C8%2C0.035)' stroke-width='1'/%3E%3C/svg%3E");
+      background-size: 56px 100px;
+      pointer-events: none;
+    }
+
+    /* ── Hero ── */
+    .hero {
+      position: relative;
+      max-width: 480px;
+      width: 100%;
+      text-align: center;
+      margin-bottom: 3.5rem;
+    }
+    .check {
+      width: 72px; height: 72px;
+      background: rgba(234,179,8,0.1);
+      border: 1px solid rgba(234,179,8,0.25);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 2rem;
+      animation: pop 0.5s cubic-bezier(0.175,0.885,0.32,1.275) forwards;
+    }
+    h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(1.8rem, 5vw, 2.6rem);
+      font-weight: 900;
+      margin-bottom: 1rem;
+      animation: up 0.5s ease 0.15s both;
+    }
+    h1 span { color: #EAB308; }
+    .hero p {
+      font-size: 0.95rem;
+      font-weight: 300;
+      color: rgba(255,255,255,0.5);
+      line-height: 1.8;
+      margin-bottom: 0.5rem;
+      animation: up 0.5s ease 0.25s both;
+    }
+
+    /* ── Divider ── */
+    .divider {
+      position: relative;
+      max-width: 600px;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 2.5rem;
+      animation: up 0.5s ease 0.35s both;
+    }
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: rgba(234,179,8,0.15);
+    }
+    .divider span {
+      font-size: 0.75rem;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(234,179,8,0.6);
+      white-space: nowrap;
+    }
+
+    /* ── Form card ── */
+    .form-card {
+      position: relative;
+      max-width: 600px;
+      width: 100%;
+      background: rgba(255,255,255,0.025);
+      border: 1px solid rgba(234,179,8,0.12);
+      border-radius: 20px;
+      padding: 2.5rem 2rem;
+      animation: up 0.5s ease 0.4s both;
+    }
+    .form-intro {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    .form-intro h2 {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    .form-intro p {
+      font-size: 0.875rem;
+      color: rgba(255,255,255,0.45);
+      line-height: 1.7;
+    }
+
+    .section-label {
+      font-size: 0.65rem;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: rgba(234,179,8,0.7);
+      margin: 1.75rem 0 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid rgba(234,179,8,0.1);
+    }
+    .section-label:first-of-type { margin-top: 0; }
+
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 500px) { .row { grid-template-columns: 1fr; } }
+
+    .field { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 1rem; }
+    .field:last-child { margin-bottom: 0; }
+    label {
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: rgba(255,255,255,0.55);
+      letter-spacing: 0.01em;
+    }
+    label .req { color: #EAB308; margin-left: 2px; }
+    label .hint { font-weight: 300; color: rgba(255,255,255,0.3); margin-left: 4px; }
+
+    input, select, textarea {
+      width: 100%;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      color: rgba(255,255,255,0.88);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 0.875rem;
+      padding: 0.7rem 1rem;
+      outline: none;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    input:focus, select:focus, textarea:focus {
+      border-color: rgba(234,179,8,0.5);
+      background: rgba(234,179,8,0.03);
+    }
+    input::placeholder, textarea::placeholder { color: rgba(255,255,255,0.2); }
+    select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='rgba(255,255,255,0.3)' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 1rem center; padding-right: 2.5rem; }
+    select option { background: #111; }
+
+    .radio-group { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .radio-pill { cursor: pointer; }
+    .radio-pill input { display: none; }
+    .radio-pill span {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 500;
+      padding: 0.45rem 0.9rem;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 20px;
+      color: rgba(255,255,255,0.5);
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .radio-pill input:checked + span {
+      border-color: rgba(234,179,8,0.6);
+      background: rgba(234,179,8,0.08);
+      color: #EAB308;
+    }
+
+    .submit-btn {
+      width: 100%;
+      margin-top: 2rem;
+      background: #EAB308;
+      color: #000;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 0.9rem;
+      font-weight: 500;
+      padding: 0.875rem 2rem;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.2s, opacity 0.2s;
+    }
+    .submit-btn:hover { background: #ca9a06; }
+    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Success state ── */
+    .form-success {
+      display: none;
+      text-align: center;
+      padding: 2rem 0;
+    }
+    .form-success .check { animation: none; }
+    .form-success h3 {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.3rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+    }
+    .form-success p {
+      font-size: 0.875rem;
+      color: rgba(255,255,255,0.45);
+      line-height: 1.7;
+    }
+
+    /* ── Error banner ── */
+    .form-error {
+      display: none;
+      background: rgba(255,69,96,0.08);
+      border: 1px solid rgba(255,69,96,0.25);
+      border-radius: 10px;
+      padding: 0.75rem 1rem;
+      font-size: 0.8rem;
+      color: rgba(255,120,140,0.9);
+      margin-top: 1rem;
+      line-height: 1.5;
+    }
+
+    .note {
+      margin-top: 2rem;
+      font-size: 0.75rem;
+      color: rgba(255,255,255,0.25);
+      text-align: center;
+      animation: up 0.5s ease 0.5s both;
+    }
+    .note a { color: rgba(234,179,8,0.6); text-decoration: none; }
+
+    @keyframes pop {
+      from { opacity: 0; transform: scale(0.5); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    @keyframes up {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Hero ── -->
+  <div class="hero">
+    <div class="check">
+      <svg width="30" height="30" fill="none" stroke="#EAB308" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+        <polyline points="20 6 9 17 4 12"/>
+      </svg>
+    </div>
+    <h1>Welcome to<br/><span>Profit Hexagon</span></h1>
+    <p>Your payment was successful. One last step below and your AI system will be ready to go.</p>
+  </div>
+
+  <!-- ── Divider ── -->
+  <div class="divider"><span>Complete Your Setup</span></div>
+
+  <!-- ── Form card ── -->
+  <div class="form-card">
+
+    <div class="form-intro">
+      <h2>Finish Setting Up Your Account</h2>
+      <p>Takes about 3 minutes. Once submitted, we'll automatically configure your AI bot, voice agent, and GHL sub-account — then reach out to schedule your onboarding call.</p>
+    </div>
+
+    <div id="form-body">
+      <form id="onboarding-form">
+
+        <div class="section-label">Your Info</div>
+        <div class="row">
+          <div class="field">
+            <label>First Name <span class="req">*</span></label>
+            <input type="text" name="agent_first_name" placeholder="Jeremiah" required>
+          </div>
+          <div class="field">
+            <label>Last Name</label>
+            <input type="text" name="agent_last_name" placeholder="Cox">
+          </div>
+        </div>
+        <div class="field">
+          <label>Business / Agency Name <span class="req">*</span></label>
+          <input type="text" name="business_name" placeholder="Smith Insurance Agency" required>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Your Phone Number <span class="req">*</span></label>
+            <input type="tel" name="agent_phone" placeholder="+16125551234" required>
+          </div>
+          <div class="field">
+            <label>Your Email <span class="req">*</span></label>
+            <input type="email" name="agent_email" placeholder="you@example.com" required>
+          </div>
+        </div>
+        <div class="field">
+          <label>Business Card / Popl Link <span class="hint">(optional)</span></label>
+          <input type="url" name="business_card_link" placeholder="https://popl.co/profile/...">
+        </div>
+
+        <div class="section-label">Your AI Assistant</div>
+        <div class="row">
+          <div class="field">
+            <label>Bot Name <span class="req">*</span> <span class="hint">(what it calls itself)</span></label>
+            <input type="text" name="bot_name" placeholder="Frank" required>
+          </div>
+          <div class="field">
+            <label>Meeting Type <span class="req">*</span></label>
+            <select name="meeting_type" required>
+              <option value="">Select...</option>
+              <option value="Phone">Phone Call</option>
+              <option value="Zoom">Zoom</option>
+              <option value="In-Person">In-Person</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Primary Service <span class="req">*</span></label>
+          <select name="vertical" required id="verticalSelect">
+            <option value="">Select...</option>
+            <option value="mp">Mortgage Protection</option>
+            <option value="fx">Final Expense</option>
+            <option value="both">Both MP + FX</option>
+            <option value="chiropractic">Chiropractic</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Calendly / Meeting Link</label>
+          <input type="url" name="meeting_link" placeholder="https://calendly.com/yourname">
+        </div>
+        <div id="insurance-fields" style="display:none;">
+          <div class="row">
+            <div class="field">
+              <label>GHL Calendar — Mortgage Protection</label>
+              <input type="url" name="calendar_link_mp" placeholder="https://...">
+            </div>
+            <div class="field">
+              <label>GHL Calendar — Final Expense</label>
+              <input type="url" name="calendar_link_fx" placeholder="https://...">
+            </div>
+          </div>
+        </div>
+
+        <div class="section-label">Resources <span style="font-weight:300;color:rgba(255,255,255,0.3);font-size:0.7rem;text-transform:none;letter-spacing:0;">(optional)</span></div>
+        <div class="row">
+          <div class="field">
+            <label>Loom Video — Mortgage Protection</label>
+            <input type="url" name="loom_video_mp" placeholder="https://loom.com/share/...">
+          </div>
+          <div class="field">
+            <label>Loom Video — Final Expense</label>
+            <input type="url" name="loom_video_fx" placeholder="https://loom.com/share/...">
+          </div>
+        </div>
+
+        <div class="section-label">Language & Coverage</div>
+        <div class="field">
+          <label>Languages your bot needs to handle <span class="req">*</span></label>
+          <div class="radio-group">
+            <label class="radio-pill"><input type="radio" name="language" value="en" checked><span>English only</span></label>
+            <label class="radio-pill"><input type="radio" name="language" value="es"><span>Spanish only</span></label>
+            <label class="radio-pill"><input type="radio" name="language" value="both"><span>Both</span></label>
+          </div>
+        </div>
+        <div class="field">
+          <label>Preferred Area Code(s) for SMS Number <span class="hint">(comma separated)</span></label>
+          <input type="text" name="area_codes" placeholder="612, 651">
+        </div>
+
+        <button type="submit" class="submit-btn" id="submit-btn">
+          Finish Setup &rarr;
+        </button>
+        <div class="form-error" id="form-error"></div>
+
+      </form>
+    </div>
+
+    <!-- Success state (hidden until form submits) -->
+    <div class="form-success" id="form-success">
+      <div class="check" style="margin-bottom:1.5rem;">
+        <svg width="30" height="30" fill="none" stroke="#EAB308" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </div>
+      <h3>You're all set.</h3>
+      <p>We're configuring your account now. Walt or Jeremiah will reach out within 24 hours to schedule your onboarding call and get your first leads uploaded.</p>
+    </div>
+
+  </div>
+
+  <p class="note">
+    Questions? Email <a href="mailto:support@profithexagon.com">support@profithexagon.com</a>
+  </p>
+
+  <script>
+    // Show/hide insurance calendar fields based on vertical
+    document.getElementById('verticalSelect').addEventListener('change', function() {
+      const show = ['mp','fx','both'].includes(this.value);
+      document.getElementById('insurance-fields').style.display = show ? '' : 'none';
+    });
+
+    // Submit via fetch so the user never leaves the page
+    document.getElementById('onboarding-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const btn = document.getElementById('submit-btn');
+      const errEl = document.getElementById('form-error');
+      btn.disabled = true;
+      btn.textContent = 'Setting up your account…';
+      errEl.style.display = 'none';
+
+      const data = Object.fromEntries(new FormData(this).entries());
+
+      try {
+        const res = await fetch('https://web-production-f3109.up.railway.app/onboarding/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+
+        if (res.ok || res.status === 302 || res.redirected) {
+          document.getElementById('form-body').style.display = 'none';
+          document.getElementById('form-success').style.display = 'block';
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+          const msg = await res.text();
+          errEl.textContent = msg || 'Something went wrong. Please try again or email support@profithexagon.com.';
+          errEl.style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = 'Finish Setup →';
+        }
+      } catch (err) {
+        errEl.textContent = 'Connection error. Please check your internet and try again.';
+        errEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Finish Setup →';
+      }
+    });
+  </script>
+
+</body>
+</html>

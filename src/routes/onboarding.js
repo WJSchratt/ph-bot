@@ -15,8 +15,18 @@ router.get('/', (req, res) => {
 
 const DAILY_SUB_CAP = 10;
 
+// Allow Webflow (and any domain) to POST to this endpoint from a browser fetch
+router.options('/submit', (req, res) => {
+  res.set({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  }).sendStatus(204);
+});
+
 // Process form submission — runs the full setup pipeline
 router.post('/submit', async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
   const form = req.body;
 
   // ── Validate required fields ──────────────────────────────────────────────
@@ -72,8 +82,14 @@ router.post('/submit', async (req, res) => {
     return res.status(500).send('Server error. Please try again.');
   }
 
-  // Run the pipeline async — respond immediately so the client isn't stuck waiting
-  res.redirect('/onboarding/success');
+  // Run the pipeline async — respond immediately.
+  // JSON requests (fetch from Webflow page) get 200; form POSTs get redirect.
+  const isJson = (req.headers['content-type'] || '').includes('application/json');
+  if (isJson) {
+    res.json({ ok: true });
+  } else {
+    res.redirect('/onboarding/success');
+  }
   runPipeline(submissionId, form).catch((err) => {
     logger.log('onboarding', 'error', null, 'Pipeline crashed', { submissionId, error: err.message });
   });
