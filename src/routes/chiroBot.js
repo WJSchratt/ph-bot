@@ -1,4 +1,5 @@
 const express = require('express');
+const axios = require('axios');
 const db = require('../db');
 const logger = require('../services/logger');
 const { callAnthropic } = require('../services/anthropic');
@@ -340,37 +341,27 @@ router.post('/chiro/push-to-github', async (req, res) => {
     const headers = {
       Authorization: `Bearer ${token}`,
       Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      'Content-Type': 'application/json'
+      'X-GitHub-Api-Version': '2022-11-28'
     };
 
-    const getResp = await fetch(apiBase, { headers });
-    if (!getResp.ok) {
-      const err = await getResp.json().catch(() => ({}));
-      return res.status(500).json({ error: `GitHub GET failed (${getResp.status}): ${err.message || 'unknown'}` });
-    }
-    const { sha } = await getResp.json();
+    const getResp = await axios.get(apiBase, { headers });
+    const sha = getResp.data.sha;
 
-    const putResp = await fetch(apiBase, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify({
-        message: 'chiro: update bot prompt from console',
-        content: Buffer.from(fileContent, 'utf8').toString('base64'),
-        sha,
-        branch: 'main'
-      })
-    });
-    if (!putResp.ok) {
-      const err = await putResp.json().catch(() => ({}));
-      return res.status(500).json({ error: `GitHub PUT failed (${putResp.status}): ${err.message || 'unknown'}` });
-    }
-    const putData = await putResp.json();
-    logger.log('chiro', 'info', null, 'pushed chiro prompt to github', { commit: putData.commit?.sha });
-    res.json({ ok: true, commit_sha: putData.commit?.sha, commit_url: putData.commit?.html_url });
+    const putResp = await axios.put(apiBase, {
+      message: 'chiro: update bot prompt from console',
+      content: Buffer.from(fileContent, 'utf8').toString('base64'),
+      sha,
+      branch: 'main'
+    }, { headers });
+
+    const commitSha = putResp.data.commit?.sha;
+    const commitUrl = putResp.data.commit?.html_url;
+    logger.log('chiro', 'info', null, 'pushed chiro prompt to github', { commit: commitSha });
+    res.json({ ok: true, commit_sha: commitSha, commit_url: commitUrl });
   } catch (err) {
-    logger.log('chiro', 'error', null, 'push-to-github failed', { error: err.message });
-    res.status(500).json({ error: err.message });
+    const detail = err.response?.data?.message || err.message;
+    logger.log('chiro', 'error', null, 'push-to-github failed', { error: detail });
+    res.status(500).json({ error: detail });
   }
 });
 
