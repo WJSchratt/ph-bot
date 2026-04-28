@@ -645,54 +645,101 @@ router.get('/qc/all-conversations', async (req, res) => {
     const { page = 1, limit = 20, search, source, from_date } = req.query;
     const lim = Math.min(parseInt(limit, 10) || 20, 200);
     const off = (Math.max(parseInt(page, 10) || 1, 1) - 1) * lim;
-    const clauses = [
+
+    const baseParams = [];
+    let p = 1;
+
+    // --- GHL side filters (ghl_conversations gc) ---
+    const ghlClauses = [
       `EXISTS (SELECT 1 FROM ghl_messages im
                 WHERE im.ghl_conversation_id = gc.ghl_conversation_id
                   AND im.location_id = gc.location_id
                   AND im.direction = 'inbound')`
     ];
-    const baseParams = [];
-    let p = 1;
+
+    // --- Local side filters (conversations lc) ---
+    // "local only" rows are always source=claude; skip if caller wants a different source
+    let includeLocal = !source || source === 'all' || source === 'claude';
+    const localClauses = [
+      `lc.is_sandbox = FALSE`,
+      `EXISTS (SELECT 1 FROM messages m2 WHERE m2.conversation_id = lc.id AND m2.direction = 'inbound')`,
+      `NOT EXISTS (SELECT 1 FROM ghl_conversations gc2 WHERE gc2.contact_id = lc.contact_id AND gc2.location_id = lc.location_id)`
+    ];
 
     if (source && source !== 'all') {
-      baseParams.push(source); clauses.push(`gc.source = $${p++}`);
+      baseParams.push(source);
+      ghlClauses.push(`gc.source = $${p++}`);
+      // local side is always claude — already handled by includeLocal above
     }
     if (search && String(search).trim()) {
       baseParams.push('%' + String(search).trim().toLowerCase() + '%');
-      clauses.push(`LOWER(gc.contact_name) LIKE $${p++}`);
+      ghlClauses.push(`LOWER(gc.contact_name) LIKE $${p}`);
+      localClauses.push(`LOWER(TRIM(COALESCE(lc.first_name,'') || ' ' || COALESCE(lc.last_name,''))) LIKE $${p}`);
+      p++;
     }
     if (from_date && /^\d{4}-\d{2}-\d{2}$/.test(String(from_date))) {
-      baseParams.push(from_date); clauses.push(`gc.last_message_at >= $${p++}::date`);
+      baseParams.push(from_date);
+      ghlClauses.push(`gc.last_message_at >= $${p}::date`);
+      localClauses.push(`lc.last_message_at >= $${p}::date`);
+      p++;
     }
 
-    const where = 'WHERE ' + clauses.join(' AND ');
+    const ghlWhere = 'WHERE ' + ghlClauses.join(' AND ');
+    const localWhere = 'WHERE ' + localClauses.join(' AND ');
     const params = [...baseParams, lim, off];
     const limIdx = p; const offIdx = p + 1;
 
+    // GHL side: use GREATEST(gc.last_message_at, c.last_message_at) so that
+    // stale GHL-pulled timestamps get overridden by fresher local webhook data.
+    const ghlSelect = `
+      SELECT gc.id AS conv_pk,
+             gc.ghl_conversation_id,
+             gc.location_id,
+             gc.contact_id,
+             gc.contact_name,
+             gc.contact_phone,
+             gc.source,
+             gc.message_count,
+             gc.terminal_outcome,
+             GREATEST(gc.last_message_at, c.last_message_at) AS last_message_at,
+             COALESCE(s.name, gc.location_id) AS subaccount_name,
+             c.id AS claude_conv_id
+        FROM ghl_conversations gc
+        LEFT JOIN subaccounts s ON s.ghl_location_id = gc.location_id
+        LEFT JOIN conversations c ON c.contact_id = gc.contact_id AND c.location_id = gc.location_id
+       ${ghlWhere}`;
+
+    // Local side: bot conversations not yet pulled into ghl_conversations at all
+    const localSelect = includeLocal ? `
+      UNION ALL
+      SELECT NULL::int AS conv_pk,
+             NULL::varchar AS ghl_conversation_id,
+             lc.location_id,
+             lc.contact_id,
+             TRIM(COALESCE(lc.first_name,'') || ' ' || COALESCE(lc.last_name,'')) AS contact_name,
+             lc.phone AS contact_phone,
+             'claude'::varchar AS source,
+             (SELECT COUNT(*)::int FROM messages m WHERE m.conversation_id = lc.id) AS message_count,
+             lc.terminal_outcome,
+             lc.last_message_at,
+             COALESCE(s2.name, lc.location_id) AS subaccount_name,
+             lc.id AS claude_conv_id
+        FROM conversations lc
+        LEFT JOIN subaccounts s2 ON s2.ghl_location_id = lc.location_id
+       ${localWhere}` : '';
+
     const q = await db.query(
-      `SELECT gc.id AS conv_pk,
-              gc.ghl_conversation_id,
-              gc.location_id,
-              gc.contact_id,
-              gc.contact_name,
-              gc.contact_phone,
-              gc.source,
-              gc.message_count,
-              gc.terminal_outcome,
-              gc.last_message_at,
-              COALESCE(s.name, gc.location_id) AS subaccount_name,
-              c.id AS claude_conv_id
-         FROM ghl_conversations gc
-         LEFT JOIN subaccounts s ON s.ghl_location_id = gc.location_id
-         LEFT JOIN conversations c ON c.contact_id = gc.contact_id AND c.location_id = gc.location_id
-        ${where}
-        ORDER BY gc.last_message_at DESC NULLS LAST
+      `SELECT * FROM (${ghlSelect} ${localSelect}) combined
+        ORDER BY last_message_at DESC NULLS LAST
         LIMIT $${limIdx} OFFSET $${offIdx}`,
       params
     );
 
     const countQ = await db.query(
-      `SELECT COUNT(*)::int AS total FROM ghl_conversations gc ${where}`,
+      `SELECT COUNT(*)::int AS total FROM (
+         SELECT 1 FROM ghl_conversations gc ${ghlWhere}
+         ${includeLocal ? `UNION ALL SELECT 1 FROM conversations lc ${localWhere}` : ''}
+       ) counted`,
       baseParams
     );
 
