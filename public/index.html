@@ -504,6 +504,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
   <div class="nav-item" data-tab="tab-elevenlabs" onclick="goTab('tab-elevenlabs')"><span class="nav-icon">&#9835;</span> 11 Labs Data <span class="nav-badge nb-cyan">NEW</span></div>
   <div class="nav-item" data-tab="tab-ep" onclick="goTab('tab-ep')"><span class="nav-icon">&#9742;</span> EP <span class="nav-badge nb-amber">NEW</span></div>
   <div class="nav-section">System</div>
+  <div class="nav-item" data-tab="tab-notifications" onclick="goTab('tab-notifications')"><span class="nav-icon">&#9679;</span> Notifications <span class="nav-badge nb-red" id="nav-notif-badge" style="display:none;"></span></div>
   <div class="nav-item" data-tab="tab-settings" onclick="goTab('tab-settings')"><span class="nav-icon">&#9881;</span> Settings</div>
   <div class="nav-item" data-tab="tab-devnotes" onclick="goTab('tab-devnotes')"><span class="nav-icon">&#128203;</span> Dev Notes <span class="nav-badge nb-cyan">NEW</span></div>
   <div class="nav-item" data-tab="tab-logs" onclick="goTab('tab-logs')"><span class="nav-icon">&#9783;</span> Logs</div>
@@ -994,6 +995,20 @@ textarea.form-input{resize:vertical;min-height:80px;}
       <button class="btn" onclick="analyzerRevertPrompt()">Revert</button>
     </div>
     <div style="font-size:11px;color:var(--muted);">Prompt generation uses incomplete conversations from the pulled cache (scoped to the selected source) as real-world examples.</div>
+  </div>
+</div>
+
+<!-- ====== NOTIFICATIONS ====== -->
+<div class="tab-content" id="tab-notifications">
+  <div style="max-width:720px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <div>
+        <div style="font-size:18px;font-weight:700;">Notifications</div>
+        <div style="color:var(--muted);font-size:13px;margin-top:3px;">Onboarding submissions and system issues that need your attention</div>
+      </div>
+      <button class="btn-sm" onclick="loadNotifications()">Refresh</button>
+    </div>
+    <div id="notif-list"><div style="color:var(--muted);padding:20px 0;">Loading...</div></div>
   </div>
 </div>
 
@@ -1622,6 +1637,7 @@ function loadCurrentTab() {
     case 'tab-review': loadReviewQueue(); break;
     case 'tab-logs': loadLogs(); startLogRefresh(); break;
     case 'tab-settings': loadSettingsData(); break;
+    case 'tab-notifications': loadNotifications(); break;
     case 'tab-analyzer': loadAnalyzerAll(); break;
     case 'tab-devconsole': loadDevConsole(); break;
     case 'tab-weekly': loadWeeklyTab(); break;
@@ -5190,6 +5206,79 @@ async function loadEp() {
     </table>`;
   buildPager(document.getElementById('ep-pager'), epState, r.total, loadEp);
 }
+
+// ── Notifications ──────────────────────────────────────────────────────────
+async function loadNotifications() {
+  const el = document.getElementById('notif-list');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--muted);padding:20px 0;">Loading...</div>';
+  const r = await api('/api/notifications');
+  if (!r || !r.ok) {
+    el.innerHTML = '<div style="color:var(--red);padding:20px 0;">Failed to load.</div>';
+    return;
+  }
+  updateNotifBadge(r.unread);
+  if (!r.notifications.length) {
+    el.innerHTML = '<div style="color:var(--muted);padding:20px 0;">All clear — nothing needs attention right now.</div>';
+    return;
+  }
+  el.innerHTML = r.notifications.map(renderNotif).join('');
+}
+
+function renderNotif(n) {
+  const age = timeAgo(n.ts);
+  const typeColors = { onboarding: 'nb-cyan', system: 'nb-red' };
+  const sevBorder = { error: 'rgba(255,69,96,.35)', warn: 'rgba(255,185,0,.25)', info: 'var(--border)' };
+  const badgeColor = typeColors[n.type] || 'nb-amber';
+  const border = sevBorder[n.severity] || 'var(--border)';
+
+  let extra = '';
+  if (n.type === 'onboarding' && n.meta) {
+    const parts = [];
+    if (n.meta.ghl_location_id) parts.push(`GHL: <code style="font-size:11px;color:var(--cyan);">${n.meta.ghl_location_id}</code>`);
+    if (n.meta.elevenlabs_agent_en) parts.push(`EL: <code style="font-size:11px;color:var(--cyan);">${n.meta.elevenlabs_agent_en}</code>`);
+    if (parts.length) extra = `<div style="margin-top:6px;font-size:12px;color:var(--muted);">${parts.join(' &nbsp;·&nbsp; ')}</div>`;
+  }
+
+  return `<div style="background:var(--surface);border:1px solid ${border};border-radius:10px;padding:14px 16px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start;">
+    <span class="nav-badge ${badgeColor}" style="border-radius:5px;padding:3px 8px;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px;">${n.type.toUpperCase()}</span>
+    <div style="flex:1;min-width:0;">
+      <div style="font-weight:600;font-size:14px;">${escHtml(n.title)}</div>
+      <div style="color:var(--muted);font-size:13px;margin-top:3px;line-height:1.5;">${escHtml(n.description)}</div>
+      ${extra}
+    </div>
+    <div style="color:var(--muted);font-size:12px;flex-shrink:0;white-space:nowrap;">${age}</div>
+  </div>`;
+}
+
+function updateNotifBadge(count) {
+  const badge = document.getElementById('nav-notif-badge');
+  if (!badge) return;
+  if (count > 0) { badge.textContent = count; badge.style.display = ''; }
+  else { badge.style.display = 'none'; }
+}
+
+function timeAgo(ts) {
+  const diff = Date.now() - new Date(ts);
+  const min = Math.floor(diff / 60000);
+  if (min < 2) return 'just now';
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return `${Math.floor(hr / 24)}d ago`;
+}
+
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Poll notification badge every 5 min while dashboard is open
+setInterval(async () => {
+  const r = await api('/api/notifications').catch(() => null);
+  if (r && r.ok) updateNotifBadge(r.unread);
+}, 5 * 60 * 1000);
+// Initial badge load on page open
+api('/api/notifications').then(r => { if (r && r.ok) updateNotifBadge(r.unread); }).catch(() => {});
 </script>
 </body>
 </html>
