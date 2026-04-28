@@ -492,6 +492,13 @@ router.post('/inbound', async (req, res) => {
       }
     }
 
+    // Keep ghl_conversations.last_message_at current so the All Conversations
+    // tab sorts correctly without waiting for a manual GHL pull.
+    db.query(
+      `UPDATE ghl_conversations SET last_message_at = NOW() WHERE contact_id = $1 AND location_id = $2`,
+      [parsed.contact_id, parsed.location_id]
+    ).catch(() => {});
+
     return res.status(200).json({
       ok: true,
       outcome: claudeResult.terminal_outcome,
