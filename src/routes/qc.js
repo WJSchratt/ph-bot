@@ -837,6 +837,7 @@ async function findGhlTokenForLocationLocal(locationId) {
 router.post('/qc/pull-all-locations', async (req, res) => {
   try {
     const fullRepull = !!req.body?.fullRepull;
+    const onlyLocationId = req.body?.locationId || null; // optional: target a single location
 
     // Gather every location that has a usable GHL token.
     const [convLocs, subLocs] = await Promise.all([
@@ -844,10 +845,11 @@ router.post('/qc/pull-all-locations', async (req, res) => {
       db.query(`SELECT DISTINCT ghl_location_id AS location_id FROM subaccounts WHERE ghl_api_key IS NOT NULL AND ghl_api_key <> ''`)
     ]);
     const seen = new Set();
-    const locationIds = [];
+    let locationIds = [];
     for (const r of [...convLocs.rows, ...subLocs.rows]) {
       if (!seen.has(r.location_id)) { seen.add(r.location_id); locationIds.push(r.location_id); }
     }
+    if (onlyLocationId) locationIds = locationIds.filter(id => id === onlyLocationId);
 
     if (!locationIds.length) {
       return res.json({ ok: true, message: 'No locations with stored GHL tokens found.', started: [] });
