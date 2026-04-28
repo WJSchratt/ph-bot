@@ -5,6 +5,7 @@ const db = require('../db');
 const logger = require('../services/logger');
 const ghlAgency = require('../services/ghlAgency');
 const elSetup = require('../services/elevenlabsSetup');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -385,5 +386,61 @@ function buildManualChecklist({ locationId, agentEn, agentEs, form }) {
   steps.push('SCHEDULE onboarding call');
   return steps;
 }
+
+// ── Test endpoints (requires dashboard auth) ──────────────────────────────
+
+router.post('/test', requireAuth, async (req, res) => {
+  const defaults = {
+    business_name: 'Test Business LLC',
+    agent_first_name: 'Test',
+    agent_last_name: 'Agent',
+    agent_phone: '+15550001234',
+    agent_email: `test-${Date.now()}@test.invalid`,
+    bot_name: 'TestBot',
+    vertical: 'mp',
+    meeting_type: 'zoom',
+    meeting_link: '',
+    plan: 'test',
+    language: 'en',
+    area_codes: '',
+    marketplace_type: '',
+  };
+  const form = { ...defaults, ...req.body, _test: true };
+
+  let submissionId;
+  try {
+    const ins = await db.query(
+      `INSERT INTO onboarding_submissions (status, form_data) VALUES ('processing', $1) RETURNING id`,
+      [JSON.stringify(form)]
+    );
+    submissionId = ins.rows[0].id;
+  } catch (err) {
+    logger.log('onboarding', 'error', null, 'Test: failed to insert submission', { error: err.message });
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+
+  res.json({ ok: true, submissionId });
+
+  runPipeline(submissionId, form).catch((err) => {
+    logger.log('onboarding', 'error', null, 'Test pipeline crashed', { submissionId, error: err.message });
+  });
+});
+
+router.get('/test/:id', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ ok: false, error: 'invalid id' });
+  try {
+    const r = await db.query(
+      `SELECT id, status, ghl_location_id, elevenlabs_agent_en, elevenlabs_agent_es,
+              completed_steps, error_log, form_data, created_at, updated_at
+       FROM onboarding_submissions WHERE id = $1`,
+      [id]
+    );
+    if (!r.rows.length) return res.status(404).json({ ok: false, error: 'Not found' });
+    res.json({ ok: true, submission: r.rows[0] });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 module.exports = router;
