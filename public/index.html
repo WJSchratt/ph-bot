@@ -2787,6 +2787,14 @@ async function loadQcBotpress() {
 let qcAllAutoSynced = false; // auto-sync GHL once per browser session on first All-tab load
 
 async function loadQcAll() {
+  // Auto-sync GHL once per browser session on first All-tab load.
+  // Fires regardless of whether results exist so drip-only contacts
+  // (who only appear after a GHL pull) are always fetched on first visit.
+  if (!qcAllAutoSynced) {
+    qcAllAutoSynced = true;
+    qcSyncAllLocations(false); // fire-and-forget, reloads tab at 15s/60s/3min
+  }
+
   // Load QC stats (header numbers) + full unified conversation list
   const stats = await api('/api/qc/stats');
   if (stats) {
@@ -2811,22 +2819,10 @@ async function loadQcAll() {
   list.innerHTML = '';
   document.getElementById('qc-list-header').textContent = 'All Conversations (' + (data.total || 0) + ')';
   if (!(data.conversations || []).length) {
-    // Auto-sync GHL on first load if there are no results and no active filter —
-    // this handles the case where ghl_conversations is empty (never been pulled).
-    if (!qcAllAutoSynced && !search && !dateFrom) {
-      qcAllAutoSynced = true;
-      const statusEl = document.getElementById('qc-sync-status');
-      if (statusEl) statusEl.textContent = 'Auto-syncing from GHL…';
-      qcSyncAllLocations(false);
-      list.innerHTML = '<div style="color:var(--muted);padding:24px;text-align:center;font-size:13px;">Syncing conversations from GHL — results will appear shortly…</div>';
-    } else {
-      list.innerHTML = '<div style="color:var(--muted);padding:24px;text-align:center;font-size:13px;">No conversations found.' +
-        (!search && !dateFrom ? ' <a href="#" onclick="qcSyncAllLocations(false);return false;" style="color:var(--cyan);">Sync GHL</a> to fetch latest.' : '') + '</div>';
-    }
+    list.innerHTML = '<div style="color:var(--muted);padding:24px;text-align:center;font-size:13px;">No conversations found.' +
+      (!search && !dateFrom ? ' GHL sync running — check back in a moment, or <a href="#" onclick="qcSyncAllLocations(false);return false;" style="color:var(--cyan);">re-sync now</a>.' : '') + '</div>';
     return;
   }
-  // Mark auto-synced so we don't trigger again this session now that we have data
-  qcAllAutoSynced = true;
   (data.conversations || []).forEach(function(c) {
     const item = document.createElement('div');
     item.className = 'conv-item';
@@ -2983,7 +2979,8 @@ async function qcSyncAllLocations(fullRepull) {
       if (n > 0) {
         toast('GHL pull started for ' + n + ' location' + (n > 1 ? 's' : '') + '.', 'ok');
         setTimeout(function() { loadQcAll(); }, 15000);
-        setTimeout(function() { loadQcAll(); if (statusEl) statusEl.textContent = ''; }, 60000);
+        setTimeout(function() { loadQcAll(); }, 60000);
+        setTimeout(function() { loadQcAll(); if (statusEl) statusEl.textContent = ''; }, 180000);
       }
     }
   } catch (e) {
