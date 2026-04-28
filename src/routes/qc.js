@@ -1322,6 +1322,11 @@ HOW CONVERSATION LOOKUPS WORK:
 - When the user asks about a specific person or date range, find the matching rows and include "open_conversation" actions.
 - The UI will render a clickable button for each open_conversation action so the user can jump straight to that chat.
 
+EXISTING UI FEATURES (tell the user about these instead of saying "contact your dev team"):
+- All Conversations tab is already sorted newest-first by default.
+- There is a date-from filter input on the All Conversations tab — the user can pick a date to show only conversations on or after that date.
+- The user can search by name or phone in the search box on the All Conversations tab.
+
 CURRENT SYSTEM PROMPT (first 4000 chars):
 ${promptSnippet || '(unavailable)'}
 
