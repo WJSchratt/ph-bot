@@ -706,8 +706,10 @@ textarea.form-input{resize:vertical;min-height:80px;}
   <div id="qc-cluster-filter-row" style="display:none;margin-bottom:14px;">
     <select class="fsel" id="qc-cluster-sel" onchange="loadQcByCluster()"><option value="">-- pick a cluster --</option></select>
   </div>
-  <div id="qc-search-row" style="margin-bottom:10px;">
-    <input type="text" id="qc-search-input" placeholder="Search by name or phone..." class="form-input" style="max-width:320px;" oninput="qcSearchDebounced()">
+  <div id="qc-search-row" style="margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <input type="text" id="qc-search-input" placeholder="Search by name or phone..." class="form-input" style="max-width:280px;" oninput="qcSearchDebounced()">
+    <input type="date" id="qc-date-from-input" class="form-input" style="max-width:155px;" title="Show conversations on or after this date" onchange="loadQcAll()">
+    <button class="btn-sm" onclick="clearQcDateFilter()" style="font-size:11px;padding:3px 8px;display:none;" id="qc-date-clear-btn">✕ Clear date</button>
   </div>
 
   <div class="conv-wrap">
@@ -1956,6 +1958,8 @@ async function dashChatSend() {
           + '<button class="btn amb" style="font-size:11px;padding:3px 10px;" onclick="qcpApplyNow()">Apply to Live Bot</button>'
           + '</div>';
       }
+      const dashConvLinks = buildConvActionLinks(res.actions);
+      if (dashConvLinks) body += dashConvLinks;
       ab.innerHTML = body;
       messagesEl.appendChild(ab);
     }
@@ -2788,8 +2792,12 @@ async function loadQcAll() {
     if (badge) badge.textContent = stats.pending > 0 ? stats.pending : '';
   }
   const search = (document.getElementById('qc-search-input')?.value || '').trim();
+  const dateFrom = (document.getElementById('qc-date-from-input')?.value || '').trim();
   const params = new URLSearchParams({ page: '1', limit: '100' });
   if (search) params.set('search', search);
+  if (dateFrom) params.set('from_date', dateFrom);
+  const clearBtn = document.getElementById('qc-date-clear-btn');
+  if (clearBtn) clearBtn.style.display = dateFrom ? '' : 'none';
   const data = await api('/api/qc/all-conversations?' + params.toString());
   if (!data) return;
   const list = document.getElementById('qc-conv-list');
@@ -2887,6 +2895,49 @@ async function qcFlagSubmit() {
 }
 
 // ========== QC INLINE CHAT (below conversation thread) ==========
+// ========== CONSOLE ACTION HELPERS ==========
+
+function buildConvActionLinks(actions) {
+  const convActions = (actions || []).filter(function(a) { return a.type === 'open_conversation'; });
+  if (!convActions.length) return '';
+  let html = '<div style="margin-top:10px;display:flex;flex-direction:column;gap:5px;">';
+  html += '<div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:2px;">Conversations referenced:</div>';
+  convActions.forEach(function(a) {
+    const label = esc(a.description || a.contact_name || 'Open conversation');
+    const localId = (a.local_conv_id !== null && a.local_conv_id !== undefined) ? a.local_conv_id : null;
+    const ghlId = JSON.stringify(String(a.ghl_conv_id || ''));
+    const locId = JSON.stringify(String(a.location_id || ''));
+    const name = JSON.stringify(String(a.contact_name || ''));
+    const onclk = localId
+      ? 'openConvFromConsole(' + localId + ',' + ghlId + ',' + locId + ',' + name + ')'
+      : 'openConvFromConsole(null,' + ghlId + ',' + locId + ',' + name + ')';
+    html += '<button class="btn sec" style="font-size:11px;padding:4px 12px;text-align:left;" onclick="' + onclk + '">&#8594; ' + label + '</button>';
+  });
+  html += '</div>';
+  return html;
+}
+
+function openConvFromConsole(localId, ghlId, locationId, name) {
+  goTab('tab-qc');
+  const allTabEl = document.querySelector('#tab-qc .itab[data-qctab="all"]');
+  if (allTabEl && qcTab !== 'all') setQcTab('all', allTabEl);
+  if (localId) {
+    loadConversation(localId, { first_name: name || '' });
+  } else if (ghlId && locationId) {
+    loadBotpressConversation(ghlId, locationId, { contact_name: name || '' });
+  }
+}
+
+function clearQcDateFilter() {
+  const inp = document.getElementById('qc-date-from-input');
+  if (inp) inp.value = '';
+  const btn = document.getElementById('qc-date-clear-btn');
+  if (btn) btn.style.display = 'none';
+  loadQcAll();
+}
+
+// ========== QC PORTAL INLINE CONSOLE PANEL ==========
+
 let qcpHistory = [];
 let qcpConvId = null;
 
@@ -2948,6 +2999,8 @@ async function qcpSend() {
           + '<button class="btn amb" style="font-size:11px;padding:3px 10px;" onclick="qcpApplyNow()">Apply to Live Bot</button>'
           + '</div>';
       }
+      const qcpConvLinks = buildConvActionLinks(res.actions);
+      if (qcpConvLinks) body2 += qcpConvLinks;
       ab.innerHTML = body2;
       messagesEl.appendChild(ab);
     }
@@ -3078,6 +3131,8 @@ async function qbcSend() {
       if (res.queued_ids && res.queued_ids.length) {
         body += '<div style="margin-top:8px;font-size:11px;color:var(--amber);">✓ Queued ' + res.queued_ids.length + ' change(s).</div>';
       }
+      const qbcConvLinks = buildConvActionLinks(res.actions);
+      if (qbcConvLinks) body += qbcConvLinks;
       aiBubble.innerHTML = body;
       messagesEl.appendChild(aiBubble);
       if (res.queued_ids && res.queued_ids.length) refreshQbcPending();
@@ -3282,6 +3337,8 @@ async function bcSend() {
       if (res.queued_ids && res.queued_ids.length) {
         body += '<div style="margin-top:8px;font-size:11px;color:var(--amber);">✓ Queued ' + res.queued_ids.length + ' change(s) to pending list.</div>';
       }
+      const bcConvLinks = buildConvActionLinks(res.actions);
+      if (bcConvLinks) body += bcConvLinks;
       aiBubble.innerHTML = body;
       messagesEl.appendChild(aiBubble);
       if (res.queued_ids && res.queued_ids.length) refreshBotConsolePending();

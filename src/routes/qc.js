@@ -642,7 +642,7 @@ router.post('/qc/flag-wrong', async (req, res) => {
 // ============================================================
 router.get('/qc/all-conversations', async (req, res) => {
   try {
-    const { page = 1, limit = 20, search, source } = req.query;
+    const { page = 1, limit = 20, search, source, from_date } = req.query;
     const lim = Math.min(parseInt(limit, 10) || 20, 200);
     const off = (Math.max(parseInt(page, 10) || 1, 1) - 1) * lim;
     const clauses = [
@@ -660,6 +660,9 @@ router.get('/qc/all-conversations', async (req, res) => {
     if (search && String(search).trim()) {
       baseParams.push('%' + String(search).trim().toLowerCase() + '%');
       clauses.push(`LOWER(gc.contact_name) LIKE $${p++}`);
+    }
+    if (from_date && /^\d{4}-\d{2}-\d{2}$/.test(String(from_date))) {
+      baseParams.push(from_date); clauses.push(`gc.last_message_at >= $${p++}::date`);
     }
 
     const where = 'WHERE ' + clauses.join(' AND ');
@@ -1277,13 +1280,47 @@ router.post('/qc/console', async (req, res) => {
       } catch {}
     }
 
-    const systemPrompt = `You are the bot management assistant for PH Insurance's SMS qualification bot. You have FULL ABILITY to make changes to the live bot — just queue them in "actions" and they deploy when the user clicks Apply.
+    // Recent conversations (last 7 days) — lets Claude reference specific chats by ID
+    let recentConvsCtx = '';
+    try {
+      const rcQ = await db.query(`
+        SELECT c.id AS local_id,
+               gc.ghl_conversation_id,
+               gc.location_id,
+               gc.contact_name,
+               gc.terminal_outcome,
+               gc.last_message_at,
+               gc.source
+          FROM ghl_conversations gc
+          LEFT JOIN conversations c ON c.contact_id = gc.contact_id AND c.location_id = gc.location_id
+         WHERE gc.last_message_at >= NOW() - '7 days'::interval
+         ORDER BY gc.last_message_at DESC
+         LIMIT 40`);
+      if (rcQ.rows.length) {
+        recentConvsCtx = '\n\nRECENT CONVERSATIONS (last 7 days — use these IDs in open_conversation actions):\n' +
+          rcQ.rows.map(r => {
+            const dt = r.last_message_at
+              ? new Date(r.last_message_at).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+              : '?';
+            const outcome = r.terminal_outcome || 'in-progress';
+            const localId = (r.local_id !== null && r.local_id !== undefined) ? r.local_id : 'null';
+            return `[${dt}] ${r.contact_name || '(no name)'} | outcome:${outcome} | local_id:${localId} | ghl_id:${r.ghl_conversation_id} | loc:${r.location_id}`;
+          }).join('\n');
+      }
+    } catch {}
+
+    const systemPrompt = `You are the bot management assistant for PH Insurance's SMS qualification bot. You have FULL ABILITY to make changes to the live bot AND to look up specific conversations.
 
 HOW CHANGES WORK:
 - When you include a "prompt_change" action, it gets saved to a queue immediately.
 - The user sees the queued changes and clicks "Apply All Changes to Bot" to deploy them live.
 - You can queue multiple changes in one response.
 - Be specific in "details" — write the exact new text or instruction to add/replace/remove.
+
+HOW CONVERSATION LOOKUPS WORK:
+- The RECENT CONVERSATIONS section below lists every conversation from the last 7 days with its IDs.
+- When the user asks about a specific person or date range, find the matching rows and include "open_conversation" actions.
+- The UI will render a clickable button for each open_conversation action so the user can jump straight to that chat.
 
 CURRENT SYSTEM PROMPT (first 4000 chars):
 ${promptSnippet || '(unavailable)'}
@@ -1295,23 +1332,36 @@ OUTBOUND MESSAGE REPLY RATES:
 ${wtCtx.length ? wtCtx.join('\n') : wtErr ? `(query error: ${wtErr})` : '(no outbound message data yet)'}
 
 QC REVIEW HISTORY (last 30 days):
-${qcCtx.length ? qcCtx.join('\n') : '(none)'}${pendingCtx}${convCtx}
+${qcCtx.length ? qcCtx.join('\n') : '(none)'}${pendingCtx}${convCtx}${recentConvsCtx}
 
 ---
 ALWAYS respond with JSON in this exact format (no exceptions, no markdown fences):
 {
-  "reply": "your conversational response here — confirm what you queued, or answer the question",
+  "reply": "your conversational response here",
   "actions": [
     {
       "type": "prompt_change",
-      "description": "Short label shown in the pending changes list (e.g. 'Improve name collection message')",
-      "details": "Exact text or full instruction for the change — be specific enough that a developer can apply it precisely"
+      "description": "Short label for the pending changes list",
+      "details": "Exact text or instruction — be specific enough that a developer can apply it precisely"
+    },
+    {
+      "type": "open_conversation",
+      "local_conv_id": 1234,
+      "ghl_conv_id": "abc123xyz",
+      "location_id": "K9xKBb...",
+      "contact_name": "John Smith",
+      "description": "John Smith — dnc (Apr 25)"
     }
   ]
 }
 
-If no changes are needed, set "actions" to [].
+Action type rules:
+- "prompt_change": queue a bot prompt edit. Required fields: description, details.
+- "open_conversation": point the user to a specific conversation in the UI. Required fields: ghl_conv_id, location_id. Optional: local_conv_id (use when local_id is not null in RECENT CONVERSATIONS), contact_name, description. Include one per conversation you want to highlight.
+
+If no actions are needed, set "actions" to [].
 When you queue changes, tell the user what you queued and that they can click Apply to deploy.
+When pointing to conversations, tell the user what you found and that they can click the buttons below to open them.
 Always return valid JSON.`;
 
     const messages = [
