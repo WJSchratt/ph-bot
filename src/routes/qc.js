@@ -730,8 +730,12 @@ router.get('/qc/all-conversations', async (req, res) => {
              COALESCE(NULLIF(TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')), ''), gc.contact_name) AS contact_name,
              c.phone AS contact_phone,
              'claude'::varchar AS source,
-             (SELECT COUNT(*)::int FROM messages m WHERE m.conversation_id = c.id) AS message_count,
+             GREATEST(
+               (SELECT COUNT(*)::int FROM messages m WHERE m.conversation_id = c.id),
+               jsonb_array_length(COALESCE(c.messages,'[]'::jsonb))
+             ) AS message_count,
              c.terminal_outcome,
+             c.product_type,
              GREATEST(c.last_message_at, gc.last_message_at) AS last_message_at,
              COALESCE(s.name, c.location_id) AS subaccount_name,
              c.id AS claude_conv_id
@@ -757,6 +761,7 @@ router.get('/qc/all-conversations', async (req, res) => {
              gc.source,
              gc.message_count,
              gc.terminal_outcome,
+             NULL::varchar AS product_type,
              gc.last_message_at,
              COALESCE(s.name, gc.location_id) AS subaccount_name,
              NULL::int AS claude_conv_id
@@ -859,7 +864,7 @@ router.post('/qc/pull-all-locations', async (req, res) => {
       jobs.spawn(jobId, async (reporter) => {
         reporter.report({ message: `Pulling ${locationId}…` });
         const result = await ghlConv.pullAndStore(token, locationId, (p) => {
-          reporter.report({ current: p.fetched, message: `${p.phase}: ${p.fetched}` });
+          reporter.report({ current: p.fetched, message: `pulling: ${p.fetched} fetched` });
         }, { fullRepull });
         reporter.report({ message: 'done' });
         return result;

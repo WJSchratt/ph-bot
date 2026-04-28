@@ -2784,6 +2784,8 @@ async function loadQcBotpress() {
   });
 }
 
+let qcAllAutoSynced = false; // auto-sync GHL once per browser session on first All-tab load
+
 async function loadQcAll() {
   // Load QC stats (header numbers) + full unified conversation list
   const stats = await api('/api/qc/stats');
@@ -2809,9 +2811,22 @@ async function loadQcAll() {
   list.innerHTML = '';
   document.getElementById('qc-list-header').textContent = 'All Conversations (' + (data.total || 0) + ')';
   if (!(data.conversations || []).length) {
-    list.innerHTML = '<div style="color:var(--muted);padding:24px;text-align:center;font-size:13px;">No conversations found.</div>';
+    // Auto-sync GHL on first load if there are no results and no active filter —
+    // this handles the case where ghl_conversations is empty (never been pulled).
+    if (!qcAllAutoSynced && !search && !dateFrom) {
+      qcAllAutoSynced = true;
+      const statusEl = document.getElementById('qc-sync-status');
+      if (statusEl) statusEl.textContent = 'Auto-syncing from GHL…';
+      qcSyncAllLocations(false);
+      list.innerHTML = '<div style="color:var(--muted);padding:24px;text-align:center;font-size:13px;">Syncing conversations from GHL — results will appear shortly…</div>';
+    } else {
+      list.innerHTML = '<div style="color:var(--muted);padding:24px;text-align:center;font-size:13px;">No conversations found.' +
+        (!search && !dateFrom ? ' <a href="#" onclick="qcSyncAllLocations(false);return false;" style="color:var(--cyan);">Sync GHL</a> to fetch latest.' : '') + '</div>';
+    }
     return;
   }
+  // Mark auto-synced so we don't trigger again this session now that we have data
+  qcAllAutoSynced = true;
   (data.conversations || []).forEach(function(c) {
     const item = document.createElement('div');
     item.className = 'conv-item';
