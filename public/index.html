@@ -5479,7 +5479,7 @@ async function csbSend() {
   const btn = document.querySelector('#chiro-sandbox-panel .btn.pri');
   if (btn) btn.disabled = true;
   try {
-    const data = await api('/api/chiro/sandbox/chat', { method: 'POST', body: JSON.stringify(cfg) });
+    const data = await api('/api/chiro/sandbox/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
     if (data.error) { csbAppend('bot', 'Error: ' + data.error); return; }
     csbAppend('bot', data.messages, data.terminal_outcome ? `outcome: ${data.terminal_outcome}` : null);
     if (data.terminal_outcome) {
@@ -5495,7 +5495,7 @@ async function csbSend() {
 }
 
 async function csbReset() {
-  await api('/api/chiro/sandbox/reset', { method: 'POST', body: '{}' });
+  await api('/api/chiro/sandbox/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   const out = document.getElementById('csb-output');
   out.innerHTML = '<div data-placeholder style="color:var(--muted);text-align:center;padding:40px 20px;font-size:13px;">Chat cleared. Type a message to start fresh.</div>';
   document.getElementById('csb-metadata').style.display = 'none';
@@ -5548,6 +5548,7 @@ async function chiroConsoleSend() {
   try {
     const data = await api('/api/chiro/console', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: msg, history: chiroConsoleBotHistory })
     });
     if (!data.ok) { chiroAppendMessage('assistant', 'Error: ' + (data.error || 'unknown')); return; }
@@ -5574,7 +5575,7 @@ async function chiroApplyChanges() {
   btn.disabled = true;
   btn.textContent = 'Applying...';
   try {
-    const data = await api('/api/chiro/console/apply', { method: 'POST', body: '{}' });
+    const data = await api('/api/chiro/console/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     if (data.ok) {
       toast(`Applied ${data.applied} change${data.applied === 1 ? '' : 's'} to chiro bot.`, 'ok');
       chiroLoadPending();
@@ -5594,7 +5595,7 @@ async function chiroPushToGithub() {
   btn.disabled = true;
   btn.textContent = 'Pushing...';
   try {
-    const data = await api('/api/chiro/push-to-github', { method: 'POST', body: '{}' });
+    const data = await api('/api/chiro/push-to-github', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     if (data.ok) {
       toast('Pushed to GitHub — Railway deploy started.', 'ok');
       if (data.commit_url) {
