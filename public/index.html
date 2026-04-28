@@ -837,7 +837,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
           <div class="form-group s2"><label class="form-label">Booking Link (optional)</label><input class="form-input" id="csb-calendar_link" placeholder="https://..."></div>
         </div>
         <div style="display:flex;gap:7px;margin-top:12px;">
-          <button class="btn pri" style="flex:1;" onclick="csbSend()">Send</button>
+          <button class="btn pri" id="csb-send-btn" style="flex:1;" onclick="csbSend()">Send</button>
           <button class="btn" onclick="csbReset()">Clear Chat</button>
         </div>
       </div>
@@ -5424,11 +5424,9 @@ async function pollTestResult(id, btn) {
 }
 
 // ========== CHIRO BOT ==========
-let chiroConsoleBotHistory = [];
-let chiroActiveTab = 'sandbox';
+let chiroConsoleHistory = [];
 
 function chiroBotSetTab(tab, el) {
-  chiroActiveTab = tab;
   document.querySelectorAll('#tab-chiro-bot .itab').forEach(i => i.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('chiro-sandbox-panel').style.display = tab === 'sandbox' ? '' : 'none';
@@ -5436,184 +5434,188 @@ function chiroBotSetTab(tab, el) {
   if (tab === 'console') chiroLoadPending();
 }
 
-// ── Sandbox ──────────────────────────────────────────────────────────────
-function csbConfig() {
-  return {
-    message: document.getElementById('csb-input').value.trim(),
-    first_name: document.getElementById('csb-first_name').value.trim() || 'Walt',
-    bot_name: document.getElementById('csb-bot_name').value.trim() || 'Aria',
-    doctor_name: document.getElementById('csb-doctor_name').value.trim() || 'Dr. Johnson',
-    practice_name: document.getElementById('csb-practice_name').value.trim() || 'our practice',
-    office_hours: document.getElementById('csb-office_hours').value.trim() || 'Monday-Friday 8am-6pm',
-    calendar_link: document.getElementById('csb-calendar_link').value.trim()
-  };
-}
-
-function csbAppend(role, text, meta) {
+// ── Sandbox ───────────────────────────────────────────────────────────────
+function csbMsg(role, texts, outcome) {
   const out = document.getElementById('csb-output');
   if (out.querySelector('[data-placeholder]')) out.innerHTML = '';
   const isBot = role === 'bot';
   const wrap = document.createElement('div');
-  wrap.style.cssText = `display:flex;flex-direction:column;align-items:${isBot ? 'flex-start' : 'flex-end'};margin-bottom:10px;`;
-  (Array.isArray(text) ? text : [text]).forEach(msg => {
-    const bubble = document.createElement('div');
-    bubble.style.cssText = `max-width:80%;padding:9px 13px;border-radius:14px;font-size:13px;line-height:1.5;${isBot ? 'background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-bottom-left-radius:4px;' : 'background:var(--cyan);color:#000;font-weight:600;border-bottom-right-radius:4px;'}`;
-    bubble.textContent = msg;
-    wrap.appendChild(bubble);
+  wrap.className = 'dc-msg ' + (isBot ? 'assistant' : 'user');
+  wrap.innerHTML = '<span class="dc-msg-role">' + (isBot ? 'Bot' : 'You') + '</span>';
+  (Array.isArray(texts) ? texts : [texts]).forEach(t => {
+    const b = document.createElement('div');
+    b.className = 'dc-msg-body';
+    b.textContent = t;
+    wrap.appendChild(b);
   });
-  if (meta) {
-    const m = document.createElement('div');
-    m.style.cssText = 'font-size:10px;color:var(--muted);font-family:"JetBrains Mono";margin-top:3px;';
-    m.textContent = meta;
-    wrap.appendChild(m);
+  if (outcome) {
+    const o = document.createElement('div');
+    o.style.cssText = 'font-size:10px;color:var(--amber);font-family:"JetBrains Mono";margin-top:4px;';
+    o.textContent = 'outcome: ' + outcome;
+    wrap.appendChild(o);
   }
   out.appendChild(wrap);
   out.scrollTop = out.scrollHeight;
 }
 
 async function csbSend() {
-  const cfg = csbConfig();
-  if (!cfg.message) return;
-  document.getElementById('csb-input').value = '';
-  csbAppend('user', cfg.message);
-  const btn = document.querySelector('#chiro-sandbox-panel .btn.pri');
-  if (btn) btn.disabled = true;
+  const input = document.getElementById('csb-input');
+  const msg = (input.value || '').trim();
+  if (!msg) return;
+  input.value = '';
+  csbMsg('user', msg);
+  const sendBtn = document.getElementById('csb-send-btn');
+  sendBtn.disabled = true;
+  const thinkWrap = document.createElement('div');
+  thinkWrap.className = 'dc-msg assistant';
+  thinkWrap.innerHTML = '<span class="dc-msg-role">Bot</span><div class="dc-msg-body" style="color:var(--muted);">Thinking…</div>';
+  document.getElementById('csb-output').appendChild(thinkWrap);
+  document.getElementById('csb-output').scrollTop = 99999;
   try {
-    const data = await api('/api/chiro/sandbox/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
-    if (data.error) { csbAppend('bot', 'Error: ' + data.error); return; }
-    csbAppend('bot', data.messages, data.terminal_outcome ? `outcome: ${data.terminal_outcome}` : null);
-    if (data.terminal_outcome) {
-      const meta = document.getElementById('csb-metadata');
-      meta.style.display = '';
-      meta.textContent = `terminal_outcome: ${data.terminal_outcome}  |  message_type: ${data.message_type}`;
+    const res = await api('/api/chiro/sandbox/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: msg,
+        first_name: document.getElementById('csb-first_name').value.trim() || 'Walt',
+        bot_name: document.getElementById('csb-bot_name').value.trim() || 'Aria',
+        doctor_name: document.getElementById('csb-doctor_name').value.trim() || 'Dr. Johnson',
+        practice_name: document.getElementById('csb-practice_name').value.trim() || 'our practice',
+        office_hours: document.getElementById('csb-office_hours').value.trim() || 'Monday-Friday 8am-6pm',
+        calendar_link: document.getElementById('csb-calendar_link').value.trim()
+      })
+    });
+    thinkWrap.remove();
+    if (!res) {
+      csbMsg('bot', 'Request failed — check console for details.');
+    } else {
+      csbMsg('bot', res.messages || ['(no reply)'], res.terminal_outcome);
     }
   } catch (e) {
-    csbAppend('bot', 'Request failed: ' + e.message);
-  } finally {
-    if (btn) btn.disabled = false;
+    thinkWrap.remove();
+    csbMsg('bot', 'Error: ' + e.message);
   }
+  sendBtn.disabled = false;
+  document.getElementById('csb-output').scrollTop = 99999;
 }
 
 async function csbReset() {
   await api('/api/chiro/sandbox/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-  const out = document.getElementById('csb-output');
-  out.innerHTML = '<div data-placeholder style="color:var(--muted);text-align:center;padding:40px 20px;font-size:13px;">Chat cleared. Type a message to start fresh.</div>';
-  document.getElementById('csb-metadata').style.display = 'none';
+  document.getElementById('csb-output').innerHTML = '<div data-placeholder style="color:var(--muted);text-align:center;padding:40px 20px;font-size:13px;">Chat cleared. Type a message to start fresh.</div>';
 }
 
 // ── Console ───────────────────────────────────────────────────────────────
 async function chiroLoadPending() {
-  try {
-    const data = await api('/api/chiro/console/pending');
-    const list = document.getElementById('chiro-pending-list');
-    const applyBtn = document.getElementById('chiro-apply-btn');
-    const countEl = document.getElementById('chiro-pending-count');
-    const edits = data?.edits || [];
-    countEl.textContent = edits.length ? `(${edits.length})` : '';
-    if (!edits.length) {
-      list.innerHTML = '<div class="bc-no-changes">No queued changes</div>';
-      applyBtn.style.display = 'none';
-      return;
-    }
-    list.innerHTML = edits.map(e => `
-      <div style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;">
-        <div style="color:var(--amber);font-size:10px;font-family:'JetBrains Mono';margin-bottom:3px;">${e.change_type}</div>
-        <div style="color:var(--text);line-height:1.4;">${e.description.slice(0, 150)}</div>
-      </div>`).join('');
-    applyBtn.style.display = '';
-  } catch (e) {
-    console.error('chiroLoadPending', e);
-  }
-}
-
-function chiroAppendMessage(role, text) {
-  const msgs = document.getElementById('chiro-console-messages');
-  const isBot = role === 'assistant';
-  const div = document.createElement('div');
-  div.style.cssText = `padding:10px 14px;border-bottom:1px solid var(--border);${isBot ? '' : 'background:rgba(0,212,255,.04);'}`;
-  div.innerHTML = `<div style="font-size:10px;color:var(--muted);margin-bottom:5px;font-family:'JetBrains Mono';">${isBot ? 'CLAUDE' : 'YOU'}</div><div style="font-size:13px;line-height:1.6;white-space:pre-wrap;">${text.replace(/</g,'&lt;')}</div>`;
-  msgs.appendChild(div);
-  msgs.scrollTop = msgs.scrollHeight;
+  const data = await api('/api/chiro/console/pending');
+  const list = document.getElementById('chiro-pending-list');
+  const applyBtn = document.getElementById('chiro-apply-btn');
+  const countEl = document.getElementById('chiro-pending-count');
+  if (!data) return;
+  const edits = data.edits || [];
+  countEl.textContent = edits.length ? '(' + edits.length + ')' : '';
+  applyBtn.style.display = edits.length ? '' : 'none';
+  list.innerHTML = edits.length
+    ? edits.map(e => '<div class="bc-change"><div class="bc-change-label">' + esc(e.description || '') + '</div></div>').join('')
+    : '<div class="bc-no-changes">No queued changes</div>';
 }
 
 async function chiroConsoleSend() {
   const input = document.getElementById('chiro-console-input');
-  const msg = input.value.trim();
+  const msg = (input.value || '').trim();
   if (!msg) return;
   input.value = '';
-  chiroAppendMessage('user', msg);
-  const btn = document.getElementById('chiro-console-send-btn');
-  btn.disabled = true;
-  btn.textContent = '...';
+  const sendBtn = document.getElementById('chiro-console-send-btn');
+  sendBtn.disabled = true;
+  const msgsEl = document.getElementById('chiro-console-messages');
+
+  const userBubble = document.createElement('div');
+  userBubble.className = 'dc-msg user';
+  userBubble.innerHTML = '<span class="dc-msg-role">You</span><div class="dc-msg-body">' + esc(msg) + '</div>';
+  msgsEl.appendChild(userBubble);
+
+  const thinkBubble = document.createElement('div');
+  thinkBubble.className = 'dc-msg assistant';
+  thinkBubble.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--muted);">Thinking…</div>';
+  msgsEl.appendChild(thinkBubble);
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+
+  chiroConsoleHistory.push({ role: 'user', content: msg });
   try {
-    const data = await api('/api/chiro/console', {
+    const res = await api('/api/chiro/console', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg, history: chiroConsoleBotHistory })
+      body: JSON.stringify({ message: msg, history: chiroConsoleHistory.slice(-20) })
     });
-    if (!data.ok) { chiroAppendMessage('assistant', 'Error: ' + (data.error || 'unknown')); return; }
-    chiroConsoleBotHistory.push({ role: 'user', content: msg });
-    chiroConsoleBotHistory.push({ role: 'assistant', content: data.reply });
-    if (chiroConsoleBotHistory.length > 20) chiroConsoleBotHistory = chiroConsoleBotHistory.slice(-20);
-    chiroAppendMessage('assistant', data.reply);
-    if (data.queued_ids?.length) chiroLoadPending();
+    thinkBubble.remove();
+    if (!res) {
+      const errBubble = document.createElement('div');
+      errBubble.className = 'dc-msg assistant';
+      errBubble.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--red);">Request failed.</div>';
+      msgsEl.appendChild(errBubble);
+    } else {
+      chiroConsoleHistory.push({ role: 'assistant', content: res.reply || '' });
+      if (chiroConsoleHistory.length > 20) chiroConsoleHistory = chiroConsoleHistory.slice(-20);
+      const aiBubble = document.createElement('div');
+      aiBubble.className = 'dc-msg assistant';
+      let body = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body">' + esc(res.reply || '') + '</div>';
+      if (res.queued_ids && res.queued_ids.length) {
+        body += '<div style="margin-top:8px;font-size:11px;color:var(--amber);">Queued ' + res.queued_ids.length + ' change(s).</div>';
+      }
+      aiBubble.innerHTML = body;
+      msgsEl.appendChild(aiBubble);
+      if (res.queued_ids && res.queued_ids.length) chiroLoadPending();
+    }
   } catch (e) {
-    chiroAppendMessage('assistant', 'Request failed: ' + e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Send';
+    thinkBubble.remove();
+    const errBubble = document.createElement('div');
+    errBubble.className = 'dc-msg assistant';
+    errBubble.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--red);">Error: ' + esc(e.message) + '</div>';
+    msgsEl.appendChild(errBubble);
   }
+  sendBtn.disabled = false;
+  msgsEl.scrollTop = msgsEl.scrollHeight;
 }
 
 function chiroClearChat() {
   document.getElementById('chiro-console-messages').innerHTML = '';
-  chiroConsoleBotHistory = [];
+  chiroConsoleHistory = [];
 }
 
 async function chiroApplyChanges() {
   const btn = document.getElementById('chiro-apply-btn');
-  btn.disabled = true;
-  btn.textContent = 'Applying...';
-  try {
-    const data = await api('/api/chiro/console/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    if (data.ok) {
-      toast(`Applied ${data.applied} change${data.applied === 1 ? '' : 's'} to chiro bot.`, 'ok');
-      chiroLoadPending();
-    } else {
-      toast('Apply failed: ' + (data.error || 'unknown'), 'err');
-    }
-  } catch (e) {
-    toast('Apply failed: ' + e.message, 'err');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Apply All Changes to Bot';
-  }
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Applying…';
+  const res = await api('/api/chiro/console/apply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dry_run: false })
+  });
+  btn.disabled = false; btn.textContent = orig;
+  if (!res) { toast('Apply failed.', 'err'); return; }
+  toast('Applied ' + (res.applied || 0) + ' change(s) to chiro bot.', 'ok');
+  chiroLoadPending();
 }
 
 async function chiroPushToGithub() {
   const btn = document.getElementById('chiro-github-btn');
-  btn.disabled = true;
-  btn.textContent = 'Pushing...';
-  try {
-    const data = await api('/api/chiro/push-to-github', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    if (data.ok) {
-      toast('Pushed to GitHub — Railway deploy started.', 'ok');
-      if (data.commit_url) {
-        const link = document.createElement('a');
-        link.href = data.commit_url;
-        link.target = '_blank';
-        link.textContent = `Commit ${(data.commit_sha || '').slice(0, 7)}`;
-        link.style.cssText = 'color:var(--cyan);font-size:12px;display:block;margin-top:4px;';
-        document.getElementById('chiro-console-messages').appendChild(link);
-      }
-    } else {
-      toast('Push failed: ' + (data.error || 'unknown'), 'err');
-    }
-  } catch (e) {
-    toast('Push failed: ' + e.message, 'err');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '↑ Push to GitHub';
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Pushing…';
+  const res = await api('/api/chiro/push-to-github', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}'
+  });
+  btn.disabled = false; btn.textContent = orig;
+  if (!res) { toast('Push failed — check Railway logs.', 'err'); return; }
+  toast('Pushed to GitHub. Railway is redeploying.', 'ok');
+  if (res.commit_url) {
+    const msgsEl = document.getElementById('chiro-console-messages');
+    const link = document.createElement('a');
+    link.href = res.commit_url; link.target = '_blank';
+    link.textContent = 'View commit ' + (res.commit_sha || '').slice(0, 7);
+    link.style.cssText = 'color:var(--cyan);font-size:12px;display:block;padding:8px 14px;';
+    msgsEl.appendChild(link);
+    msgsEl.scrollTop = msgsEl.scrollHeight;
   }
 }
 </script>
