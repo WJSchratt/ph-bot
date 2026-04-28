@@ -12,7 +12,10 @@ const ALLOWED_CATEGORIES = new Set([
   'analyzer_analysis',
   'analyzer_prompt_gen',
   'dev_console',
-  'sandbox_sim'
+  'sandbox_sim',
+  'chiro_console',
+  'chiro_apply',
+  'chiro_sandbox'
 ]);
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
