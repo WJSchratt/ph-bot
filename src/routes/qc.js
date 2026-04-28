@@ -672,9 +672,15 @@ router.get('/qc/all-conversations', async (req, res) => {
     ];
 
     // Non-Claude side: botpress / drip / GHL-only contacts (not in our conversations table).
+    // Show a conversation if:
+    //  a) we've pulled its messages and found at least one inbound, OR
+    //  b) we've pulled its messages and the count is > 0 (updateConversationAggregates set it).
+    // This means drip-only contacts who've never replied are excluded, but any
+    // conversation that has been pulled and has activity shows up even if we
+    // later re-check the inbound filter via ghl_messages.
     const ghlOnlyClauses = [
       `NOT EXISTS (SELECT 1 FROM conversations cx WHERE cx.contact_id = gc.contact_id AND cx.location_id = gc.location_id)`,
-      `EXISTS (SELECT 1 FROM ghl_messages im WHERE im.ghl_conversation_id = gc.ghl_conversation_id AND im.location_id = gc.location_id AND im.direction = 'inbound')`
+      `(gc.message_count > 0 OR EXISTS (SELECT 1 FROM ghl_messages im WHERE im.ghl_conversation_id = gc.ghl_conversation_id AND im.location_id = gc.location_id AND im.direction = 'inbound'))`
     ];
 
     // source filter: 'claude' → skip ghl-only side; non-claude → skip claude side

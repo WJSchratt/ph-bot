@@ -498,13 +498,18 @@ async function pullAndStore(ghlToken, locationId, progressCallback, options = {}
   // --- Pick which conversations need messages fetched ---
   const knownUpdated = await getKnownConversationUpdatedMap(locationId);
 
-  // Also include any DB-known conversations that have zero messages yet.
+  // Also include DB-known conversations that have zero messages yet.
+  // LIMIT 500 ordered by most recently updated so each pull run completes in
+  // ~5 minutes instead of timing out on 5,000+ conversations. Repeated syncs
+  // will progressively catch up on the older ones.
   const emptyQ = await db.query(
     `SELECT c.ghl_conversation_id
      FROM ghl_conversations c
      LEFT JOIN (SELECT ghl_conversation_id, COUNT(*) AS n FROM ghl_messages WHERE location_id = $1 GROUP BY ghl_conversation_id) m
        ON m.ghl_conversation_id = c.ghl_conversation_id
-     WHERE c.location_id = $1 AND (m.n IS NULL OR m.n = 0)`,
+     WHERE c.location_id = $1 AND (m.n IS NULL OR m.n = 0)
+     ORDER BY c.ghl_date_updated DESC NULLS LAST
+     LIMIT 500`,
     [locationId]
   );
   const emptyIds = new Set(emptyQ.rows.map((r) => r.ghl_conversation_id));
