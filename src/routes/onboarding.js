@@ -13,6 +13,8 @@ router.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', '..', 'public', 'onboarding.html'));
 });
 
+const DAILY_SUB_CAP = 10;
+
 // Process form submission — runs the full setup pipeline
 router.post('/submit', async (req, res) => {
   const form = req.body;
@@ -22,6 +24,39 @@ router.post('/submit', async (req, res) => {
   const missing = required.filter((f) => !form[f]?.trim());
   if (missing.length) {
     return res.status(400).send(`Missing required fields: ${missing.join(', ')}`);
+  }
+
+  const email = (form.agent_email || '').trim().toLowerCase();
+
+  // ── Email deduplication ───────────────────────────────────────────────────
+  try {
+    const dup = await db.query(
+      `SELECT id FROM subaccounts WHERE LOWER(agent_email) = $1 LIMIT 1`,
+      [email]
+    );
+    if (dup.rows.length) {
+      logger.log('onboarding', 'warn', null, 'Duplicate email rejected', { email });
+      return res.status(409).send(
+        `An account already exists for ${form.agent_email}. If you think this is a mistake, contact your Profit Hexagon rep.`
+      );
+    }
+  } catch (err) {
+    logger.log('onboarding', 'error', null, 'Dedup check failed', { error: err.message });
+  }
+
+  // ── Daily rate cap ────────────────────────────────────────────────────────
+  try {
+    const countRes = await db.query(
+      `SELECT COUNT(*) FROM onboarding_submissions WHERE created_at > NOW() - INTERVAL '24 hours'`
+    );
+    if (parseInt(countRes.rows[0].count, 10) >= DAILY_SUB_CAP) {
+      logger.log('onboarding', 'warn', null, 'Daily cap hit — submission rejected', { email });
+      return res.status(429).send(
+        `Maximum onboarding submissions reached for today. Please contact your Profit Hexagon rep to get set up.`
+      );
+    }
+  } catch (err) {
+    logger.log('onboarding', 'error', null, 'Rate cap check failed', { error: err.message });
   }
 
   // ── Insert initial submission record ──────────────────────────────────────
