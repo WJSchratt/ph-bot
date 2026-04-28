@@ -1471,4 +1471,47 @@ Always return valid JSON.`;
   }
 });
 
+// GET /qc/conv-counts — diagnostic: how many conversations in each table
+// and what date ranges they cover. Use to spot gaps between GHL pulls and local data.
+router.get('/qc/conv-counts', async (req, res) => {
+  try {
+    const [local, ghlConvs, ghlMsgs, localOnly, ghlOnly] = await Promise.all([
+      db.query(`
+        SELECT COUNT(*)::int AS total,
+               COUNT(*) FILTER (WHERE is_sandbox = FALSE)::int AS non_sandbox,
+               MIN(last_message_at) AS oldest,
+               MAX(last_message_at) AS newest,
+               COUNT(*) FILTER (WHERE last_message_at >= NOW() - '7 days'::interval AND is_sandbox = FALSE)::int AS last_7d,
+               COUNT(*) FILTER (WHERE last_message_at >= NOW() - '1 day'::interval AND is_sandbox = FALSE)::int AS last_24h
+          FROM conversations`),
+      db.query(`
+        SELECT COUNT(*)::int AS total,
+               MIN(last_message_at) AS oldest,
+               MAX(last_message_at) AS newest,
+               COUNT(*) FILTER (WHERE last_message_at >= NOW() - '7 days'::interval)::int AS last_7d,
+               COUNT(*) FILTER (WHERE last_message_at >= NOW() - '1 day'::interval)::int AS last_24h
+          FROM ghl_conversations`),
+      db.query(`SELECT COUNT(*)::int AS total FROM ghl_messages`),
+      db.query(`
+        SELECT COUNT(*)::int AS total
+          FROM conversations c
+         WHERE c.is_sandbox = FALSE
+           AND NOT EXISTS (SELECT 1 FROM ghl_conversations gc WHERE gc.contact_id = c.contact_id AND gc.location_id = c.location_id)`),
+      db.query(`
+        SELECT COUNT(*)::int AS total
+          FROM ghl_conversations gc
+         WHERE NOT EXISTS (SELECT 1 FROM conversations c WHERE c.contact_id = gc.contact_id AND c.location_id = gc.location_id)`)
+    ]);
+    res.json({
+      conversations_table: local.rows[0],
+      ghl_conversations_table: ghlConvs.rows[0],
+      ghl_messages_total: ghlMsgs.rows[0].total,
+      local_only_no_ghl_row: localOnly.rows[0].total,
+      ghl_only_no_local_row: ghlOnly.rows[0].total
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
