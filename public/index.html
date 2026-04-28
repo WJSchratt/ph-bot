@@ -2556,7 +2556,7 @@ async function refreshPipelineData() {
 // ========== QC PORTAL ==========
 async function loadQC(opts) {
   opts = opts || {};
-  const mode = opts.mode || qcTab; // 'claude' (pending only) or 'all'
+  const mode = opts.mode || qcTab; // 'claude' (all bot convos), 'all' (pending review list), or default (pending only)
   const search = opts.search != null ? opts.search : (document.getElementById('qc-search-input')?.value || '').trim();
 
   // Load stats — write into the per-number spans in the new hero row.
@@ -2571,16 +2571,18 @@ async function loadQC(opts) {
     if (stats.pending > 0) { badge.textContent = stats.pending; } else { badge.textContent = ''; }
   }
 
-  // Build query: 'all' mode drops the terminal_outcome + qc_reviewed filters.
+  // Build query: 'all' and 'claude' modes drop the terminal_outcome + qc_reviewed filters.
   const params = new URLSearchParams({ page: '1', limit: '50' });
-  if (mode === 'all') params.set('all', 'true');
+  if (mode === 'all' || mode === 'claude') params.set('all', 'true');
   if (search) params.set('search', search);
 
   const data = await api('/api/qc/pending?' + params.toString());
   if (!data) return;
   const list = document.getElementById('qc-conv-list');
   list.innerHTML = '';
-  const headerLbl = mode === 'all' ? 'All Conversations' : 'Pending Review';
+  const headerLbl = mode === 'claude' ? 'All Claude Bot Conversations'
+                  : mode === 'all'    ? 'All Conversations'
+                  : 'Pending Review';
   document.getElementById('qc-list-header').textContent = headerLbl + ' (' + (data.total || 0) + ')';
   if (!(data.conversations || []).length) {
     list.innerHTML = '<div style="color:var(--muted);padding:24px;text-align:center;font-size:13px;">No conversations match.</div>';
