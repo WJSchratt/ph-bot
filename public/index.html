@@ -710,6 +710,9 @@ textarea.form-input{resize:vertical;min-height:80px;}
     <input type="text" id="qc-search-input" placeholder="Search by name or phone..." class="form-input" style="max-width:280px;" oninput="qcSearchDebounced()">
     <input type="date" id="qc-date-from-input" class="form-input" style="max-width:155px;" title="Show conversations on or after this date" onchange="loadQcAll()">
     <button class="btn-sm" onclick="clearQcDateFilter()" style="font-size:11px;padding:3px 8px;display:none;" id="qc-date-clear-btn">✕ Clear date</button>
+    <button class="btn-sm" id="qc-sync-ghl-btn" onclick="qcSyncAllLocations(false)" style="font-size:11px;padding:3px 10px;background:rgba(0,212,255,.12);border:1px solid var(--cyan);color:var(--cyan);" title="Pull latest conversations from GHL for all locations">⟳ Sync GHL</button>
+    <button class="btn-sm" id="qc-repull-ghl-btn" onclick="qcSyncAllLocations(true)" style="font-size:11px;padding:3px 10px;" title="Full re-pull all conversations from GHL (slow)">Full Repull</button>
+    <span id="qc-sync-status" style="font-size:11px;color:var(--muted);"></span>
   </div>
 
   <div class="conv-wrap">
@@ -2941,6 +2944,38 @@ function clearQcDateFilter() {
   const btn = document.getElementById('qc-date-clear-btn');
   if (btn) btn.style.display = 'none';
   loadQcAll();
+}
+
+async function qcSyncAllLocations(fullRepull) {
+  const btn = document.getElementById(fullRepull ? 'qc-repull-ghl-btn' : 'qc-sync-ghl-btn');
+  const statusEl = document.getElementById('qc-sync-status');
+  if (btn) { btn.disabled = true; btn.textContent = fullRepull ? 'Repulling…' : 'Syncing…'; }
+  if (statusEl) statusEl.textContent = 'Starting pull…';
+  try {
+    const res = await api('/api/qc/pull-all-locations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fullRepull: !!fullRepull })
+    });
+    if (!res || !res.ok) {
+      if (statusEl) statusEl.textContent = 'Pull failed: ' + (res?.error || 'unknown error');
+      toast('GHL sync failed.', 'err');
+    } else {
+      const n = (res.started || []).length;
+      if (statusEl) statusEl.textContent = n > 0
+        ? 'Pulling ' + n + ' location' + (n > 1 ? 's' : '') + '… (may take a minute)'
+        : 'No locations with tokens found.';
+      if (n > 0) {
+        toast('GHL pull started for ' + n + ' location' + (n > 1 ? 's' : '') + '.', 'ok');
+        setTimeout(function() { loadQcAll(); }, 15000);
+        setTimeout(function() { loadQcAll(); if (statusEl) statusEl.textContent = ''; }, 60000);
+      }
+    }
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Error: ' + e.message;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = fullRepull ? 'Full Repull' : '⟳ Sync GHL'; }
+  }
 }
 
 // ========== QC PORTAL INLINE CONSOLE PANEL ==========

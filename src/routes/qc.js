@@ -635,10 +635,20 @@ router.post('/qc/flag-wrong', async (req, res) => {
 });
 
 // ============================================================
-// Unified "All Conversations" — every ghl_conversations row with at least
-// one inbound reply, regardless of source (claude/botpress/other/drip).
-// Returns claude_conv_id so the frontend can route to the rich Claude detail
-// when source='claude', or fall back to the ghl_messages thread view.
+// Unified "All Conversations" — every conversation that has at least one
+// inbound reply, regardless of source (claude/botpress/other/drip).
+//
+// Bug-fix notes vs. prior version:
+//  1. LEFT JOIN → LATERAL: old plain LEFT JOIN produced N rows per Claude
+//     conversation when a contact had N ghl_conversations rows (e.g. re-opened
+//     contact). LATERAL + LIMIT 1 guarantees 1:1.
+//  2. Inbound filter broadened: old `EXISTS messages WHERE direction='inbound'`
+//     excluded conversations whose history lived only in the JSONB column (rows
+//     predating consistent messages-table logging). Now checks JSONB as well.
+//  3. Search now matches GHL contact_name, phone, and individual name parts in
+//     addition to the full concatenated name — fixes mismatches where GHL sent
+//     a different first_name to the webhook than what appears in the GHL UI.
+//  4. Count query uses same LATERAL so the count matches the row set.
 // ============================================================
 router.get('/qc/all-conversations', async (req, res) => {
   try {
@@ -650,11 +660,15 @@ router.get('/qc/all-conversations', async (req, res) => {
     let p = 1;
 
     // Claude-bot side: primary source is local `conversations` table — always
-    // current regardless of GHL pull cadence. GHL data joined in for enrichment
-    // (ghl_conversation_id needed to open the thread detail).
+    // current regardless of GHL pull cadence. LATERAL join fetches the most
+    // recent ghl_conversations row (if any) for enrichment only.
     const claudeClauses = [
       `c.is_sandbox = FALSE`,
-      `EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'inbound')`
+      // Broadened: check messages table first, fall back to JSONB history.
+      // Old conversations may only have JSONB entries if they predate consistent
+      // messages-table logging, so requiring the table row alone excluded them.
+      `(EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'inbound')
+        OR jsonb_array_length(COALESCE(c.messages,'[]'::jsonb)) > 0)`
     ];
 
     // Non-Claude side: botpress / drip / GHL-only contacts (not in our conversations table).
@@ -674,9 +688,22 @@ router.get('/qc/all-conversations', async (req, res) => {
       }
     }
     if (search && String(search).trim()) {
-      baseParams.push('%' + String(search).trim().toLowerCase() + '%');
-      claudeClauses.push(`LOWER(TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,''))) LIKE $${p}`);
-      ghlOnlyClauses.push(`LOWER(gc.contact_name) LIKE $${p}`);
+      const sVal = '%' + String(search).trim().toLowerCase() + '%';
+      baseParams.push(sVal);
+      // Claude side: match full name, each part, phone, OR the GHL contact_name.
+      // The GHL contact_name check catches cases where the webhook received a
+      // different first_name than the GHL UI shows (typo in GHL data at send time).
+      claudeClauses.push(`(
+        LOWER(TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,''))) LIKE $${p}
+        OR LOWER(COALESCE(c.first_name,'')) LIKE $${p}
+        OR LOWER(COALESCE(c.last_name,'')) LIKE $${p}
+        OR COALESCE(c.phone,'') LIKE $${p}
+        OR LOWER(COALESCE(gc.contact_name,'')) LIKE $${p}
+      )`);
+      ghlOnlyClauses.push(`(
+        LOWER(COALESCE(gc.contact_name,'')) LIKE $${p}
+        OR COALESCE(gc.contact_phone,'') LIKE $${p}
+      )`);
       p++;
     }
     if (from_date && /^\d{4}-\d{2}-\d{2}$/.test(String(from_date))) {
@@ -692,13 +719,15 @@ router.get('/qc/all-conversations', async (req, res) => {
     const limIdx = p; const offIdx = p + 1;
 
     // Claude bot conversations — driven by local conversations table (always fresh).
-    // LEFT JOIN ghl_conversations to get ghl_conversation_id for the thread detail view.
+    // LATERAL join gets at most 1 ghl_conversations row (most recent) per contact,
+    // preventing the N-duplicate problem when a contact has multiple GHL threads.
+    // contact_name falls back to ghl contact_name when local name fields are blank.
     const claudeSelect = includeClaude ? `
       SELECT c.id AS conv_pk,
              gc.ghl_conversation_id,
              c.location_id,
              c.contact_id,
-             TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS contact_name,
+             COALESCE(NULLIF(TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')), ''), gc.contact_name) AS contact_name,
              c.phone AS contact_phone,
              'claude'::varchar AS source,
              (SELECT COUNT(*)::int FROM messages m WHERE m.conversation_id = c.id) AS message_count,
@@ -707,7 +736,13 @@ router.get('/qc/all-conversations', async (req, res) => {
              COALESCE(s.name, c.location_id) AS subaccount_name,
              c.id AS claude_conv_id
         FROM conversations c
-        LEFT JOIN ghl_conversations gc ON gc.contact_id = c.contact_id AND gc.location_id = c.location_id
+        LEFT JOIN LATERAL (
+          SELECT ghl_conversation_id, last_message_at, contact_name
+          FROM ghl_conversations
+          WHERE contact_id = c.contact_id AND location_id = c.location_id
+          ORDER BY last_message_at DESC NULLS LAST
+          LIMIT 1
+        ) gc ON TRUE
         LEFT JOIN subaccounts s ON s.ghl_location_id = c.location_id
        ${claudeWhere}` : '';
 
@@ -738,10 +773,18 @@ router.get('/qc/all-conversations', async (req, res) => {
       params
     );
 
+    // Count uses same LATERAL so it matches the actual row set (no duplicate inflation).
     const countQ = await db.query(
       `SELECT COUNT(*)::int AS total FROM (
          ${[
-           includeClaude ? `SELECT 1 FROM conversations c LEFT JOIN ghl_conversations gc ON gc.contact_id = c.contact_id AND gc.location_id = c.location_id ${claudeWhere}` : '',
+           includeClaude ? `
+             SELECT 1 FROM conversations c
+             LEFT JOIN LATERAL (
+               SELECT contact_name FROM ghl_conversations
+               WHERE contact_id = c.contact_id AND location_id = c.location_id
+               ORDER BY last_message_at DESC NULLS LAST LIMIT 1
+             ) gc ON TRUE
+             ${claudeWhere}` : '',
            includeGhlOnly ? `SELECT 1 FROM ghl_conversations gc ${ghlOnlyWhere}` : ''
          ].filter(Boolean).join(' UNION ALL ')}
        ) counted`,
@@ -750,6 +793,85 @@ router.get('/qc/all-conversations', async (req, res) => {
 
     res.json({ conversations: q.rows, total: countQ.rows[0]?.total || 0 });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// Pull all known locations from GHL — surfaces conversations that only
+// exist in GHL (drip/botpress contacts who haven't triggered our webhook).
+// Uses tokens stored in conversations or subaccounts tables; no credentials
+// needed from the caller.
+// ============================================================
+async function findGhlTokenForLocationLocal(locationId) {
+  try {
+    const fromSub = await db.query(
+      `SELECT ghl_api_key FROM subaccounts WHERE ghl_location_id = $1 AND ghl_api_key IS NOT NULL AND ghl_api_key <> ''`,
+      [locationId]
+    );
+    if (fromSub.rows[0]?.ghl_api_key) return fromSub.rows[0].ghl_api_key;
+  } catch {}
+  try {
+    const fromConv = await db.query(
+      `SELECT ghl_token FROM conversations
+       WHERE location_id = $1 AND ghl_token IS NOT NULL AND ghl_token <> ''
+       ORDER BY updated_at DESC LIMIT 1`,
+      [locationId]
+    );
+    if (fromConv.rows[0]?.ghl_token) return fromConv.rows[0].ghl_token;
+  } catch {}
+  return null;
+}
+
+router.post('/qc/pull-all-locations', async (req, res) => {
+  try {
+    const fullRepull = !!req.body?.fullRepull;
+
+    // Gather every location that has a usable GHL token.
+    const [convLocs, subLocs] = await Promise.all([
+      db.query(`SELECT DISTINCT location_id FROM conversations WHERE ghl_token IS NOT NULL AND ghl_token <> '' AND is_sandbox = FALSE`),
+      db.query(`SELECT DISTINCT ghl_location_id AS location_id FROM subaccounts WHERE ghl_api_key IS NOT NULL AND ghl_api_key <> ''`)
+    ]);
+    const seen = new Set();
+    const locationIds = [];
+    for (const r of [...convLocs.rows, ...subLocs.rows]) {
+      if (!seen.has(r.location_id)) { seen.add(r.location_id); locationIds.push(r.location_id); }
+    }
+
+    if (!locationIds.length) {
+      return res.json({ ok: true, message: 'No locations with stored GHL tokens found.', started: [] });
+    }
+
+    const jobs = require('../services/jobs');
+    const ghlConv = require('../services/ghlConversations');
+    const started = [];
+
+    for (const locationId of locationIds) {
+      const token = await findGhlTokenForLocationLocal(locationId);
+      if (!token) continue;
+
+      const jobId = await jobs.createJob({
+        type: fullRepull ? 'ghl_full_repull' : 'ghl_incremental_pull',
+        params: { locationId, fullRepull },
+        startedBy: req.session?.username || 'qc_pull_all'
+      });
+
+      jobs.spawn(jobId, async (reporter) => {
+        reporter.report({ message: `Pulling ${locationId}…` });
+        const result = await ghlConv.pullAndStore(token, locationId, (p) => {
+          reporter.report({ current: p.fetched, message: `${p.phase}: ${p.fetched}` });
+        }, { fullRepull });
+        reporter.report({ message: 'done' });
+        return result;
+      });
+
+      started.push({ locationId, jobId });
+    }
+
+    logger.log('qc', 'info', null, 'pull-all-locations triggered', { count: started.length, fullRepull, by: req.session?.username });
+    res.json({ ok: true, started, fullRepull, location_count: started.length });
+  } catch (err) {
+    logger.log('qc', 'error', null, 'pull-all-locations failed', { error: err.message });
     res.status(500).json({ error: err.message });
   }
 });
