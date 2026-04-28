@@ -190,12 +190,18 @@ const OUTCOME_TO_STAGE = {
 // Maps stage name patterns to outcome keys so we can match any sub-account's
 // stages by name regardless of their GHL-generated UUIDs.
 const STAGE_NAME_PATTERNS = [
+  // Insurance pipeline stages
   { pattern: /engaging.with.ai/i,  outcome: 'engaging_with_ai' },
   { pattern: /appointment.set/i,   outcome: 'booked' },
   { pattern: /needs.human/i,       outcome: 'requested_human' },
   { pattern: /^dnc$/i,             outcome: 'dnc' },
   { pattern: /remove/i,            outcome: 'dnc' },
   { pattern: /disqualif/i,         outcome: 'disqualified' },
+  // Chiro Patient Pipeline stages
+  { pattern: /NPE\s*book/i,        outcome: 'booked' },
+  { pattern: /^contacted$/i,       outcome: 'engaging_with_ai' },
+  { pattern: /^new\s*lead$/i,      outcome: 'engaging_with_ai' },
+  { pattern: /lost.*\/.*DQ|lost.*disq/i, outcome: 'dnc' },
 ];
 
 // In-memory cache: locationId → {pipelineId, stageMap, cachedAt}
@@ -206,17 +212,25 @@ const PIPELINE_CONFIG_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 // pulling from GHL if not yet cached. Returns {pipelineId, stageMap} where
 // stageMap keys are outcome names (e.g. "booked", "engaging_with_ai").
 // Returns null if the pipeline can't be resolved.
-async function resolveLocationPipelineConfig(locationId, ghlToken) {
-  const mem = _pipelineConfigCache.get(locationId);
+// Returns the ILIKE pattern used to find the main pipeline for a given vertical.
+function pipelineNamePattern(vertical) {
+  if (vertical === 'chiro') return '%Patient%';
+  return '%Sales%';
+}
+
+async function resolveLocationPipelineConfig(locationId, ghlToken, vertical) {
+  const cacheKey = `${locationId}:${vertical || 'insurance'}`;
+  const mem = _pipelineConfigCache.get(cacheKey);
   if (mem && Date.now() - mem.cachedAt < PIPELINE_CONFIG_CACHE_TTL_MS) return mem;
 
+  const namePattern = pipelineNamePattern(vertical || 'insurance');
   let row = null;
   try {
     const r = await db.query(
       `SELECT ghl_pipeline_id, stages FROM ghl_pipelines
-       WHERE location_id = $1 AND name ILIKE '%Sales%'
+       WHERE location_id = $1 AND name ILIKE $2
        ORDER BY pulled_at DESC LIMIT 1`,
-      [locationId]
+      [locationId, namePattern]
     );
     row = r.rows[0] || null;
   } catch (err) {
@@ -229,9 +243,9 @@ async function resolveLocationPipelineConfig(locationId, ghlToken) {
       await pullPipelines(ghlToken, locationId);
       const r = await db.query(
         `SELECT ghl_pipeline_id, stages FROM ghl_pipelines
-         WHERE location_id = $1 AND name ILIKE '%Sales%'
+         WHERE location_id = $1 AND name ILIKE $2
          ORDER BY pulled_at DESC LIMIT 1`,
-        [locationId]
+        [locationId, namePattern]
       );
       row = r.rows[0] || null;
     } catch (err) {
@@ -253,7 +267,7 @@ async function resolveLocationPipelineConfig(locationId, ghlToken) {
   }
 
   const config = { pipelineId: row.ghl_pipeline_id, stageMap, cachedAt: Date.now() };
-  _pipelineConfigCache.set(locationId, config);
+  _pipelineConfigCache.set(cacheKey, config);
   logger.log('pipeline_route', 'info', null, 'Pipeline config resolved', {
     locationId, pipelineId: config.pipelineId, stages: Object.keys(stageMap).length
   });
@@ -349,7 +363,7 @@ async function fetchContactName(ghlToken, contactId) {
 // stage (step: 'create_opportunity'); otherwise the existing opp is moved
 // (step: 'update_stage').
 async function routeOpportunity(ghlToken, locationId, contactId, outcome, opts = {}) {
-  const { dryRun = false, logCtx = null, contactName = null } = opts;
+  const { dryRun = false, logCtx = null, contactName = null, vertical = 'insurance' } = opts;
   const lc = logCtx || contactId;
   const result = {
     contactId,
@@ -375,7 +389,7 @@ async function routeOpportunity(ghlToken, locationId, contactId, outcome, opts =
   let resolvedStageId = mapping.stageId;
   let resolvedSkipStageIds = Array.isArray(mapping.skipIfAtStageIds) ? mapping.skipIfAtStageIds : null;
 
-  const locCfg = await resolveLocationPipelineConfig(locationId, ghlToken);
+  const locCfg = await resolveLocationPipelineConfig(locationId, ghlToken, vertical);
   if (locCfg) {
     resolvedPipelineId = locCfg.pipelineId;
     if (locCfg.stageMap[outcome]) resolvedStageId = locCfg.stageMap[outcome];

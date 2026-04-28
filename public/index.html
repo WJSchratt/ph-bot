@@ -699,6 +699,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
   <div class="qc-tabs-row">
     <div class="itab active" data-qctab="all" onclick="setQcTab('all', this)">All</div>
     <div class="itab" data-qctab="claude" onclick="setQcTab('claude', this)">Claude Bot</div>
+    <div class="itab" data-qctab="chiro" onclick="setQcTab('chiro', this)">Chiro Bot</div>
     <div class="itab" data-qctab="botpress" onclick="setQcTab('botpress', this)">Archive (Botpress)</div>
     <div class="itab" data-qctab="cluster" onclick="setQcTab('cluster', this)">Filter by Word Track</div>
     <div class="itab" data-qctab="console" onclick="setQcTab('console', this)">&#9881; Bot Console</div>
@@ -1612,6 +1613,7 @@ function loadCurrentTab() {
     case 'tab-qc':
       if (qcTab === 'all') loadQcAll();
       else if (qcTab === 'claude') loadQC({ mode: 'claude' });
+      else if (qcTab === 'chiro') loadQC({ mode: 'chiro' });
       else if (qcTab === 'botpress') loadQcBotpress();
       else if (qcTab === 'cluster') loadQcClusterPicker();
       else if (qcTab === 'console') loadQcConsole();
@@ -2571,16 +2573,18 @@ async function loadQC(opts) {
     if (stats.pending > 0) { badge.textContent = stats.pending; } else { badge.textContent = ''; }
   }
 
-  // Build query: 'all' and 'claude' modes drop the terminal_outcome + qc_reviewed filters.
+  // Build query: 'all', 'claude', and 'chiro' modes drop the terminal_outcome + qc_reviewed filters.
   const params = new URLSearchParams({ page: '1', limit: '50' });
-  if (mode === 'all' || mode === 'claude') params.set('all', 'true');
+  if (mode === 'all' || mode === 'claude' || mode === 'chiro') params.set('all', 'true');
+  if (mode === 'chiro') params.set('vertical', 'chiro');
   if (search) params.set('search', search);
 
   const data = await api('/api/qc/pending?' + params.toString());
   if (!data) return;
   const list = document.getElementById('qc-conv-list');
   list.innerHTML = '';
-  const headerLbl = mode === 'claude' ? 'All Claude Bot Conversations'
+  const headerLbl = mode === 'chiro'  ? 'All Chiro Bot Conversations'
+                  : mode === 'claude' ? 'All Claude Bot Conversations'
                   : mode === 'all'    ? 'All Conversations'
                   : 'Pending Review';
   document.getElementById('qc-list-header').textContent = headerLbl + ' (' + (data.total || 0) + ')';
@@ -2762,6 +2766,7 @@ function setQcTab(which, el) {
   if (searchRow) searchRow.style.display = (which === 'cluster' || isConsole) ? 'none' : '';
   if (which === 'all') loadQcAll();
   else if (which === 'claude') loadQC({ mode: 'claude' });
+  else if (which === 'chiro') loadQC({ mode: 'chiro' });
   else if (which === 'botpress') loadQcBotpress();
   else if (which === 'cluster') loadQcClusterPicker();
   else if (which === 'console') loadQcConsole();

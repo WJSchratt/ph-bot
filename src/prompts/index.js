@@ -3,6 +3,7 @@ const californiaDefault = require('./california');
 const client = require('./client');
 const application = require('./application');
 const knowledgeBase = require('./knowledgeBase');
+const chiroPrompt = require('./chiro');
 const db = require('../db');
 
 const RESPONSE_FORMAT = `---
@@ -88,6 +89,26 @@ async function selectBasePrompt(contactStage, isCa) {
   return override.exists ? override.text : standardDefault;
 }
 
+function buildChiroContextBlock(conv) {
+  const cfg = (conv.vertical_config && typeof conv.vertical_config === 'object') ? conv.vertical_config : {};
+  const doctorName = cfg.doctor_name || conv.agent_name || 'Dr. Johnson';
+  const practiceName = cfg.practice_name || 'our practice';
+  const officeHours = cfg.office_hours || 'Monday-Friday 8am-6pm';
+  const calLink = cfg.calendar_link || '';
+  const botName = conv.bot_name || 'Aria';
+  return `---
+PRACTICE CONTEXT:
+- Patient First Name: ${conv.first_name || ''}
+- Bot Name: ${botName}
+- Doctor: ${doctorName}
+- Practice Name: ${practiceName}
+- Office Hours: ${officeHours}
+- Booking Link: ${calLink}
+
+Replace [BOT_NAME] with "${botName}", [DOCTOR] with "${doctorName}", [PRACTICE_NAME] with "${practiceName}" in all responses.
+`;
+}
+
 function buildContextBlock(conv) {
   const leadTypeLabel = conv.product_type === 'mp'
     ? 'mortgage protection'
@@ -123,6 +144,10 @@ ${conv.ghl_message_history || '(none)'}
 }
 
 async function buildSystemPrompt(conv) {
+  if (conv.vertical === 'chiro') {
+    const context = buildChiroContextBlock(conv);
+    return `${chiroPrompt}\n\n${context}\n\n${RESPONSE_FORMAT}`;
+  }
   const base = await selectBasePrompt(conv.contact_stage, conv.is_ca);
   const context = buildContextBlock(conv);
   return `${base}\n\n${context}\n\n${RESPONSE_FORMAT}\n\n=== KNOWLEDGE BASE ===\n\n${knowledgeBase}`;

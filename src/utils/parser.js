@@ -114,6 +114,11 @@ function parseInboundPayload(raw) {
     language: (pickField(body, 'language') || '').toLowerCase(),
     marketplace_type: pickField(body, 'marketplace_type'),
     consent_status: pickField(body, 'consent_status'),
+    bot_vertical: (pickField(body, 'bot_vertical') || 'insurance').toLowerCase().trim(),
+    doctor_name: pickField(body, 'doctor_name'),
+    practice_name: pickField(body, 'practice_name'),
+    office_hours: pickField(body, 'office_hours'),
+    chiro_calendar_link: pickField(body, 'calendar_link'),
     tags: tagList
   };
 }

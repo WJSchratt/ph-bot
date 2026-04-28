@@ -30,7 +30,7 @@ async function upsertConversation(parsed, { is_sandbox = false } = {}) {
       bot_name, agent_name, agent_phone, agent_business_card_url,
       calendar_link_fx, calendar_link_mp, loom_video_fx, loom_video_mp, meeting_type,
       ghl_token, ghl_message_history, offer, offer_short, language, marketplace_type, consent_status,
-      is_sandbox, last_message_at
+      is_sandbox, vertical, vertical_config, last_message_at
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,
       $10,$11,$12,$13,$14,
@@ -38,7 +38,7 @@ async function upsertConversation(parsed, { is_sandbox = false } = {}) {
       $17,$18,$19,$20,
       $21,$22,$23,$24,$25,
       $26,$27,$28,$29,$30,$31,$32,
-      $33, NOW()
+      $33,$34,$35, NOW()
     )
     ON CONFLICT (contact_id, location_id) DO UPDATE SET
       phone = EXCLUDED.phone,
@@ -72,6 +72,8 @@ async function upsertConversation(parsed, { is_sandbox = false } = {}) {
       marketplace_type = EXCLUDED.marketplace_type,
       consent_status = EXCLUDED.consent_status,
       is_sandbox = EXCLUDED.is_sandbox,
+      vertical = COALESCE(NULLIF(EXCLUDED.vertical, ''), conversations.vertical),
+      vertical_config = CASE WHEN EXCLUDED.vertical_config = '{}'::jsonb THEN conversations.vertical_config ELSE EXCLUDED.vertical_config END,
       last_message_at = NOW(),
       updated_at = NOW()
     RETURNING *`,
@@ -82,7 +84,14 @@ async function upsertConversation(parsed, { is_sandbox = false } = {}) {
       parsed.bot_name, parsed.agent_name, parsed.agent_phone, parsed.agent_business_card_url,
       parsed.calendar_link_fx, parsed.calendar_link_mp, parsed.loom_video_fx, parsed.loom_video_mp, parsed.meeting_type,
       parsed.ghl_token, parsed.ghl_message_history, parsed.offer, parsed.offer_short, parsed.language, parsed.marketplace_type, parsed.consent_status,
-      is_sandbox
+      is_sandbox,
+      parsed.bot_vertical || 'insurance',
+      JSON.stringify({
+        ...(parsed.doctor_name   ? { doctor_name:   parsed.doctor_name }   : {}),
+        ...(parsed.practice_name ? { practice_name: parsed.practice_name } : {}),
+        ...(parsed.office_hours  ? { office_hours:  parsed.office_hours }  : {}),
+        ...(parsed.chiro_calendar_link ? { calendar_link: parsed.chiro_calendar_link } : {})
+      })
     ]
   );
   return res.rows[0];

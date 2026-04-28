@@ -32,17 +32,19 @@ function scenarioFilter(scenario) {
 // Get pending QC conversations
 router.get('/qc/pending', async (req, res) => {
   try {
-    const { page = 1, limit = 20, search, all } = req.query;
+    const { page = 1, limit = 20, search, all, vertical } = req.query;
     const lim = Math.min(parseInt(limit, 10) || 20, 100);
     const off = (Math.max(parseInt(page, 10) || 1, 1) - 1) * lim;
 
     // `all=true` drops the qc_reviewed + terminal_outcome filters so reviewers
     // can browse every conversation (including in-progress + already-reviewed).
+    // `vertical` filters by bot vertical ('insurance', 'chiro'). Defaults to 'insurance'.
     // `search` matches first/last name OR phone, case-insensitive substring.
     const includeAll = String(all || '') === 'true' || all === '1';
-    const clauses = ['c.is_sandbox = FALSE'];
-    const params = [];
-    let p = 1;
+    const verticalFilter = vertical && String(vertical).trim() ? String(vertical).trim() : 'insurance';
+    const clauses = ['c.is_sandbox = FALSE', `COALESCE(c.vertical, 'insurance') = $1`];
+    const params = [verticalFilter];
+    let p = 2;
     if (!includeAll) {
       clauses.push('c.qc_reviewed = FALSE');
       clauses.push('c.terminal_outcome IS NOT NULL');

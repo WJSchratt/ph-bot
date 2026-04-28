@@ -241,7 +241,7 @@ router.post('/inbound', async (req, res) => {
           parsed.location_id,
           conv.contact_id,
           'engaging_with_ai',
-          { logCtx: contactId, contactName }
+          { logCtx: contactId, contactName, vertical: conv.vertical || 'insurance' }
         );
         logger.log('pipeline_route', 'info', contactId, 'first-reply engaging_with_ai', {
           opportunityId: engRes.opportunityId,
@@ -454,7 +454,7 @@ router.post('/inbound', async (req, res) => {
               parsed.location_id,
               conv.contact_id,
               routeOutcome,
-              { logCtx: contactId, contactName }
+              { logCtx: contactId, contactName, vertical: conv.vertical || 'insurance' }
             );
             logger.log('pipeline_route', 'info', contactId, 'routeOpportunity result', {
               terminal_outcome: newOutcome,
@@ -474,8 +474,8 @@ router.post('/inbound', async (req, res) => {
         }
       }
 
-      // Skip firing PCR again on a reschedule (the first booking already fired it)
-      if (!isReschedule) {
+      // Skip firing PCR again on a reschedule, and skip entirely for non-insurance verticals
+      if (!isReschedule && (conv.vertical || 'insurance') === 'insurance') {
         await firePostCallRouter(mergedConv, newOutcome);
         logger.log('webhook_fire', 'info', contactId, 'Post-call router fired', { outcome: newOutcome, url: process.env.GHL_POST_CALL_ROUTER_URL });
       }

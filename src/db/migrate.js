@@ -26,6 +26,26 @@ async function applyMigrations() {
     `);
     console.log('[migrate] is_sandbox column ensured');
 
+    // vertical — which bot handled this conversation ('insurance', 'chiro', etc.)
+    // vertical_config — JSONB bag for vertical-specific config (doctor_name, practice_name, etc.)
+    await pool.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'conversations' AND column_name = 'vertical'
+        ) THEN
+          ALTER TABLE conversations ADD COLUMN vertical VARCHAR(50) DEFAULT 'insurance';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'conversations' AND column_name = 'vertical_config'
+        ) THEN
+          ALTER TABLE conversations ADD COLUMN vertical_config JSONB DEFAULT '{}'::jsonb;
+        END IF;
+      END $$;
+    `);
+    console.log('[migrate] vertical + vertical_config columns ensured');
+
     // V2 Command Center tables and columns
     const v2Sql = fs.readFileSync(path.join(__dirname, 'migrate_v2.sql'), 'utf8');
     await pool.query(v2Sql);
