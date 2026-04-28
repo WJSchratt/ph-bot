@@ -26,6 +26,7 @@ const cronRoutes = require('./routes/cron');
 const jobsRouter = require('./routes/jobs');
 const elevenlabsWebhookRouter = require('./routes/elevenlabsWebhook');
 const elevenlabsApiRouter = require('./routes/elevenlabsApi');
+const chiroBotRouter = require('./routes/chiroBot');
 const onboardingRouter = require('./routes/onboarding');
 const notificationsRouter = require('./routes/notifications');
 const conversationStore = require('./services/conversationStore');
@@ -109,6 +110,7 @@ app.use('/api', testSyncRouter);
 app.use('/api', jobsRouter);
 // Dashboard-facing ElevenLabs endpoints (list/detail/audio stream). Requires auth.
 app.use('/api', elevenlabsApiRouter);
+app.use('/api', chiroBotRouter);
 app.use('/api', notificationsRouter);
 app.use('/sandbox', sandboxRouter);
 app.use('/cron', cronRoutes.router);

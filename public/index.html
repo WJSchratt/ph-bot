@@ -498,6 +498,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
   <div class="nav-section">AI Management</div>
   <div class="nav-item" data-tab="tab-qc" onclick="goTab('tab-qc')"><span class="nav-icon">&#9678;</span> QC Portal <span class="nav-badge nb-amber" id="nav-qc-badge"></span></div>
   <div class="nav-item" data-tab="tab-review" onclick="goTab('tab-review')"><span class="nav-icon">&#8635;</span> AI Review Queue <span class="nav-badge nb-red" id="nav-review-badge"></span></div>
+  <div class="nav-item" data-tab="tab-chiro-bot" onclick="goTab('tab-chiro-bot')"><span class="nav-icon">&#9876;</span> Chiro Bot <span class="nav-badge nb-cyan">NEW</span></div>
   <div class="nav-section">Tools</div>
   <div class="nav-item" data-tab="tab-sandbox" onclick="goTab('tab-sandbox')"><span class="nav-icon">&#9879;</span> Sandbox</div>
   <div class="nav-item" data-tab="tab-analyzer" onclick="goTab('tab-analyzer')"><span class="nav-icon">&#9881;</span> Analyzer <span class="nav-badge nb-cyan">NEW</span></div>
@@ -812,6 +813,75 @@ textarea.form-input{resize:vertical;min-height:80px;}
     <p id="review-banner-text">Loading review items...</p>
   </div>
   <div id="review-list"></div>
+</div>
+
+<!-- ====== CHIRO BOT ====== -->
+<div class="tab-content" id="tab-chiro-bot">
+  <div class="sh"><span class="sh-title">Chiro Bot Management</span><div class="sh-line"></div></div>
+  <div class="itabs" style="margin-bottom:14px;">
+    <div class="itab active" onclick="chiroBotSetTab('sandbox', this)">Sandbox</div>
+    <div class="itab" onclick="chiroBotSetTab('console', this)">Console</div>
+  </div>
+
+  <!-- ── Sandbox ── -->
+  <div id="chiro-sandbox-panel">
+    <div class="sb-grid">
+      <div class="sb-panel">
+        <div class="card-title" style="margin-bottom:12px;">Patient Config</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;">
+          <div class="form-group"><label class="form-label">Patient First Name</label><input class="form-input" id="csb-first_name" value="Walt"></div>
+          <div class="form-group"><label class="form-label">Bot Name</label><input class="form-input" id="csb-bot_name" value="Aria"></div>
+          <div class="form-group"><label class="form-label">Doctor Name</label><input class="form-input" id="csb-doctor_name" value="Dr. Johnson"></div>
+          <div class="form-group"><label class="form-label">Practice Name</label><input class="form-input" id="csb-practice_name" value="our practice"></div>
+          <div class="form-group s2"><label class="form-label">Office Hours</label><input class="form-input" id="csb-office_hours" value="Monday-Friday 8am-6pm"></div>
+          <div class="form-group s2"><label class="form-label">Booking Link (optional)</label><input class="form-input" id="csb-calendar_link" placeholder="https://..."></div>
+        </div>
+        <div style="display:flex;gap:7px;margin-top:12px;">
+          <button class="btn pri" style="flex:1;" onclick="csbSend()">Send</button>
+          <button class="btn" onclick="csbReset()">Clear Chat</button>
+        </div>
+      </div>
+      <div class="sb-panel" style="display:flex;flex-direction:column;">
+        <div class="card-title" style="margin-bottom:12px;">Chiro Bot Simulator</div>
+        <div class="sb-output" id="csb-output" style="flex:1;min-height:300px;">
+          <div style="color:var(--muted);text-align:center;padding:40px 20px;font-size:13px;">Type a message as the patient and click Send.</div>
+        </div>
+        <div class="sb-input-row">
+          <textarea class="sb-text-input" id="csb-input" placeholder="Type as the patient..." rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();csbSend();}"></textarea>
+          <button class="btn pri" onclick="csbSend()">Send</button>
+        </div>
+        <div id="csb-metadata" style="display:none;margin-top:8px;padding:9px;background:var(--surface2);border-radius:6px;font-size:10px;font-family:'JetBrains Mono';color:var(--muted);"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Console ── -->
+  <div id="chiro-console-panel" style="display:none;">
+    <div class="bc-wrap">
+      <div class="bc-main">
+        <div class="bc-chat">
+          <div class="dc-chat-top">
+            <strong style="color:#fff;">Chiro Bot Console</strong>
+            <span style="font-size:11px;color:var(--muted);margin-left:8px;">Ask Claude to rewrite sections, fix tone, add scenarios — changes queue up then apply live</span>
+            <button class="btn-sm" style="margin-left:auto;" onclick="chiroClearChat()">Clear</button>
+          </div>
+          <div class="dc-messages" id="chiro-console-messages"></div>
+          <div class="dc-input-row">
+            <textarea class="dc-input" id="chiro-console-input" rows="2" placeholder="e.g. The bot should handle insurance questions better. Add a flow for patients who ask about cost upfront. Ctrl+Enter to send." onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();chiroConsoleSend();}"></textarea>
+            <button class="btn pri" id="chiro-console-send-btn" onclick="chiroConsoleSend()">Send</button>
+          </div>
+        </div>
+        <div class="bc-sidebar">
+          <div class="bc-sidebar-title">Pending Changes <span id="chiro-pending-count" style="color:var(--amber);"></span></div>
+          <div id="chiro-pending-list"><div class="bc-no-changes">No queued changes</div></div>
+          <div style="margin-top:auto;display:flex;flex-direction:column;gap:7px;">
+            <button class="btn amb" id="chiro-apply-btn" style="display:none;" onclick="chiroApplyChanges()">Apply All Changes to Bot</button>
+            <button class="btn" id="chiro-github-btn" onclick="chiroPushToGithub()" title="Commits current prompt to src/prompts/chiro.js and pushes to GitHub, triggering Railway redeploy" style="border-color:var(--purple);color:var(--purple);">&#8593; Push to GitHub</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ====== SANDBOX ====== -->
@@ -1661,6 +1731,7 @@ function loadCurrentTab() {
     case 'tab-elevenlabs': loadElevenLabs(); break;
     case 'tab-ep': loadEp(); break;
     case 'tab-botconsole': loadBotConsole(); break;
+    case 'tab-chiro-bot': chiroLoadPending(); break;
   }
 }
 
@@ -5350,6 +5421,199 @@ async function pollTestResult(id, btn) {
     loadNotifications();
   };
   setTimeout(poll, 2000);
+}
+
+// ========== CHIRO BOT ==========
+let chiroConsoleBotHistory = [];
+let chiroActiveTab = 'sandbox';
+
+function chiroBotSetTab(tab, el) {
+  chiroActiveTab = tab;
+  document.querySelectorAll('#tab-chiro-bot .itab').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('chiro-sandbox-panel').style.display = tab === 'sandbox' ? '' : 'none';
+  document.getElementById('chiro-console-panel').style.display = tab === 'console' ? '' : 'none';
+  if (tab === 'console') chiroLoadPending();
+}
+
+// ── Sandbox ──────────────────────────────────────────────────────────────
+function csbConfig() {
+  return {
+    message: document.getElementById('csb-input').value.trim(),
+    first_name: document.getElementById('csb-first_name').value.trim() || 'Walt',
+    bot_name: document.getElementById('csb-bot_name').value.trim() || 'Aria',
+    doctor_name: document.getElementById('csb-doctor_name').value.trim() || 'Dr. Johnson',
+    practice_name: document.getElementById('csb-practice_name').value.trim() || 'our practice',
+    office_hours: document.getElementById('csb-office_hours').value.trim() || 'Monday-Friday 8am-6pm',
+    calendar_link: document.getElementById('csb-calendar_link').value.trim()
+  };
+}
+
+function csbAppend(role, text, meta) {
+  const out = document.getElementById('csb-output');
+  if (out.querySelector('[data-placeholder]')) out.innerHTML = '';
+  const isBot = role === 'bot';
+  const wrap = document.createElement('div');
+  wrap.style.cssText = `display:flex;flex-direction:column;align-items:${isBot ? 'flex-start' : 'flex-end'};margin-bottom:10px;`;
+  (Array.isArray(text) ? text : [text]).forEach(msg => {
+    const bubble = document.createElement('div');
+    bubble.style.cssText = `max-width:80%;padding:9px 13px;border-radius:14px;font-size:13px;line-height:1.5;${isBot ? 'background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-bottom-left-radius:4px;' : 'background:var(--cyan);color:#000;font-weight:600;border-bottom-right-radius:4px;'}`;
+    bubble.textContent = msg;
+    wrap.appendChild(bubble);
+  });
+  if (meta) {
+    const m = document.createElement('div');
+    m.style.cssText = 'font-size:10px;color:var(--muted);font-family:"JetBrains Mono";margin-top:3px;';
+    m.textContent = meta;
+    wrap.appendChild(m);
+  }
+  out.appendChild(wrap);
+  out.scrollTop = out.scrollHeight;
+}
+
+async function csbSend() {
+  const cfg = csbConfig();
+  if (!cfg.message) return;
+  document.getElementById('csb-input').value = '';
+  csbAppend('user', cfg.message);
+  const btn = document.querySelector('#chiro-sandbox-panel .btn.pri');
+  if (btn) btn.disabled = true;
+  try {
+    const data = await api('/api/chiro/sandbox/chat', { method: 'POST', body: JSON.stringify(cfg) });
+    if (data.error) { csbAppend('bot', 'Error: ' + data.error); return; }
+    csbAppend('bot', data.messages, data.terminal_outcome ? `outcome: ${data.terminal_outcome}` : null);
+    if (data.terminal_outcome) {
+      const meta = document.getElementById('csb-metadata');
+      meta.style.display = '';
+      meta.textContent = `terminal_outcome: ${data.terminal_outcome}  |  message_type: ${data.message_type}`;
+    }
+  } catch (e) {
+    csbAppend('bot', 'Request failed: ' + e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function csbReset() {
+  await api('/api/chiro/sandbox/reset', { method: 'POST', body: '{}' });
+  const out = document.getElementById('csb-output');
+  out.innerHTML = '<div data-placeholder style="color:var(--muted);text-align:center;padding:40px 20px;font-size:13px;">Chat cleared. Type a message to start fresh.</div>';
+  document.getElementById('csb-metadata').style.display = 'none';
+}
+
+// ── Console ───────────────────────────────────────────────────────────────
+async function chiroLoadPending() {
+  try {
+    const data = await api('/api/chiro/console/pending');
+    const list = document.getElementById('chiro-pending-list');
+    const applyBtn = document.getElementById('chiro-apply-btn');
+    const countEl = document.getElementById('chiro-pending-count');
+    const edits = data?.edits || [];
+    countEl.textContent = edits.length ? `(${edits.length})` : '';
+    if (!edits.length) {
+      list.innerHTML = '<div class="bc-no-changes">No queued changes</div>';
+      applyBtn.style.display = 'none';
+      return;
+    }
+    list.innerHTML = edits.map(e => `
+      <div style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;">
+        <div style="color:var(--amber);font-size:10px;font-family:'JetBrains Mono';margin-bottom:3px;">${e.change_type}</div>
+        <div style="color:var(--text);line-height:1.4;">${e.description.slice(0, 150)}</div>
+      </div>`).join('');
+    applyBtn.style.display = '';
+  } catch (e) {
+    console.error('chiroLoadPending', e);
+  }
+}
+
+function chiroAppendMessage(role, text) {
+  const msgs = document.getElementById('chiro-console-messages');
+  const isBot = role === 'assistant';
+  const div = document.createElement('div');
+  div.style.cssText = `padding:10px 14px;border-bottom:1px solid var(--border);${isBot ? '' : 'background:rgba(0,212,255,.04);'}`;
+  div.innerHTML = `<div style="font-size:10px;color:var(--muted);margin-bottom:5px;font-family:'JetBrains Mono';">${isBot ? 'CLAUDE' : 'YOU'}</div><div style="font-size:13px;line-height:1.6;white-space:pre-wrap;">${text.replace(/</g,'&lt;')}</div>`;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+async function chiroConsoleSend() {
+  const input = document.getElementById('chiro-console-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  chiroAppendMessage('user', msg);
+  const btn = document.getElementById('chiro-console-send-btn');
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const data = await api('/api/chiro/console', {
+      method: 'POST',
+      body: JSON.stringify({ message: msg, history: chiroConsoleBotHistory })
+    });
+    if (!data.ok) { chiroAppendMessage('assistant', 'Error: ' + (data.error || 'unknown')); return; }
+    chiroConsoleBotHistory.push({ role: 'user', content: msg });
+    chiroConsoleBotHistory.push({ role: 'assistant', content: data.reply });
+    if (chiroConsoleBotHistory.length > 20) chiroConsoleBotHistory = chiroConsoleBotHistory.slice(-20);
+    chiroAppendMessage('assistant', data.reply);
+    if (data.queued_ids?.length) chiroLoadPending();
+  } catch (e) {
+    chiroAppendMessage('assistant', 'Request failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send';
+  }
+}
+
+function chiroClearChat() {
+  document.getElementById('chiro-console-messages').innerHTML = '';
+  chiroConsoleBotHistory = [];
+}
+
+async function chiroApplyChanges() {
+  const btn = document.getElementById('chiro-apply-btn');
+  btn.disabled = true;
+  btn.textContent = 'Applying...';
+  try {
+    const data = await api('/api/chiro/console/apply', { method: 'POST', body: '{}' });
+    if (data.ok) {
+      toast(`Applied ${data.applied} change${data.applied === 1 ? '' : 's'} to chiro bot.`, 'ok');
+      chiroLoadPending();
+    } else {
+      toast('Apply failed: ' + (data.error || 'unknown'), 'err');
+    }
+  } catch (e) {
+    toast('Apply failed: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Apply All Changes to Bot';
+  }
+}
+
+async function chiroPushToGithub() {
+  const btn = document.getElementById('chiro-github-btn');
+  btn.disabled = true;
+  btn.textContent = 'Pushing...';
+  try {
+    const data = await api('/api/chiro/push-to-github', { method: 'POST', body: '{}' });
+    if (data.ok) {
+      toast('Pushed to GitHub — Railway deploy started.', 'ok');
+      if (data.commit_url) {
+        const link = document.createElement('a');
+        link.href = data.commit_url;
+        link.target = '_blank';
+        link.textContent = `Commit ${(data.commit_sha || '').slice(0, 7)}`;
+        link.style.cssText = 'color:var(--cyan);font-size:12px;display:block;margin-top:4px;';
+        document.getElementById('chiro-console-messages').appendChild(link);
+      }
+    } else {
+      toast('Push failed: ' + (data.error || 'unknown'), 'err');
+    }
+  } catch (e) {
+    toast('Push failed: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↑ Push to GitHub';
+  }
 }
 </script>
 </body>

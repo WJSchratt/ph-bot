@@ -48,6 +48,7 @@ RULES FOR THE JSON:
 // quickly without a deploy, long enough that burst traffic doesn't hammer the
 // DB. Cleared explicitly by the QC apply-pending route after it writes.
 let overrideCache = { text: null, fetchedAt: 0, exists: false };
+let chiroOverrideCache = { text: null, fetchedAt: 0, exists: false };
 const OVERRIDE_TTL_MS = 30 * 1000;
 
 async function getSavedOverride() {
@@ -67,6 +68,25 @@ async function getSavedOverride() {
 
 function clearOverrideCache() {
   overrideCache = { text: null, fetchedAt: 0, exists: false };
+}
+
+async function getChiroOverride() {
+  const now = Date.now();
+  if (now - chiroOverrideCache.fetchedAt < OVERRIDE_TTL_MS) return chiroOverrideCache;
+  try {
+    const q = await db.query(
+      `SELECT value FROM app_settings WHERE section = 'chiro_prompt' AND key = 'current'`
+    );
+    const v = q.rows[0]?.value;
+    chiroOverrideCache = { text: v || null, fetchedAt: now, exists: !!v };
+  } catch {
+    chiroOverrideCache = { text: null, fetchedAt: now, exists: false };
+  }
+  return chiroOverrideCache;
+}
+
+function clearChiroOverrideCache() {
+  chiroOverrideCache = { text: null, fetchedAt: 0, exists: false };
 }
 
 async function selectBasePrompt(contactStage, isCa) {
@@ -145,12 +165,14 @@ ${conv.ghl_message_history || '(none)'}
 
 async function buildSystemPrompt(conv) {
   if (conv.vertical === 'chiro') {
+    const override = await getChiroOverride();
+    const base = override.exists ? override.text : chiroPrompt;
     const context = buildChiroContextBlock(conv);
-    return `${chiroPrompt}\n\n${context}\n\n${RESPONSE_FORMAT}`;
+    return `${base}\n\n${context}\n\n${RESPONSE_FORMAT}`;
   }
   const base = await selectBasePrompt(conv.contact_stage, conv.is_ca);
   const context = buildContextBlock(conv);
   return `${base}\n\n${context}\n\n${RESPONSE_FORMAT}\n\n=== KNOWLEDGE BASE ===\n\n${knowledgeBase}`;
 }
 
-module.exports = { buildSystemPrompt, selectBasePrompt, clearOverrideCache };
+module.exports = { buildSystemPrompt, selectBasePrompt, clearOverrideCache, clearChiroOverrideCache };
