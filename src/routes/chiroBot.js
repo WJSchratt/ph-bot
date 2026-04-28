@@ -326,10 +326,10 @@ router.post('/chiro/console/apply', async (req, res) => {
 // Commits the current DB prompt to src/prompts/chiro.js via GitHub API, triggering Railway redeploy
 router.post('/chiro/push-to-github', async (req, res) => {
   try {
-    const token = process.env.GITHUB_TOKEN;
+    const token = process.env.GITHUB_DEPLOY_TOKEN || process.env.GITHUB_TOKEN;
     const repo = process.env.GITHUB_REPO || 'WJSchratt/ph-bot';
     if (!token) {
-      return res.status(400).json({ error: 'GITHUB_TOKEN env var not set. Add it in Railway → Variables.' });
+      return res.status(400).json({ error: 'GITHUB_DEPLOY_TOKEN env var not set. Add it in Railway → Variables.' });
     }
 
     const currentPrompt = await getCurrentPrompt();
