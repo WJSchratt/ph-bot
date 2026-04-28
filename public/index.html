@@ -1669,6 +1669,8 @@ async function dashboardPullAll(fullRepull) {
   if (status) status.textContent = 'Done. ' + ok + ' ok, ' + failed + ' failed.';
   toast('Pull complete: ' + ok + ' ok, ' + failed + ' failed', failed ? 'err' : 'ok');
   loadDashboard();
+  // Refresh QC All tab so new conversations appear immediately without manual navigation.
+  if (qcTab === 'all') loadQcAll();
 }
 
 async function loadDashboard() {
