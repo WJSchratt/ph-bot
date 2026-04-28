@@ -209,13 +209,15 @@ async function runPipeline(submissionId, form) {
     );
   }
 
-  // ── Step 2: Get location-scoped token ─────────────────────────────────────
+  // ── Step 2: Get location-scoped token (falls back to agency token) ────────
   if (locationId) {
     const tokenRes = await step(submissionId, 'get_location_token', async () => {
       locationToken = await ghlAgency.getLocationToken(locationId);
       return { ok: !!locationToken };
     });
-    if (!tokenRes.ok) locationToken = null;
+    // PIT tokens can't be exchanged via /oauth/locationToken — fall back to
+    // the agency key directly, which GHL accepts on location-scoped endpoints.
+    if (!locationToken) locationToken = process.env.GHL_AGENCY_API_KEY || null;
   }
 
   // ── Step 3: Set all GHL custom values ─────────────────────────────────────
