@@ -2812,10 +2812,15 @@ async function loadQcAll() {
     item.className = 'conv-item';
     const srcLabel = c.source === 'claude' ? 'Claude' : c.source === 'botpress' ? 'BotPress' : 'Drip/GHL';
     const srcCls = c.source === 'claude' ? 'pill b' : c.source === 'botpress' ? 'pill a' : 'pill g';
-    const outcomeTag = c.terminal_outcome ? ' -- ' + c.terminal_outcome : '';
-    item.innerHTML = '<div class="ci-name">' + esc(c.contact_name || '(no name)') + ' -- ' + esc(c.subaccount_name || c.location_id) +
-      ' <span class="' + srcCls + '" style="margin-left:4px;font-size:10px;">' + srcLabel + '</span></div>' +
-      '<div class="ci-meta">' + fmtNum(c.message_count || 0) + ' msgs' + outcomeTag + '</div>';
+    const outcomeTag = c.terminal_outcome ? ' — ' + c.terminal_outcome : '';
+    const dateTag = c.last_message_at
+      ? new Date(c.last_message_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+      : '';
+    item.innerHTML = '<div class="ci-name" style="display:flex;align-items:center;justify-content:space-between;gap:6px;">' +
+      '<span>' + esc(c.contact_name || '(no name)') + ' <span class="' + srcCls + '" style="font-size:10px;">' + srcLabel + '</span></span>' +
+      (dateTag ? '<span style="font-size:11px;color:var(--muted);font-weight:400;white-space:nowrap;">' + esc(dateTag) + '</span>' : '') +
+      '</div>' +
+      '<div class="ci-meta">' + esc(c.subaccount_name || c.location_id) + ' — ' + fmtNum(c.message_count || 0) + ' msgs' + outcomeTag + '</div>';
     item.onclick = function() {
       list.querySelectorAll('.conv-item').forEach(function(i) { i.classList.remove('active'); });
       item.classList.add('active');
