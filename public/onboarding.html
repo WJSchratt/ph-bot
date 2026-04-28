@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Profit Hexagon — Client Onboarding</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f0f0f;
+      --surface: #1a1a1a;
+      --border: #2a2a2a;
+      --accent: #6c63ff;
+      --accent-hover: #5a52e0;
+      --text: #f0f0f0;
+      --muted: #888;
+      --error: #ff4d4f;
+    }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; min-height: 100vh; padding: 40px 16px 80px; }
+    .container { max-width: 640px; margin: 0 auto; }
+    .logo { text-align: center; margin-bottom: 40px; }
+    .logo h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+    .logo span { color: var(--accent); }
+    .logo p { color: var(--muted); font-size: 14px; margin-top: 6px; }
+
+    .section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 28px; margin-bottom: 20px; }
+    .section-title { font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin-bottom: 20px; }
+
+    .field { margin-bottom: 18px; }
+    .field:last-child { margin-bottom: 0; }
+    label { display: block; font-size: 13px; font-weight: 600; color: #ccc; margin-bottom: 6px; }
+    label .req { color: var(--error); margin-left: 2px; }
+    label .hint { font-weight: 400; color: var(--muted); font-size: 12px; margin-left: 4px; }
+    input[type="text"], input[type="email"], input[type="tel"], input[type="url"], select, textarea {
+      width: 100%; background: #111; border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text); font-size: 14px; padding: 10px 14px; outline: none; transition: border-color 0.15s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+    textarea { resize: vertical; min-height: 72px; }
+    select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 480px) { .row { grid-template-columns: 1fr; } }
+
+    .radio-group { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+    .radio-group label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 400; color: var(--text); cursor: pointer; padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; transition: border-color 0.15s, background 0.15s; margin: 0; }
+    .radio-group input[type="radio"] { display: none; }
+    .radio-group input[type="radio"]:checked + span { color: var(--accent); font-weight: 600; }
+    .radio-group label:has(input:checked) { border-color: var(--accent); background: rgba(108,99,255,0.08); }
+
+    .divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+    .submit-btn { width: 100%; background: var(--accent); color: #fff; border: none; border-radius: 10px; font-size: 16px; font-weight: 700; padding: 16px; cursor: pointer; transition: background 0.15s; margin-top: 8px; }
+    .submit-btn:hover { background: var(--accent-hover); }
+    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .note { background: rgba(108,99,255,0.08); border: 1px solid rgba(108,99,255,0.25); border-radius: 10px; padding: 16px; font-size: 13px; color: #bbb; line-height: 1.6; margin-bottom: 20px; }
+    .note strong { color: var(--accent); }
+
+    .footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 32px; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="logo">
+    <h1>Profit <span>Hexagon</span></h1>
+    <p>Client Onboarding — fill this out once and your account will be ready to go</p>
+  </div>
+
+  <div class="note">
+    <strong>What happens after you submit?</strong> We'll automatically create your AI assistant, set up your account, and reach out within 24 hours to schedule your onboarding call. Gather your calendar link, Loom videos (if you have them), and your Popl / business card link before filling this out.
+  </div>
+
+  <form action="/onboarding/submit" method="POST" id="onboardingForm">
+
+    <!-- ── Section 1: About You ── -->
+    <div class="section">
+      <div class="section-title">About You</div>
+
+      <div class="row">
+        <div class="field">
+          <label>First Name <span class="req">*</span></label>
+          <input type="text" name="agent_first_name" placeholder="Jeremiah" required>
+        </div>
+        <div class="field">
+          <label>Last Name</label>
+          <input type="text" name="agent_last_name" placeholder="Smith">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Business / Agency Name <span class="req">*</span></label>
+        <input type="text" name="business_name" placeholder="Smith Insurance Agency" required>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label>Your Phone Number <span class="req">*</span> <span class="hint">(agents will call from this)</span></label>
+          <input type="tel" name="agent_phone" placeholder="+16125551234" required>
+        </div>
+        <div class="field">
+          <label>Your Email <span class="req">*</span></label>
+          <input type="email" name="agent_email" placeholder="you@example.com" required>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Business Card / Popl Link <span class="hint">(popl.co or similar)</span></label>
+        <input type="url" name="business_card_link" placeholder="https://popl.co/profile/...">
+      </div>
+    </div>
+
+    <!-- ── Section 2: Your AI Assistant ── -->
+    <div class="section">
+      <div class="section-title">Your AI Assistant</div>
+
+      <div class="row">
+        <div class="field">
+          <label>Bot Name <span class="req">*</span> <span class="hint">(what the AI calls itself in texts)</span></label>
+          <input type="text" name="bot_name" placeholder="Frank" required>
+        </div>
+        <div class="field">
+          <label>Meeting Type <span class="req">*</span></label>
+          <select name="meeting_type" required>
+            <option value="">Select...</option>
+            <option value="Phone">Phone Call</option>
+            <option value="Zoom">Zoom</option>
+            <option value="In-Person">In-Person</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>What is your primary service? <span class="req">*</span></label>
+        <select name="vertical" required id="verticalSelect">
+          <option value="">Select...</option>
+          <option value="mp">Mortgage Protection</option>
+          <option value="fx">Final Expense</option>
+          <option value="both">Both MP + FX</option>
+          <option value="chiropractic">Chiropractic</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>General Meeting / Calendly Link</label>
+        <input type="url" name="meeting_link" placeholder="https://calendly.com/yourname">
+      </div>
+
+      <div id="insuranceFields">
+        <div class="row">
+          <div class="field">
+            <label>GHL Calendar Link — Mortgage Protection</label>
+            <input type="url" name="calendar_link_mp" placeholder="https://...">
+          </div>
+          <div class="field">
+            <label>GHL Calendar Link — Final Expense</label>
+            <input type="url" name="calendar_link_fx" placeholder="https://...">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Section 3: Resources ── -->
+    <div class="section">
+      <div class="section-title">Resources</div>
+
+      <div class="row">
+        <div class="field">
+          <label>Loom Video — Mortgage Protection <span class="hint">(optional)</span></label>
+          <input type="url" name="loom_video_mp" placeholder="https://loom.com/share/...">
+        </div>
+        <div class="field">
+          <label>Loom Video — Final Expense <span class="hint">(optional)</span></label>
+          <input type="url" name="loom_video_fx" placeholder="https://loom.com/share/...">
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Section 4: Language ── -->
+    <div class="section">
+      <div class="section-title">Language</div>
+
+      <div class="field">
+        <label>Which languages will your AI bot need to handle? <span class="req">*</span></label>
+        <div class="radio-group">
+          <label><input type="radio" name="language" value="en" checked><span>English only</span></label>
+          <label><input type="radio" name="language" value="es"><span>Spanish only</span></label>
+          <label><input type="radio" name="language" value="both"><span>Both (English + Spanish)</span></label>
+        </div>
+      </div>
+
+      <div class="field" id="marketplaceField" style="display:none;">
+        <label>Marketplace Type <span class="hint">(ACA clients only)</span></label>
+        <select name="marketplace_type">
+          <option value="">Not applicable</option>
+          <option value="ACA">ACA / Marketplace</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- ── Section 5: Phone Setup ── -->
+    <div class="section">
+      <div class="section-title">Phone Setup</div>
+
+      <div class="field">
+        <label>Preferred Area Code(s) for SMS Number <span class="hint">(comma separated — e.g. 612, 651)</span></label>
+        <input type="text" name="area_codes" placeholder="612, 651, 763">
+      </div>
+    </div>
+
+    <!-- ── Section 6: Plan ── -->
+    <div class="section">
+      <div class="section-title">Your Plan</div>
+
+      <div class="field">
+        <label>Which plan did you sign up for?</label>
+        <div class="radio-group">
+          <label><input type="radio" name="plan" value="trial"><span>Trial ($1)</span></label>
+          <label><input type="radio" name="plan" value="basic"><span>Basic ($100/mo)</span></label>
+          <label><input type="radio" name="plan" value="pro"><span>Pro ($500/mo)</span></label>
+        </div>
+      </div>
+    </div>
+
+    <button type="submit" class="submit-btn" id="submitBtn">Submit — Set Up My Account</button>
+  </form>
+
+  <div class="footer">Profit Hexagon &mdash; Your information is stored securely and used only to configure your account.</div>
+</div>
+
+<script>
+  const verticalSelect = document.getElementById('verticalSelect');
+  const insuranceFields = document.getElementById('insuranceFields');
+  const marketplaceField = document.getElementById('marketplaceField');
+
+  verticalSelect.addEventListener('change', () => {
+    const v = verticalSelect.value;
+    insuranceFields.style.display = (v === 'mp' || v === 'fx' || v === 'both') ? '' : 'none';
+    marketplaceField.style.display = (v === 'mp' || v === 'fx' || v === 'both') ? '' : 'none';
+  });
+
+  document.getElementById('onboardingForm').addEventListener('submit', (e) => {
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    btn.textContent = 'Setting up your account...';
+  });
+</script>
+</body>
+</html>

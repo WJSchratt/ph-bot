@@ -517,6 +517,14 @@ async function applyMigrations() {
       await pool.query(el2Sql);
       console.log('[migrate] elevenlabs_calls.call_number ensured');
     }
+
+    // Onboarding submissions table + subaccounts extended columns
+    const ob3Path = path.join(__dirname, '..', '..', 'db', 'migrations', '003_create_onboarding.sql');
+    if (fs.existsSync(ob3Path)) {
+      const ob3Sql = fs.readFileSync(ob3Path, 'utf8');
+      await pool.query(ob3Sql);
+      console.log('[migrate] onboarding_submissions + subaccounts columns ensured');
+    }
 }
 
 // CLI entry point — when run as `node src/db/migrate.js` or `npm run migrate`.

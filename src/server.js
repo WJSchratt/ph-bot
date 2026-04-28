@@ -26,6 +26,7 @@ const cronRoutes = require('./routes/cron');
 const jobsRouter = require('./routes/jobs');
 const elevenlabsWebhookRouter = require('./routes/elevenlabsWebhook');
 const elevenlabsApiRouter = require('./routes/elevenlabsApi');
+const onboardingRouter = require('./routes/onboarding');
 const conversationStore = require('./services/conversationStore');
 const ghl = require('./services/ghl');
 const logger = require('./services/logger');
@@ -50,6 +51,8 @@ app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 // (login) and admin-only endpoints (users CRUD); those gate themselves inline.
 app.use('/webhook', webhookRouter);
 app.use('/api/auth', authRouter);
+// Public client onboarding form — no auth required
+app.use('/onboarding', onboardingRouter);
 
 // Everything else under /api/*, /sandbox/*, /cron/* requires a valid session token.
 app.use('/api', requireAuth);
