@@ -27,6 +27,7 @@ const jobsRouter = require('./routes/jobs');
 const elevenlabsWebhookRouter = require('./routes/elevenlabsWebhook');
 const elevenlabsApiRouter = require('./routes/elevenlabsApi');
 const chiroBotRouter = require('./routes/chiroBot');
+const chiroDemoChatRouter = require('./routes/chiroDemoChat');
 const onboardingRouter = require('./routes/onboarding');
 const notificationsRouter = require('./routes/notifications');
 const conversationStore = require('./services/conversationStore');
@@ -55,6 +56,8 @@ app.use('/webhook', webhookRouter);
 app.use('/api/auth', authRouter);
 // Public client onboarding form — no auth required
 app.use('/onboarding', onboardingRouter);
+// Public chiro demo chat — used by ph-chiropractor Vercel site, no auth
+app.use('/', chiroDemoChatRouter);
 
 // Everything else under /api/*, /sandbox/*, /cron/* requires a valid session token.
 app.use('/api', requireAuth);
