@@ -1386,7 +1386,24 @@ textarea.form-input{resize:vertical;min-height:80px;}
 
 <!-- ====== EP ====== -->
 <div class="tab-content" id="tab-ep">
-  <div class="sh"><span class="sh-title">EP · After Hours Research Caller</span><div class="sh-line"></div>
+
+  <!-- Review Queue -->
+  <div style="margin-bottom:28px;">
+    <div class="sh" style="margin-bottom:12px;">
+      <span class="sh-title">Review Queue</span><div class="sh-line"></div>
+      <span id="rq-stat-pending"  style="font-size:12px;color:var(--muted);">Pending <b id="rq-cnt-p" style="color:#111827;">—</b></span>
+      <span style="color:var(--border2);margin:0 6px;">·</span>
+      <span id="rq-stat-approved" style="font-size:12px;color:var(--muted);">Approved <b id="rq-cnt-a" style="color:#16a34a;">—</b></span>
+      <span style="color:var(--border2);margin:0 6px;">·</span>
+      <span style="font-size:12px;color:var(--muted);">Disqualified <b id="rq-cnt-d" style="color:#dc2626;">—</b></span>
+      <button class="btn pri" style="margin-left:auto;" onclick="loadEpReview()">Refresh</button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Last 7 days · Approve sends to video pipeline · <kbd style="background:#1a2436;border:1px solid #253447;border-radius:3px;padding:0 4px;font-size:11px;color:#c8d8e8;">Space</kbd> play &nbsp;<kbd style="background:#1a2436;border:1px solid #253447;border-radius:3px;padding:0 4px;font-size:11px;color:#c8d8e8;">A</kbd> approve &nbsp;<kbd style="background:#1a2436;border:1px solid #253447;border-radius:3px;padding:0 4px;font-size:11px;color:#c8d8e8;">D</kbd> disqualify &nbsp;<kbd style="background:#1a2436;border:1px solid #253447;border-radius:3px;padding:0 4px;font-size:11px;color:#c8d8e8;">↑↓</kbd> navigate</div>
+    <div id="rq-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+  </div>
+
+  <!-- All EP Calls -->
+  <div class="sh" style="margin-bottom:10px;"><span class="sh-title">All EP Calls</span><div class="sh-line"></div>
     <input class="finput" id="ep-start-date" type="date" onchange="loadEp()">
     <input class="finput" id="ep-end-date" type="date" onchange="loadEp()">
     <button class="btn pri" onclick="loadEp()">Refresh</button>
@@ -1729,7 +1746,7 @@ function loadCurrentTab() {
     case 'tab-devconsole': loadDevConsole(); break;
     case 'tab-weekly': loadWeeklyTab(); break;
     case 'tab-elevenlabs': loadElevenLabs(); break;
-    case 'tab-ep': loadEp(); break;
+    case 'tab-ep': loadEpReview(); loadEp(); break;
     case 'tab-botconsole': loadBotConsole(); break;
     case 'tab-chiro-bot': chiroLoadPending(); break;
   }
@@ -5294,6 +5311,102 @@ async function loadEp() {
     </table>`;
   buildPager(document.getElementById('ep-pager'), epState, r.total, loadEp);
 }
+
+// ── EP Review Queue ─────────────────────────────────────────────────────────
+let rqActive = null;
+
+async function loadEpReview() {
+  const el = document.getElementById('rq-list');
+  el.innerHTML = '<div style="color:var(--muted);padding:20px;">Loading...</div>';
+  const r = await api('/ep-review/api/calls');
+  if (!r || !r.ok) { el.innerHTML = '<div style="color:var(--red);padding:20px;">Failed to load.</div>'; return; }
+  document.getElementById('rq-cnt-p').textContent = r.stats.pending;
+  document.getElementById('rq-cnt-a').textContent = r.stats.approved;
+  document.getElementById('rq-cnt-d').textContent = r.stats.disqualified;
+  if (!r.calls.length) {
+    el.innerHTML = '<div style="color:var(--muted);padding:40px;text-align:center;">All caught up — no calls pending for the last 7 days.</div>';
+    return;
+  }
+  el.innerHTML = r.calls.map(c => {
+    const dt = c.start_time ? new Date(c.start_time).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true}) : '';
+    const status = c.review_status || 'pending';
+    const leftBar = status === 'approved' ? '#16a34a' : status === 'disqualified' ? '#dc2626' : 'transparent';
+    return `<div id="rqcard-${c.conversation_id}" data-id="${c.conversation_id}" onclick="rqSelect('${c.conversation_id}')"
+      style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px 18px;display:grid;grid-template-columns:180px 1fr 180px;gap:18px;align-items:center;cursor:pointer;position:relative;border-left:3px solid ${leftBar};">
+      <div>
+        <div style="font-size:14px;font-weight:600;color:#111827;">${c.external_number || ''}</div>
+        <div style="font-size:12px;color:#9ca3af;margin-top:3px;">${c.day_of_week_called || ''} · ${dt} · ${c.duration_secs || 0}s</div>
+        <div id="rqlbl-${c.conversation_id}" style="font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;color:${status==='approved'?'#16a34a':status==='disqualified'?'#dc2626':'#d1d5db'}">${status !== 'pending' ? status : ''}</div>
+        ${c.video_url ? `<a href="${c.video_url}" target="_blank" style="font-size:11px;color:#3b82f6;text-decoration:none;margin-top:3px;display:block;">Watch video</a>` : ''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        ${c.has_audio
+          ? `<audio id="rqaudio-${c.conversation_id}" controls preload="none" src="/ep-review/audio/${c.conversation_id}" style="width:100%;height:30px;"></audio>`
+          : `<span style="font-size:12px;color:#9ca3af;">No audio on file</span>`}
+        <textarea id="rqnotes-${c.conversation_id}" placeholder="Notes (optional)" rows="2"
+          style="width:100%;border:1px solid #e5e7eb;border-radius:5px;background:#f9fafb;padding:6px 8px;font-size:12px;font-family:inherit;color:#374151;resize:none;outline:none;">${c.review_notes || ''}</textarea>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:7px;">
+        <button onclick="rqDecide(event,'${c.conversation_id}','approved')"
+          style="width:100%;padding:8px 0;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;background:#111827;color:#fff;border:1px solid #111827;">Approve</button>
+        <button onclick="rqDecide(event,'${c.conversation_id}','disqualified')"
+          style="width:100%;padding:8px 0;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;background:#fff;color:#dc2626;border:1px solid #fca5a5;">Disqualify</button>
+      </div>
+    </div>`;
+  }).join('');
+  const first = r.calls.find(c => (c.review_status || 'pending') === 'pending');
+  if (first) rqSelect(first.conversation_id);
+}
+
+function rqSelect(id) {
+  if (rqActive) {
+    const prev = document.getElementById('rqcard-' + rqActive);
+    if (prev) prev.style.boxShadow = '';
+  }
+  rqActive = id;
+  const card = document.getElementById('rqcard-' + id);
+  if (card) card.style.boxShadow = '0 0 0 2px #111827';
+}
+
+async function rqDecide(evt, id, status) {
+  evt.stopPropagation();
+  const notes = document.getElementById('rqnotes-' + id)?.value || '';
+  const r = await api('/ep-review/api/review', { method: 'POST', body: { conv_id: id, status, notes } });
+  if (!r || !r.ok) { alert('Save failed'); return; }
+  const card = document.getElementById('rqcard-' + id);
+  const lbl  = document.getElementById('rqlbl-' + id);
+  const color = status === 'approved' ? '#16a34a' : '#dc2626';
+  if (card) card.style.borderLeft = `3px solid ${color}`;
+  if (lbl)  { lbl.textContent = status; lbl.style.color = color; }
+  // update stats
+  const sr = await api('/ep-review/api/stats');
+  if (sr) {
+    document.getElementById('rq-cnt-p').textContent = sr.pending;
+    document.getElementById('rq-cnt-a').textContent = sr.approved;
+    document.getElementById('rq-cnt-d').textContent = sr.disqualified;
+  }
+  // advance to next pending
+  const all = Array.from(document.querySelectorAll('#rq-list > div'));
+  const idx = all.findIndex(c => c.dataset.id === id);
+  for (let i = idx + 1; i < all.length; i++) {
+    const lbl2 = document.getElementById('rqlbl-' + all[i].dataset.id);
+    if (!lbl2 || !lbl2.textContent.trim()) { rqSelect(all[i].dataset.id); all[i].scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (!rqActive) return;
+  if (!document.getElementById('tab-ep')?.classList.contains('active')) return;
+  if (['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+  const audio = document.getElementById('rqaudio-' + rqActive);
+  const all   = Array.from(document.querySelectorAll('#rq-list > div'));
+  const idx   = all.findIndex(c => c.dataset.id === rqActive);
+  if (e.code === 'Space') { e.preventDefault(); audio && (audio.paused ? audio.play() : audio.pause()); }
+  else if (e.key === 'a' || e.key === 'A') rqDecide({ stopPropagation:()=>{} }, rqActive, 'approved');
+  else if (e.key === 'd' || e.key === 'D') rqDecide({ stopPropagation:()=>{} }, rqActive, 'disqualified');
+  else if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); if (idx < all.length-1) { rqSelect(all[idx+1].dataset.id); all[idx+1].scrollIntoView({ behavior:'smooth', block:'center' }); } }
+  else if (e.key === 'ArrowUp'   || e.key === 'k') { e.preventDefault(); if (idx > 0)            { rqSelect(all[idx-1].dataset.id); all[idx-1].scrollIntoView({ behavior:'smooth', block:'center' }); } }
+});
 
 // ── Notifications ──────────────────────────────────────────────────────────
 async function loadNotifications() {

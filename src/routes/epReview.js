@@ -315,4 +315,42 @@ router.post('/ep-review/api/cleanup', async (req, res) => {
   }
 });
 
+// JSON endpoint for SPA
+router.get('/ep-review/api/calls', async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT conversation_id,
+             external_number,
+             start_time,
+             duration_secs,
+             day_of_week_called,
+             audio_bytes IS NOT NULL AS has_audio,
+             COALESCE(review_status, 'pending') AS review_status,
+             review_notes,
+             video_url
+      FROM elevenlabs_calls
+      WHERE is_ep = TRUE
+        AND call_result = 'voicemail'
+        AND start_time > NOW() - INTERVAL '7 days'
+      ORDER BY
+        (CASE WHEN COALESCE(review_status,'pending') = 'pending' THEN 0 ELSE 1 END),
+        start_time DESC
+      LIMIT 300
+    `);
+    const statsRes = await db.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE COALESCE(review_status,'pending') = 'pending') AS pending,
+        COUNT(*) FILTER (WHERE review_status = 'approved')                    AS approved,
+        COUNT(*) FILTER (WHERE review_status = 'disqualified')                AS disqualified
+      FROM elevenlabs_calls
+      WHERE is_ep = TRUE
+        AND call_result = 'voicemail'
+        AND start_time > NOW() - INTERVAL '7 days'
+    `);
+    res.json({ ok: true, calls: result.rows, stats: statsRes.rows[0] });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;
