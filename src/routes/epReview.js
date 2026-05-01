@@ -276,7 +276,7 @@ router.post('/ep-review/api/review', async (req, res) => {
   if (!conv_id || !status) return res.status(400).json({ ok: false });
   try {
     await db.query(
-      `UPDATE elevenlabs_calls SET review_status=$1, outcome_type='voicemail', review_notes=$2 WHERE conversation_id=$3`,
+      `UPDATE elevenlabs_calls SET review_status=$1, review_notes=$2 WHERE conversation_id=$3`,
       [status, notes || '', conv_id]
     );
     res.json({ ok: true });
