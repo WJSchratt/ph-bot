@@ -119,8 +119,16 @@ app.use('/api', notificationsRouter);
 app.use('/sandbox', sandboxRouter);
 app.use('/cron', cronRoutes.router);
 
-// EP voicemail review queue — auth required
-app.use('/', requireAuth, epReviewRouter);
+// EP voicemail review queue — redirect to login if no session
+app.use('/', (req, res, next) => {
+  if (!req.path.startsWith('/ep-review')) return next();
+  const { extractToken, getSession } = require('./services/auth');
+  const token = extractToken(req);
+  const session = token && getSession(token);
+  if (!session) return res.redirect('/?redirect=' + encodeURIComponent(req.originalUrl));
+  req.session = session;
+  next();
+}, epReviewRouter);
 
 // Static dashboard served last; login page is also static.
 app.use('/', express.static(path.join(__dirname, '..', 'public')));
