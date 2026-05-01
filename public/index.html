@@ -5371,7 +5371,7 @@ function rqSelect(id) {
 async function rqDecide(evt, id, status) {
   evt.stopPropagation();
   const notes = document.getElementById('rqnotes-' + id)?.value || '';
-  const r = await api('/ep-review/api/review', { method: 'POST', body: { conv_id: id, status, notes } });
+  const r = await api('/ep-review/api/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conv_id: id, status, notes }) });
   if (!r || !r.ok) { alert('Save failed'); return; }
   const card = document.getElementById('rqcard-' + id);
   const lbl  = document.getElementById('rqlbl-' + id);
