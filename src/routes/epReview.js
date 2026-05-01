@@ -315,6 +315,116 @@ router.post('/ep-review/api/cleanup', async (req, res) => {
   }
 });
 
+// Public prospect landing page — no auth, linked from email
+const BUNNY_LIBRARY_ID = process.env.BUNNY_LIBRARY_ID || '650848';
+
+router.get('/watch/:video_id', (req, res) => {
+  const { video_id } = req.params;
+  if (!/^[a-f0-9-]{36}$/i.test(video_id)) return res.status(404).send('Not found');
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>We Called Your Business — Watch What Happened</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0a0a0a;
+  color: #f5f5f5;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 20px 80px;
+}
+.wordmark {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #737373;
+  margin-bottom: 40px;
+}
+.headline {
+  text-align: center;
+  max-width: 600px;
+  margin-bottom: 36px;
+}
+.headline h1 {
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  font-weight: 700;
+  line-height: 1.25;
+  color: #fff;
+  letter-spacing: -.3px;
+}
+.headline p {
+  font-size: 15px;
+  color: #737373;
+  margin-top: 10px;
+}
+.player {
+  width: 100%;
+  max-width: 800px;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.06), 0 24px 60px rgba(0,0,0,.6);
+}
+.player iframe {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16/9;
+  border: none;
+}
+.cta {
+  margin-top: 40px;
+  text-align: center;
+}
+.cta p { font-size: 14px; color: #737373; margin-bottom: 16px; }
+.cta a {
+  display: inline-block;
+  background: #fff;
+  color: #0a0a0a;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 13px 36px;
+  border-radius: 7px;
+  text-decoration: none;
+  letter-spacing: -.1px;
+  transition: opacity .12s;
+}
+.cta a:hover { opacity: .88; }
+footer {
+  margin-top: 60px;
+  font-size: 12px;
+  color: #404040;
+}
+</style>
+</head>
+<body>
+<div class="wordmark">Profit Hexagon</div>
+<div class="headline">
+  <h1>We called your business last night.<br>Here's what happened.</h1>
+  <p>Watch the recording — it takes about 3 minutes.</p>
+</div>
+<div class="player">
+  <iframe
+    src="https://iframe.mediadelivery.net/embed/${BUNNY_LIBRARY_ID}/${video_id}?autoplay=true&loop=false&muted=false&preload=true&responsive=true"
+    loading="lazy"
+    allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
+    allowfullscreen>
+  </iframe>
+</div>
+<div class="cta">
+  <p>Ready to stop missing after-hours revenue?</p>
+  <a href="https://profithexagon.com/book" target="_blank">Book Your Free Audit</a>
+</div>
+<footer>Profit Hexagon &nbsp;&middot;&nbsp; profithexagon.com</footer>
+</body>
+</html>`);
+});
+
 // JSON endpoint for SPA
 router.get('/ep-review/api/calls', async (req, res) => {
   try {
