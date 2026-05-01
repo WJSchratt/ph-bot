@@ -29,6 +29,7 @@ const elevenlabsApiRouter = require('./routes/elevenlabsApi');
 const chiroBotRouter = require('./routes/chiroBot');
 const chiroDemoChatRouter = require('./routes/chiroDemoChat');
 const onboardingRouter = require('./routes/onboarding');
+const epReviewRouter = require('./routes/epReview');
 const notificationsRouter = require('./routes/notifications');
 const conversationStore = require('./services/conversationStore');
 const ghl = require('./services/ghl');
@@ -117,6 +118,9 @@ app.use('/api', chiroBotRouter);
 app.use('/api', notificationsRouter);
 app.use('/sandbox', sandboxRouter);
 app.use('/cron', cronRoutes.router);
+
+// EP voicemail review queue — auth required
+app.use('/', requireAuth, epReviewRouter);
 
 // Static dashboard served last; login page is also static.
 app.use('/', express.static(path.join(__dirname, '..', 'public')));
