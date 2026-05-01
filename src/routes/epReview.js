@@ -418,7 +418,7 @@ footer {
 </div>
 <div class="cta">
   <p>Ready to stop missing after-hours revenue?</p>
-  <a href="https://profithexagon.com/book" target="_blank">Book Your Free Audit</a>
+  <a href="https://links.profithexagon.com/widget/bookings/implementation-call-automation" target="_blank">Book Your Free Audit</a>
 </div>
 <footer>Profit Hexagon &nbsp;&middot;&nbsp; profithexagon.com</footer>
 </body>
