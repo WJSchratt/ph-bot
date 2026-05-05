@@ -1743,4 +1743,29 @@ router.post('/qc/refresh-conversation', async (req, res) => {
   }
 });
 
+// ============================================================
+// Sync file-based standard.js → DB override
+// Fixes the "I edited standard.js but production still uses old prompt"
+// problem. Reads the current standard.js content and saves it as the
+// DB override so the bot picks it up within 30 seconds.
+// ============================================================
+router.post('/qc/sync-standard-to-db', async (req, res) => {
+  try {
+    const standardText = require('../prompts/standard');
+    const { clearOverrideCache } = require('../prompts');
+    await db.query(
+      `INSERT INTO app_settings (section, key, value)
+       VALUES ('analyzer_prompt', 'current', $1)
+       ON CONFLICT (section, key) DO UPDATE SET value = EXCLUDED.value`,
+      [standardText]
+    );
+    clearOverrideCache();
+    logger.log('qc', 'info', null, 'sync-standard-to-db: file synced to DB override', { by: req.session?.username });
+    res.json({ ok: true, message: 'standard.js synced to live bot. Changes active within 30 seconds.' });
+  } catch (err) {
+    logger.log('qc', 'error', null, 'sync-standard-to-db failed', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

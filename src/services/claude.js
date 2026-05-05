@@ -86,7 +86,7 @@ async function generateResponse(conversation, history, newUserMessage, contact_i
     response = await callAnthropic(
       {
         model: MODEL,
-        max_tokens: 1024,
+        max_tokens: 2048,
         system: [
           { type: 'text', text: system, cache_control: { type: 'ephemeral' } }
         ],

@@ -695,6 +695,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
     <button class="btn" id="qc-flush-btn" onclick="qcApplyPending()" style="background:var(--amber);color:#000;display:none;font-weight:700;">
       <span id="qc-flush-count">0</span> edits pending — apply
     </button>
+    <button class="btn" onclick="qcSyncStandardToDb()" style="background:rgba(16,217,138,.15);border:1px solid var(--green);color:var(--green);font-size:11px;" title="Copy standard.js → DB so the live bot picks up recent file edits within 30s">&#8593; Sync file → live bot</button>
   </div>
 
   <!-- Prominent source tabs (All / Claude / Archive / Cluster). -->
@@ -2873,6 +2874,13 @@ async function qcApplyPending() {
   if (!res) { toast('Apply failed.', 'err'); return; }
   toast('Applied ' + (res.applied || 0) + ' edits. Prompt updated.', 'ok');
   refreshPendingEditsCounter();
+}
+
+async function qcSyncStandardToDb() {
+  if (!confirm('Overwrite the live bot prompt with the current standard.js file contents?\n\nThis fixes "I edited the file but production ignored it" — replaces the DB override with whatever is in standard.js right now.')) return;
+  const res = await api('/api/qc/sync-standard-to-db', { method: 'POST' });
+  if (!res) { toast('Sync failed.', 'err'); return; }
+  toast('standard.js synced to live bot. Active in ~30 seconds.', 'ok');
 }
 
 // ----- Tabs within QC Portal -----
