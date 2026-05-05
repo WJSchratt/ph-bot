@@ -730,6 +730,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
           <strong id="qc-lead-name">Select a conversation</strong>
           <span class="qc-lead-meta" id="qc-lead-meta" style="display:block;font-size:13px;color:var(--muted);margin-top:4px;"></span>
         </div>
+        <button class="btn-sm" id="qc-refresh-conv-btn" onclick="qcRefreshConversation()" style="display:none;font-size:11px;padding:3px 10px;background:rgba(0,212,255,.1);border:1px solid var(--cyan);color:var(--cyan);" title="Re-pull this conversation's messages from GHL">⟳ Refresh</button>
         <span class="pill a" id="qc-status-pill">Pending QC</span>
       </div>
       <div class="conv-messages" id="qc-messages">
@@ -2749,6 +2750,7 @@ async function loadConversation(id, convMeta) {
   document.getElementById('qc-lead-meta').textContent = (conv.product_type || '') + ' -- ' + fmtNum((data.thread || []).length) + ' msgs' + (conv.terminal_outcome ? ' -- ' + conv.terminal_outcome : '') + (data.fallback === 'local_only' ? ' · local-only (not yet pulled)' : '');
   renderQcThread(data.thread || []);
   qcpSetConv(id, name || 'this conversation');
+  qcSetRefreshTarget(data.ghl_conversation_id || null, conv.location_id || null);
 }
 
 // Source → badge style + label.
@@ -3392,11 +3394,53 @@ async function loadBotpressConversation(convId, locationId, meta) {
   if (!data) return;
   selectedQcConvId = null;
   const conv = data.conversation || {};
-  const name = conv.contact_name || '(no name)';
+  const name = conv.contact_name || meta?.contact_name || '(no name)';
   document.getElementById('qc-lead-name').innerHTML = esc(name) + ' <span class="pill a" style="margin-left:6px;">ARCHIVE</span>';
   document.getElementById('qc-lead-meta').textContent = (conv.contact_phone || '') + ' -- ' + fmtNum((data.thread || []).length) + ' msgs' + (conv.terminal_outcome ? ' -- ' + conv.terminal_outcome : '');
   renderQcThread(data.thread || []);
-  qcpSetConv(null, name); // no local conv id for archive, but still set the label
+  qcpSetConv(null, name);
+  qcSetRefreshTarget(convId, locationId);
+}
+
+// ========== QC PER-CONTACT REFRESH ==========
+
+let _qcRefreshConvId = null;
+let _qcRefreshLocId = null;
+let _qcRefreshing = false;
+
+function qcSetRefreshTarget(ghlConvId, locationId) {
+  _qcRefreshConvId = ghlConvId || null;
+  _qcRefreshLocId = locationId || null;
+  const btn = document.getElementById('qc-refresh-conv-btn');
+  if (btn) btn.style.display = (ghlConvId && locationId) ? '' : 'none';
+}
+
+async function qcRefreshConversation() {
+  if (_qcRefreshing || !_qcRefreshConvId || !_qcRefreshLocId) return;
+  _qcRefreshing = true;
+  const btn = document.getElementById('qc-refresh-conv-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⟳ Refreshing…'; }
+  try {
+    const res = await api('/api/qc/refresh-conversation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ghl_conversation_id: _qcRefreshConvId, location_id: _qcRefreshLocId })
+    });
+    if (!res || !res.ok) {
+      toast('Refresh failed: ' + (res?.error || 'unknown'), 'err');
+    } else {
+      toast((res.messages_pulled || 0) + ' messages refreshed from GHL.', 'ok');
+      // Reload the thread in place. Preserve the contact name from the DOM.
+      const nameEl = document.getElementById('qc-lead-name');
+      const name = (nameEl?.textContent || '').replace('ARCHIVE', '').trim();
+      loadBotpressConversation(_qcRefreshConvId, _qcRefreshLocId, { contact_name: name });
+    }
+  } catch (e) {
+    toast('Refresh error: ' + e.message, 'err');
+  } finally {
+    _qcRefreshing = false;
+    if (btn) { btn.disabled = false; btn.textContent = '⟳ Refresh'; }
+  }
 }
 
 async function loadQcClusterPicker() {

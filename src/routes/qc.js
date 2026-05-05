@@ -1695,4 +1695,52 @@ router.get('/qc/sync-status', async (req, res) => {
   }
 });
 
+// POST /qc/refresh-conversation — re-pulls a single conversation's messages
+// from GHL and updates ghl_messages in place. Used by the per-contact refresh
+// button in the QC portal so reviewers can get fresh messages without waiting
+// for the next daily repull.
+router.post('/qc/refresh-conversation', async (req, res) => {
+  try {
+    const { ghl_conversation_id, location_id } = req.body || {};
+    if (!ghl_conversation_id || !location_id) {
+      return res.status(400).json({ error: 'ghl_conversation_id and location_id required' });
+    }
+    const token = await findGhlTokenForLocationLocal(location_id);
+    if (!token) return res.status(400).json({ error: 'No GHL token found for this location' });
+
+    const ghlConvSvc = require('../services/ghlConversations');
+    const result = await ghlConvSvc.pullMessagesWithRetry(token, ghl_conversation_id);
+    if (!result.ok) {
+      return res.status(502).json({ error: 'GHL fetch failed: ' + result.error });
+    }
+    const filtered = result.messages.filter(ghlConvSvc.isSmsMessage);
+    await ghlConvSvc.replaceMessagesForConversation(ghl_conversation_id, location_id, filtered);
+
+    // Keep ghl_conversations aggregates current so message_count and source stay accurate.
+    const convIdQ = await db.query(
+      `SELECT contact_id FROM ghl_conversations WHERE ghl_conversation_id = $1 AND location_id = $2`,
+      [ghl_conversation_id, location_id]
+    );
+    const convRow = { id: ghl_conversation_id, contactId: convIdQ.rows[0]?.contact_id, location_id };
+    const classification = ghlConvSvc.classifyConversation(convRow, filtered, new Set());
+    const lastMs = filtered.reduce((acc, m) => {
+      const t = new Date(m.dateAdded || m.created || 0).getTime();
+      return t > acc ? t : acc;
+    }, 0);
+    await ghlConvSvc.updateConversationAggregates(ghl_conversation_id, location_id, {
+      source: classification.source,
+      messageCount: filtered.length,
+      lastMessageAt: lastMs ? new Date(lastMs).toISOString() : null
+    });
+
+    logger.log('qc', 'info', null, 'refresh-conversation complete', {
+      ghl_conversation_id, location_id, messages_pulled: filtered.length
+    });
+    res.json({ ok: true, messages_pulled: filtered.length });
+  } catch (err) {
+    logger.log('qc', 'error', null, 'refresh-conversation failed', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
