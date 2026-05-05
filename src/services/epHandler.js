@@ -280,11 +280,12 @@ async function finalizeEpRecording(conversationId, audioUrl) {
     logger.log('ep', 'warn', conversationId, 'No call_recording custom field in EP folder; skipping GHL recording update', {});
     return;
   }
-  const absoluteUrl = audioUrl && !audioUrl.startsWith('http')
-    ? ((process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '') + audioUrl)
-    : audioUrl;
+  // Use the public /recording/ path so prospects can play the audio from
+  // the outreach email without needing dashboard auth.
+  const base = (process.env.PUBLIC_BASE_URL || 'https://web-production-f3109.up.railway.app').replace(/\/$/, '');
+  const publicUrl = `${base}/recording/${encodeURIComponent(conversationId)}`;
   const res = await updateContactCustomFields(row.ghl_contact_id, [
-    { id: recHit.id, key: recHit.key, field_value: absoluteUrl || audioUrl }
+    { id: recHit.id, key: recHit.key, field_value: publicUrl }
   ]);
   if (!res.ok) {
     logger.log('ep', 'error', conversationId, 'GHL recording-url update failed', {
