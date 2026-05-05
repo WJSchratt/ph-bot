@@ -31,6 +31,7 @@ const chiroDemoChatRouter = require('./routes/chiroDemoChat');
 const onboardingRouter = require('./routes/onboarding');
 const epReviewRouter = require('./routes/epReview');
 const notificationsRouter = require('./routes/notifications');
+const auditRouter = require('./routes/audit');
 const conversationStore = require('./services/conversationStore');
 const ghl = require('./services/ghl');
 const logger = require('./services/logger');
@@ -59,6 +60,22 @@ app.use('/api/auth', authRouter);
 app.use('/onboarding', onboardingRouter);
 // Public chiro demo chat — used by ph-chiropractor Vercel site, no auth
 app.use('/', chiroDemoChatRouter);
+
+// Public audio playback for EP recording links in outreach emails.
+// No auth required — ElevenLabs conversation IDs are long opaque strings.
+app.get('/recording/:conversation_id', async (req, res) => {
+  try {
+    const store = require('./services/elevenlabsStore');
+    const row = await store.getAudioBytes(req.params.conversation_id);
+    if (!row || !row.audio_bytes) return res.status(404).send('Recording not found');
+    res.setHeader('Content-Type', row.audio_mime || 'audio/mpeg');
+    res.setHeader('Content-Length', row.audio_bytes.length);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.end(row.audio_bytes);
+  } catch (err) {
+    res.status(500).send('Error loading recording');
+  }
+});
 
 // Everything else under /api/*, /sandbox/*, /cron/* requires a valid session token.
 app.use('/api', requireAuth);
@@ -116,6 +133,7 @@ app.use('/api', jobsRouter);
 app.use('/api', elevenlabsApiRouter);
 app.use('/api', chiroBotRouter);
 app.use('/api', notificationsRouter);
+app.use('/api', auditRouter);
 app.use('/sandbox', sandboxRouter);
 app.use('/cron', cronRoutes.router);
 
