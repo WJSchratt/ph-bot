@@ -2798,6 +2798,7 @@ function renderQcThread(thread) {
 async function qcAction(outcome) {
   if (!selectedQcConvId) { toast('Select a conversation first.'); return; }
   const feedbackText = document.getElementById('qc-feedback-input').value.trim();
+  const modText = null; // replacement text goes through qcFlagSubmit — not inline here
 
   const body = { conversation_id: selectedQcConvId, reviewer: 'admin', outcome };
   if (outcome === 'modified' || outcome === 'failed') {
