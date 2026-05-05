@@ -420,6 +420,17 @@ textarea.form-input{resize:vertical;min-height:80px;}
 .dc-modal{background:var(--surface);border:1px solid var(--border2);border-radius:10px;padding:20px;max-width:80vw;max-height:80vh;overflow:auto;}
 .dc-modal pre{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;font-family:'JetBrains Mono';font-size:11px;white-space:pre-wrap;max-height:60vh;overflow:auto;color:var(--text);}
 
+/* CHANGES TAB */
+.ch-entry{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;cursor:pointer;transition:border-color .15s;}
+.ch-entry:hover{border-color:var(--cyan);}
+.ch-entry.active{border-color:var(--amber);background:rgba(245,158,11,.06);}
+.ch-entry-desc{font-size:12px;color:var(--text);line-height:1.55;margin-bottom:4px;word-break:break-word;}
+.ch-entry-meta{font-size:10px;color:var(--muted);display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.ch-layout{display:flex;gap:12px;height:calc(100vh - 160px);min-height:0;}
+.ch-list-panel{width:300px;flex-shrink:0;background:var(--surface);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;padding:14px;gap:10px;overflow:hidden;}
+.ch-list-scroll{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;}
+.ch-empty{color:var(--muted);font-size:12px;text-align:center;padding:24px 0;line-height:1.7;}
+
 /* MISC */
 .divider{height:1px;background:var(--border);margin:13px 0;}
 .dim-text{color:var(--muted);font-size:12px;}
@@ -497,6 +508,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
   <div class="nav-item" data-tab="tab-weekly" onclick="goTab('tab-weekly')"><span class="nav-icon">&#9112;</span> Weekly Summary</div>
   <div class="nav-section">AI Management</div>
   <div class="nav-item" data-tab="tab-qc" onclick="goTab('tab-qc')"><span class="nav-icon">&#9678;</span> QC Portal <span class="nav-badge nb-amber" id="nav-qc-badge"></span></div>
+  <div class="nav-item" data-tab="tab-changes" onclick="goTab('tab-changes')"><span class="nav-icon">&#9658;</span> Changes <span class="nav-badge nb-amber" id="nav-changes-badge" style="display:none;"></span></div>
   <div class="nav-item" data-tab="tab-review" onclick="goTab('tab-review')"><span class="nav-icon">&#8635;</span> AI Review Queue <span class="nav-badge nb-red" id="nav-review-badge"></span></div>
   <div class="nav-item" data-tab="tab-chiro-bot" onclick="goTab('tab-chiro-bot')"><span class="nav-icon">&#9876;</span> Chiro Bot <span class="nav-badge nb-cyan">NEW</span></div>
   <div class="nav-section">Tools</div>
@@ -752,16 +764,10 @@ textarea.form-input{resize:vertical;min-height:80px;}
         </div>
       </div>
 
-      <div class="qc-acts" style="flex-wrap:wrap;gap:8px;">
-        <div style="display:flex;gap:8px;align-items:center;width:100%;flex-wrap:wrap;">
-          <button class="btn grn" onclick="qcAction('approved')">Approve</button>
-          <button class="btn dan" onclick="qcAction('failed')">Mark Failed</button>
-          <button class="btn amb" onclick="qcAction('modified')">Save &amp; Train</button>
-          <span class="qc-score" id="qc-accuracy-display" style="margin-left:auto;"></span>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:6px;width:100%;">
-          <input type="text" placeholder="Notes — what the bot did wrong (e.g. 'asked the same question twice', 'revealed AI unprompted')..." id="qc-feedback-input" style="width:100%;">
-        </div>
+      <div class="qc-acts" style="gap:10px;">
+        <button class="btn grn" style="flex:1;font-size:14px;" onclick="qcApprove()">&#10003; Approved</button>
+        <button class="btn dan" style="flex:1;font-size:14px;" onclick="openNotApprovedModal()">&#10007; Not Approved</button>
+        <span class="qc-score" id="qc-accuracy-display" style="margin-left:auto;font-size:12px;"></span>
       </div>
       <div class="qcp-chat">
         <div class="qcp-chat-header">
@@ -802,6 +808,61 @@ textarea.form-input{resize:vertical;min-height:80px;}
           <div id="qbc-pending-list"><div class="bc-no-changes">No queued changes</div></div>
           <button class="btn amb" id="qbc-apply-btn" style="display:none;margin-top:auto;" onclick="qbcApplyChanges()">Apply All Changes to Bot</button>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ====== NOT APPROVED MODAL ====== -->
+<div id="not-approved-modal" class="dc-modal-backdrop" style="display:none;" onclick="if(event.target===this)closeNotApprovedModal()">
+  <div class="dc-modal" style="width:500px;max-width:92vw;">
+    <div style="font-size:17px;font-weight:700;color:#fff;margin-bottom:6px;">Not Approved</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px;">What did the bot do wrong? <span style="color:var(--dim);">(optional — leave blank to just flag it)</span></div>
+    <textarea id="not-approved-text" rows="4" placeholder="e.g. 'Used banned phrase appreciate you reaching out' / 'Asked DOB twice' / 'Gave a price range instead of pushing to book after 3 price asks'..." style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:7px;font-family:'Rajdhani';font-size:13px;outline:none;resize:vertical;margin-bottom:14px;" onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();submitNotApproved();}"></textarea>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn" onclick="closeNotApprovedModal()" style="color:var(--muted);">Cancel</button>
+      <button class="btn dan" onclick="submitNotApproved()">Submit &amp; Next</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== CHANGES TAB ====== -->
+<div class="tab-content" id="tab-changes">
+  <div class="sh">
+    <span class="sh-title">Changes</span><div class="sh-line"></div>
+    <div style="font-size:12px;color:var(--muted);">Queued fixes from Not Approved reviews. Chat with Claude to refine, then push them live.</div>
+    <button class="btn grn" id="ch-push-btn" style="display:none;margin-left:auto;" onclick="changesPushLive()">&#9650; Push Changes to Live Bot</button>
+  </div>
+  <div id="ch-push-status" class="confirm-banner" style="display:none;margin-bottom:12px;"></div>
+
+  <div class="ch-layout">
+    <!-- Left: pending changes list -->
+    <div class="ch-list-panel">
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+        <span style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:700;">Pending Changes</span>
+        <span id="ch-count" style="color:var(--amber);font-weight:700;font-size:13px;"></span>
+      </div>
+      <div class="ch-list-scroll" id="ch-entries">
+        <div class="ch-empty">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Right: Claude chat panel -->
+    <div class="bc-chat" style="flex:1;min-width:0;">
+      <div class="dc-chat-top" style="align-items:center;gap:8px;flex-wrap:wrap;">
+        <strong style="color:#fff;flex-shrink:0;">Chat with Claude</strong>
+        <select id="ch-entry-sel" class="fsel" style="flex:1;min-width:160px;max-width:400px;" onchange="chSelectEntry()">
+          <option value="">— pick a change to discuss —</option>
+        </select>
+        <button class="btn-sm" id="ch-discard-btn" style="display:none;background:rgba(255,69,96,.12);border-color:var(--red);color:var(--red);" onclick="chDiscardSelected()">Discard</button>
+        <button class="btn-sm" style="margin-left:4px;" onclick="chClearChat()">Clear chat</button>
+      </div>
+      <div class="dc-messages" id="ch-messages">
+        <div style="color:var(--muted);font-size:12px;text-align:center;padding:30px 20px;line-height:1.8;">Select a change from the left panel, then chat with Claude to figure out the exact fix.<br>When ready, click <strong style="color:var(--green);">Push Changes to Live Bot</strong> above.</div>
+      </div>
+      <div class="dc-input-row">
+        <textarea class="dc-input" id="ch-input" rows="2" placeholder="What should the bot have said instead? What rule needs updating? Ctrl+Enter to send." onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();chSend();}"></textarea>
+        <button class="btn pri" id="ch-send-btn" onclick="chSend()">Send</button>
       </div>
     </div>
   </div>
@@ -1741,6 +1802,7 @@ function loadCurrentTab() {
       else if (qcTab === 'console') loadQcConsole();
       refreshPendingEditsCounter();
       break;
+    case 'tab-changes': loadChangesTab(); break;
     case 'tab-review': loadReviewQueue(); break;
     case 'tab-logs': loadLogs(); startLogRefresh(); break;
     case 'tab-settings': loadSettingsData(); break;
@@ -2798,13 +2860,9 @@ function renderQcThread(thread) {
 
 async function qcAction(outcome) {
   if (!selectedQcConvId) { toast('Select a conversation first.'); return; }
-  const feedbackText = document.getElementById('qc-feedback-input').value.trim();
-  const modText = null; // replacement text goes through qcFlagSubmit — not inline here
+  const modText = null;
 
   const body = { conversation_id: selectedQcConvId, reviewer: 'admin', outcome };
-  if (outcome === 'modified' || outcome === 'failed') {
-    if (feedbackText) body.notes = feedbackText;
-  }
   const res = await api('/api/qc/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!res) { toast('Failed to submit QC review.'); return; }
 
@@ -2842,7 +2900,6 @@ async function qcAction(outcome) {
   }
 
   toast('QC review submitted: ' + outcome + (queued.length ? ' (' + queued.length + ' edit' + (queued.length > 1 ? 's' : '') + ' queued)' : ''));
-  document.getElementById('qc-feedback-input').value = '';
   loadQC();
   refreshPendingEditsCounter();
 }
@@ -2881,6 +2938,408 @@ async function qcSyncStandardToDb() {
   const res = await api('/api/qc/sync-standard-to-db', { method: 'POST' });
   if (!res) { toast('Sync failed.', 'err'); return; }
   toast('standard.js synced to live bot. Active in ~30 seconds.', 'ok');
+}
+
+// ========== QC REVIEW — APPROVED / NOT APPROVED ==========
+
+let _qcConvList = []; // shadow of current qc conversation list for auto-advance
+
+async function qcApprove() {
+  if (!selectedQcConvId) { toast('Select a conversation first.'); return; }
+  const res = await api('/api/qc/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conversation_id: selectedQcConvId, reviewer: 'admin', outcome: 'approved' })
+  });
+  if (!res) { toast('Failed to submit.', 'err'); return; }
+  toast('Approved.');
+  await qcAdvanceAfterReview();
+}
+
+function openNotApprovedModal() {
+  if (!selectedQcConvId) { toast('Select a conversation first.'); return; }
+  document.getElementById('not-approved-text').value = '';
+  document.getElementById('not-approved-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('not-approved-text').focus(), 80);
+}
+
+function closeNotApprovedModal() {
+  document.getElementById('not-approved-modal').style.display = 'none';
+}
+
+async function submitNotApproved() {
+  const notes = document.getElementById('not-approved-text').value.trim();
+  closeNotApprovedModal();
+
+  // Submit the QC review as failed
+  const reviewRes = await api('/api/qc/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      conversation_id: selectedQcConvId,
+      reviewer: 'admin',
+      outcome: 'failed',
+      notes: notes || null
+    })
+  });
+  if (!reviewRes) { toast('Failed to submit review.', 'err'); return; }
+
+  // Queue a pending change if there's a description
+  if (notes) {
+    await api('/api/pending-changes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'qc',
+        change_type: 'behavioral_feedback',
+        description: `Reviewer flagged conversation ${selectedQcConvId}: ${notes}. Adjust the system prompt so the bot avoids this pattern.`,
+        example_conversation_id: selectedQcConvId
+      })
+    });
+  } else {
+    // Blank submission: still queue a generic fix entry so it shows in Changes
+    await api('/api/pending-changes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'qc',
+        change_type: 'correction',
+        description: `Conversation ${selectedQcConvId} flagged as Not Approved (no description provided). Review the conversation thread and identify what the bot did wrong.`,
+        example_conversation_id: selectedQcConvId
+      })
+    });
+  }
+
+  toast('Not Approved queued. Advancing…');
+  refreshPendingEditsCounter();
+  refreshChangesBadge();
+  await qcAdvanceAfterReview();
+}
+
+async function qcAdvanceAfterReview() {
+  // Re-fetch the list, then auto-select the first unreviewed conversation.
+  const prevId = selectedQcConvId;
+  selectedQcConvId = null;
+
+  // Clear the panel
+  document.getElementById('qc-lead-name').textContent = 'Loading next…';
+  document.getElementById('qc-messages').innerHTML = '';
+
+  // Reload stats
+  const stats = await api('/api/qc/stats');
+  if (stats) {
+    document.getElementById('qc-stat-pending').textContent = fmtNum(stats.pending);
+    document.getElementById('qc-stat-approved').textContent = fmtNum(stats.approved);
+    document.getElementById('qc-stat-failed').textContent = fmtNum(stats.failed);
+    document.getElementById('qc-stat-modified').textContent = fmtNum(stats.modified);
+    const badge = document.getElementById('nav-qc-badge');
+    if (stats.pending > 0) { badge.textContent = stats.pending; } else { badge.textContent = ''; }
+  }
+
+  // Reload conversation list (pending-only)
+  const params = new URLSearchParams({ page: '1', limit: '50' });
+  if (qcTab === 'all' || qcTab === 'claude') params.set('all', 'true');
+  const data = await api('/api/qc/pending?' + params.toString());
+  if (!data) return;
+
+  const list = document.getElementById('qc-conv-list');
+  list.innerHTML = '';
+  const convs = data.conversations || [];
+  document.getElementById('qc-list-header').textContent = 'Pending Review (' + (data.total || 0) + ')';
+
+  if (!convs.length) {
+    list.innerHTML = '<div style="color:var(--muted);padding:24px;text-align:center;">All caught up! No more pending reviews.</div>';
+    document.getElementById('qc-lead-name').textContent = 'No more conversations';
+    return;
+  }
+
+  // Render new list and auto-select first item that isn't the one just reviewed
+  let firstItem = null;
+  convs.forEach(c => {
+    const item = document.createElement('div');
+    item.className = 'conv-item';
+    const outcomeTag = c.terminal_outcome ? ' -- ' + c.terminal_outcome : ' -- in-progress';
+    item.innerHTML = '<div class="ci-name">' + esc((c.first_name || '') + ' ' + (c.last_name || '')) + ' -- ' + esc(c.subaccount_name || c.product_type || '') + '</div>' +
+      '<div class="ci-meta">' + fmtNum(c.message_count) + ' msgs' + outcomeTag + '</div>';
+    item.onclick = () => {
+      list.querySelectorAll('.conv-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+      loadConversation(c.id, c);
+    };
+    list.appendChild(item);
+    if (!firstItem && c.id !== prevId) firstItem = { item, conv: c };
+  });
+
+  // Auto-select
+  if (firstItem) {
+    firstItem.item.classList.add('active');
+    loadConversation(firstItem.conv.id, firstItem.conv);
+  }
+}
+
+// ========== CHANGES TAB ==========
+
+let chHistory = [];
+let chSelectedId = null;
+let chEntries = [];
+
+async function loadChangesTab() {
+  const res = await api('/api/qc/pending-edits');
+  if (!res) return;
+  chEntries = res.edits || [];
+  _renderChangesList();
+}
+
+function _renderChangesList() {
+  const edits = chEntries;
+
+  // Update badge & push button
+  const badge = document.getElementById('nav-changes-badge');
+  const pushBtn = document.getElementById('ch-push-btn');
+  const countEl = document.getElementById('ch-count');
+  if (edits.length > 0) {
+    badge.textContent = edits.length;
+    badge.style.display = '';
+    pushBtn.style.display = '';
+    countEl.textContent = edits.length;
+  } else {
+    badge.style.display = 'none';
+    pushBtn.style.display = 'none';
+    countEl.textContent = '';
+  }
+
+  // Reset discard btn
+  document.getElementById('ch-discard-btn').style.display = 'none';
+
+  const el = document.getElementById('ch-entries');
+  const sel = document.getElementById('ch-entry-sel');
+
+  if (!edits.length) {
+    el.innerHTML = '<div class="ch-empty">No pending changes.<br><br>Mark conversations <strong style="color:var(--red);">Not Approved</strong> in the QC Portal to queue fixes here.</div>';
+    sel.innerHTML = '<option value="">— no pending changes —</option>';
+    return;
+  }
+
+  el.innerHTML = '';
+  sel.innerHTML = '<option value="">— pick a change to discuss —</option>';
+
+  for (const e of edits) {
+    const desc = (e.description || '').slice(0, 220);
+    const shortDesc = desc.length > 80 ? desc.slice(0, 80) + '…' : desc;
+    const ts = e.created_at
+      ? new Date(e.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : '';
+    const typeLbl = e.change_type ? `<span class="pill a" style="font-size:9px;">${esc(e.change_type.replace(/_/g, ' '))}</span>` : '';
+
+    const card = document.createElement('div');
+    card.className = 'ch-entry' + (e.id === chSelectedId ? ' active' : '');
+    card.dataset.id = e.id;
+    card.innerHTML = `<div class="ch-entry-meta">${typeLbl}<span>${esc(ts)}</span></div><div class="ch-entry-desc">${esc(desc)}</div>`;
+    card.onclick = () => chSelectById(e.id);
+    el.appendChild(card);
+
+    const opt = document.createElement('option');
+    opt.value = e.id;
+    opt.textContent = shortDesc;
+    if (e.id === chSelectedId) opt.selected = true;
+    sel.appendChild(opt);
+  }
+}
+
+function chSelectById(id) {
+  chSelectedId = id;
+  // Highlight card
+  document.querySelectorAll('#ch-entries .ch-entry').forEach(c => {
+    c.classList.toggle('active', Number(c.dataset.id) === id);
+  });
+  document.getElementById('ch-entry-sel').value = id;
+  document.getElementById('ch-discard-btn').style.display = '';
+
+  // If the chat is empty, insert a context hint
+  const chatEl = document.getElementById('ch-messages');
+  if (!chatEl.querySelector('.dc-msg')) {
+    const entry = chEntries.find(e => e.id === id);
+    if (entry) {
+      const hint = document.createElement('div');
+      hint.style.cssText = 'color:var(--muted);font-size:11px;padding:8px 12px;border-left:2px solid var(--border2);margin:8px 0;line-height:1.6;';
+      hint.textContent = 'Discussing: ' + (entry.description || '').slice(0, 160);
+      chatEl.appendChild(hint);
+    }
+  }
+}
+
+function chSelectEntry() {
+  const val = document.getElementById('ch-entry-sel').value;
+  if (val) chSelectById(Number(val));
+}
+
+function chClearChat() {
+  chHistory = [];
+  document.getElementById('ch-messages').innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center;padding:30px 20px;line-height:1.8;">Chat cleared. Select a change from the left to start.</div>';
+}
+
+async function chSend() {
+  const inp = document.getElementById('ch-input');
+  const msg = inp.value.trim();
+  if (!msg) return;
+  inp.value = '';
+
+  const messagesEl = document.getElementById('ch-messages');
+  // Clear placeholder on first real message
+  const placeholder = messagesEl.querySelector('[data-placeholder]');
+  if (placeholder) placeholder.remove();
+
+  const userBubble = document.createElement('div');
+  userBubble.className = 'dc-msg user';
+  userBubble.innerHTML = '<span class="dc-msg-role">You</span><div class="dc-msg-body">' + esc(msg) + '</div>';
+  messagesEl.appendChild(userBubble);
+
+  const thinkBubble = document.createElement('div');
+  thinkBubble.className = 'dc-msg assistant';
+  thinkBubble.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--muted);">Thinking…</div>';
+  messagesEl.appendChild(thinkBubble);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  chHistory.push({ role: 'user', content: msg });
+
+  const entry = chEntries.find(e => e.id === chSelectedId);
+  const sendBtn = document.getElementById('ch-send-btn');
+  sendBtn.disabled = true;
+
+  try {
+    // Prepend change context to the message for the first turn
+    const contextMsg = entry && chHistory.length === 1
+      ? `[Context: Reviewing queued change — ${entry.description?.slice(0, 200) || '(no description)'}]\n\n${msg}`
+      : msg;
+
+    const res = await api('/api/qc/console', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: contextMsg,
+        history: chHistory.slice(-10),
+        conversation_id: entry?.example_conversation_id || null
+      })
+    });
+
+    thinkBubble.remove();
+
+    if (!res) {
+      const eb = document.createElement('div');
+      eb.className = 'dc-msg assistant';
+      eb.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--red);">Request failed.</div>';
+      messagesEl.appendChild(eb);
+    } else {
+      chHistory.push({ role: 'assistant', content: res.reply || '' });
+      const ab = document.createElement('div');
+      ab.className = 'dc-msg assistant';
+      let body = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body">' + esc(res.reply || '') + '</div>';
+      if (res.queued_ids && res.queued_ids.length) {
+        body += '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;">'
+          + '<span style="font-size:11px;color:var(--amber);">&#10003; ' + res.queued_ids.length + ' change(s) queued</span>'
+          + '</div>';
+        // Refresh the list silently
+        setTimeout(() => api('/api/qc/pending-edits').then(r => { if (r) { chEntries = r.edits || []; _renderChangesList(); } }), 400);
+      }
+      const convLinks = buildConvActionLinks(res.actions);
+      if (convLinks) body += convLinks;
+      ab.innerHTML = body;
+      messagesEl.appendChild(ab);
+    }
+  } catch (e) {
+    thinkBubble.remove();
+    const eb = document.createElement('div');
+    eb.className = 'dc-msg assistant';
+    eb.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--red);">Error: ' + esc(e.message) + '</div>';
+    messagesEl.appendChild(eb);
+  }
+
+  sendBtn.disabled = false;
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+async function chDiscardSelected() {
+  if (!chSelectedId) { toast('Select a change first.'); return; }
+  if (!confirm('Discard this pending change? This cannot be undone.')) return;
+  const res = await api('/api/pending-changes/' + chSelectedId + '/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'rejected' })
+  });
+  if (!res) { toast('Failed to discard.', 'err'); return; }
+  toast('Change discarded.');
+  chSelectedId = null;
+  document.getElementById('ch-discard-btn').style.display = 'none';
+  document.getElementById('ch-messages').innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center;padding:30px 20px;">Change discarded. Select another from the left.</div>';
+  chHistory = [];
+  // Reload
+  const r = await api('/api/qc/pending-edits');
+  if (r) { chEntries = r.edits || []; _renderChangesList(); }
+  refreshPendingEditsCounter();
+}
+
+async function changesPushLive() {
+  const countRes = await api('/api/qc/pending-edits-count');
+  if (!countRes || !countRes.pending) { toast('No pending changes to push.'); return; }
+
+  if (!confirm(`Push ${countRes.pending} change(s) to the live bot?\n\nClaude will merge all queued changes into the system prompt. The bot will use the new prompt within 30 seconds.\nGitHub will also be updated — Railway will auto-deploy.`)) return;
+
+  const pushBtn = document.getElementById('ch-push-btn');
+  const statusEl = document.getElementById('ch-push-status');
+  const origLabel = pushBtn.innerHTML;
+  pushBtn.disabled = true;
+  pushBtn.textContent = 'Merging…';
+  statusEl.style.display = 'none';
+
+  // Step 1: apply-pending (Claude merges + saves to DB)
+  const applyRes = await api('/api/qc/apply-pending', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dry_run: false })
+  });
+
+  if (!applyRes) {
+    pushBtn.disabled = false;
+    pushBtn.innerHTML = origLabel;
+    toast('Apply failed — check Logs.', 'err');
+    return;
+  }
+
+  statusEl.style.display = '';
+  statusEl.textContent = `✓ ${applyRes.applied} change(s) merged. Bot prompt updated — live within 30 seconds.`;
+  pushBtn.textContent = 'Committing to GitHub…';
+
+  // Step 2: commit to GitHub (triggers Railway auto-deploy)
+  const commitRes = await api('/api/qc/commit-prompt-to-github', { method: 'POST' });
+  if (commitRes && commitRes.ok) {
+    statusEl.textContent += ' GitHub committed — Railway auto-deploying now.';
+    toast('Changes live! ' + applyRes.applied + ' edit(s) applied. Railway deploying.', 'ok');
+  } else {
+    const why = commitRes?.error || 'unknown error';
+    statusEl.textContent += ` (GitHub commit skipped: ${why} — bot is still live via DB)`;
+    toast('Changes live via DB. GitHub commit skipped: ' + why, 'ok');
+  }
+
+  pushBtn.disabled = false;
+  pushBtn.innerHTML = origLabel;
+
+  // Reload changes list, clear chat
+  chSelectedId = null;
+  chHistory = [];
+  document.getElementById('ch-messages').innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center;padding:30px 20px;line-height:1.8;">Changes pushed! The bot is live with the updated prompt.<br>Any new Not Approved reviews will appear here.</div>';
+  const r = await api('/api/qc/pending-edits');
+  if (r) { chEntries = r.edits || []; _renderChangesList(); }
+  refreshPendingEditsCounter();
+}
+
+async function refreshChangesBadge() {
+  try {
+    const r = await api('/api/qc/pending-edits-count');
+    if (!r) return;
+    const badge = document.getElementById('nav-changes-badge');
+    if (r.pending > 0) { badge.textContent = r.pending; badge.style.display = ''; }
+    else { badge.style.display = 'none'; }
+  } catch {}
 }
 
 // ----- Tabs within QC Portal -----
@@ -5165,12 +5624,14 @@ function applyRoleVisibility(role) {
   loadDashboard();
   refreshHealthBadge();
   refreshPendingChangesBadge();
+  refreshChangesBadge();
   // Background badge refreshers — longer intervals + pause when tab is hidden
   // so an open-but-inactive dashboard tab doesn't hammer Postgres all night.
   const badgeTick = () => {
     if (document.visibilityState !== 'visible') return;
     refreshHealthBadge();
     refreshPendingChangesBadge();
+    refreshChangesBadge();
   };
   setInterval(badgeTick, 5 * 60 * 1000);
   document.addEventListener('visibilitychange', () => {

@@ -1,4 +1,5 @@
 const express = require('express');
+const axios = require('axios');
 const db = require('../db');
 const store = require('../services/conversationStore');
 const claude = require('../services/claude');
@@ -6,6 +7,39 @@ const logger = require('../services/logger');
 const { callAnthropic } = require('../services/anthropic');
 const { parseTags, determineContactStage, determineProductType, determineIsCa } = require('../utils/parser');
 const router = express.Router();
+
+const GH_OWNER = 'WJSchratt';
+const GH_REPO = 'ph-bot';
+const GH_FILE = 'src/prompts/standard.js';
+
+async function commitPromptToGitHub(promptText) {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) return { ok: false, error: 'GITHUB_TOKEN not set in environment' };
+  const headers = { Authorization: `Bearer ${token}`, 'User-Agent': 'ph-bot', Accept: 'application/vnd.github+json' };
+  const apiBase = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_FILE}`;
+
+  // Escape backticks and ${} so the template literal in the file stays valid.
+  const escaped = promptText
+    .replace(/\\/g, '\\\\')
+    .replace(/`/g, '\\`')
+    .replace(/\$\{/g, '\\${');
+  const fileContent = `module.exports = \`${escaped}\`;\n`;
+
+  try {
+    const getRes = await axios.get(apiBase, { headers });
+    const sha = getRes.data.sha;
+    const contentB64 = Buffer.from(fileContent).toString('base64');
+    await axios.put(apiBase, {
+      message: 'chore: sync standard.js from QC apply-pending [skip ci]',
+      content: contentB64,
+      sha
+    }, { headers });
+    return { ok: true };
+  } catch (err) {
+    const detail = err.response?.data?.message || err.message;
+    return { ok: false, error: detail };
+  }
+}
 
 const SAMPLE_PROFILES = [
   { first_name: 'Linda', state: 'FL', offer: 'Final Expense', existing_age: '68', existing_smoker: 'no', existing_health: 'high blood pressure', persona: 'easy_close' },
@@ -1740,6 +1774,32 @@ router.post('/qc/refresh-conversation', async (req, res) => {
   } catch (err) {
     logger.log('qc', 'error', null, 'refresh-conversation failed', { error: err.message });
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// Commit the current live prompt (DB override) back to standard.js on GitHub.
+// Railway detects the push and auto-deploys, keeping the file canonical.
+// Requires GITHUB_TOKEN env var on Railway. Called by the Changes tab after
+// apply-pending succeeds.
+// ============================================================
+router.post('/qc/commit-prompt-to-github', async (req, res) => {
+  try {
+    const analyzerModule = require('./analyzer');
+    const currentPrompt = await analyzerModule.getCurrentPrompt();
+    if (!currentPrompt) {
+      return res.status(400).json({ ok: false, error: 'No live prompt found — run apply-pending first' });
+    }
+    const result = await commitPromptToGitHub(currentPrompt);
+    if (result.ok) {
+      logger.log('qc', 'info', null, 'commit-prompt-to-github: success', { by: req.session?.username });
+    } else {
+      logger.log('qc', 'warn', null, 'commit-prompt-to-github: failed', { error: result.error });
+    }
+    res.json(result);
+  } catch (err) {
+    logger.log('qc', 'error', null, 'commit-prompt-to-github error', { error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
