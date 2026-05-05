@@ -3579,8 +3579,7 @@ let chEntries = [];
 
 async function loadChangesTab() {
   const res = await api('/api/qc/pending-edits');
-  if (!res) return;
-  chEntries = res.edits || [];
+  chEntries = res ? (res.edits || []) : [];
   _renderChangesList();
 }
 
