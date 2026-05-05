@@ -1116,7 +1116,7 @@ router.get('/qc/pending-edits-count', async (req, res) => {
 router.get('/qc/pending-edits', async (req, res) => {
   try {
     const q = await db.query(
-      `SELECT id, source, change_type, description, instruction, proposed_by, created_at
+      `SELECT id, source, change_type, description, proposed_by, created_at
          FROM pending_prompt_changes
         WHERE status = 'pending'
         ORDER BY created_at ASC
