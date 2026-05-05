@@ -7,6 +7,7 @@ const calendar = require('../services/calendar');
 const { firePostCallRouter } = require('../services/postCallRouter');
 const ghlPipeline = require('../services/ghlPipeline');
 const logger = require('../services/logger');
+const db = require('../db');
 
 const router = express.Router();
 
@@ -172,6 +173,26 @@ router.post('/inbound', async (req, res) => {
     if (/^📞|inbound call to |missed call (to|from) |voicemail from |answered \(\d+/i.test(trimmedBody)) {
       logger.log('webhook', 'info', contactId, 'Skipped non-SMS inbound by body pattern', { body_preview: trimmedBody.slice(0, 100) });
       return res.status(200).json({ ok: true, skipped: 'call/activity log body' });
+    }
+
+    // GHL retries webhook delivery on timeout (~30s, 5min, 30min intervals).
+    // If we've already logged an identical inbound from this contact in the
+    // last 5 minutes, this is a retry — skip it to avoid duplicate bot replies.
+    if (parsed.contact_id && trimmedBody) {
+      const dupCheck = await db.query(
+        `SELECT id FROM messages
+         WHERE contact_id = $1 AND direction = 'inbound' AND content = $2
+           AND created_at > NOW() - INTERVAL '5 minutes'
+         LIMIT 1`,
+        [parsed.contact_id, trimmedBody]
+      );
+      if (dupCheck.rows.length) {
+        logger.log('webhook', 'info', contactId, 'Duplicate inbound suppressed', {
+          existing_message_id: dupCheck.rows[0].id,
+          contact_id: parsed.contact_id
+        });
+        return res.status(200).json({ ok: true, skipped: 'duplicate' });
+      }
     }
 
     const conv = await store.upsertConversation(parsed);

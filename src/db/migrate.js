@@ -563,6 +563,14 @@ async function applyMigrations() {
       CREATE INDEX IF NOT EXISTS idx_pipeline_log_location ON pipeline_route_log(location_id, created_at DESC) WHERE location_id IS NOT NULL;
     `);
     console.log('[migrate] pipeline_route_log ensured');
+
+    // Fast dedup index for the GHL retry-suppression check in webhook.js.
+    // Queries contact_id + direction + created_at on every inbound message.
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_messages_contact_dir_created
+        ON messages(contact_id, direction, created_at DESC);
+    `);
+    console.log('[migrate] idx_messages_contact_dir_created ensured');
 }
 
 // CLI entry point — when run as `node src/db/migrate.js` or `npm run migrate`.
