@@ -525,6 +525,44 @@ async function applyMigrations() {
       await pool.query(ob3Sql);
       console.log('[migrate] onboarding_submissions + subaccounts columns ensured');
     }
+
+    // Clip selection columns for EP review queue — start/end in milliseconds.
+    await pool.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='elevenlabs_calls' AND column_name='clip_start_ms') THEN
+          ALTER TABLE elevenlabs_calls ADD COLUMN clip_start_ms INTEGER;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='elevenlabs_calls' AND column_name='clip_end_ms') THEN
+          ALTER TABLE elevenlabs_calls ADD COLUMN clip_end_ms INTEGER;
+        END IF;
+      END $$;
+    `);
+    console.log('[migrate] elevenlabs_calls clip columns ensured');
+
+    // Persistent pipeline routing log — survives server restarts (unlike in-memory logger).
+    // Lets us diagnose whether routeOpportunity is firing and whether GHL API calls succeed.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pipeline_route_log (
+        id BIGSERIAL PRIMARY KEY,
+        contact_id TEXT NOT NULL,
+        location_id TEXT,
+        outcome TEXT NOT NULL,
+        route_outcome TEXT,
+        opportunity_id TEXT,
+        pipeline_id TEXT,
+        stage_id TEXT,
+        prior_stage_id TEXT,
+        was_created BOOLEAN DEFAULT FALSE,
+        skipped TEXT,
+        error TEXT,
+        steps JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_pipeline_log_contact ON pipeline_route_log(contact_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_pipeline_log_created ON pipeline_route_log(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_pipeline_log_location ON pipeline_route_log(location_id, created_at DESC) WHERE location_id IS NOT NULL;
+    `);
+    console.log('[migrate] pipeline_route_log ensured');
 }
 
 // CLI entry point — when run as `node src/db/migrate.js` or `npm run migrate`.

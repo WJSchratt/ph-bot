@@ -171,7 +171,8 @@ const DEACTIVATING_OUTCOMES = new Set([
   'dnc',
   'opted_out',
   'opt_out',
-  'stop_requested'
+  'stop_requested',
+  'human_handoff'
 ]);
 
 function shouldDeactivateForOutcome(outcome) {

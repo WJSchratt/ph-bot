@@ -508,6 +508,32 @@ async function routeOpportunity(ghlToken, locationId, contactId, outcome, opts =
     handoff_reason: mapping.handoffReason,
     steps: result.steps.map((s) => ({ step: s.step, ok: s.ok }))
   });
+
+  // Persist to DB so routing history survives server restarts (in-memory logger rolls off at 200 entries).
+  try {
+    await db.query(
+      `INSERT INTO pipeline_route_log
+        (contact_id, location_id, outcome, route_outcome, opportunity_id, pipeline_id, stage_id, prior_stage_id, was_created, skipped, error, steps)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [
+        contactId,
+        locationId,
+        outcome,
+        result.target ? outcome : null,
+        result.opportunityId || null,
+        result.target?.pipelineId || null,
+        result.target?.pipelineStageId || null,
+        result.prior?.pipelineStageId || null,
+        result.created || false,
+        result.skipped || null,
+        result.error ? JSON.stringify(result.error) : null,
+        JSON.stringify(result.steps.map((s) => ({ step: s.step, ok: s.ok, error: s.error || undefined })))
+      ]
+    );
+  } catch (dbErr) {
+    logger.log('pipeline_route', 'warn', lc, 'DB log write failed', { error: dbErr.message });
+  }
+
   return result;
 }
 

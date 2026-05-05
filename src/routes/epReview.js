@@ -5,6 +5,12 @@ const router = express.Router();
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+function fmtMs(ms) {
+  if (ms == null) return '–';
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 function fmtDate(d) {
   if (!d) return '';
   const dt = d instanceof Date ? d : new Date(d);
@@ -28,7 +34,9 @@ router.get('/ep-review', async (req, res) => {
              audio_bytes IS NOT NULL AS has_audio,
              COALESCE(review_status, 'pending') AS review_status,
              review_notes,
-             video_url
+             video_url,
+             clip_start_ms,
+             clip_end_ms
       FROM elevenlabs_calls
       WHERE is_ep = TRUE
         AND call_result = 'voicemail'
@@ -74,6 +82,12 @@ router.get('/ep-review', async (req, res) => {
             ${c.has_audio
               ? `<audio id="audio-${c.conversation_id}" controls preload="none" src="/ep-review/audio/${c.conversation_id}"></audio>`
               : `<span class="no-audio">No audio on file</span>`}
+            <div class="clip-row">
+              <button class="btn-mark" onclick="markClip(event,'${c.conversation_id}','start')" title="Set clip start to current playback position">&#9646; Start</button>
+              <span class="clip-range" id="clip-${c.conversation_id}">${c.clip_start_ms != null ? fmtMs(c.clip_start_ms) + ' → ' + fmtMs(c.clip_end_ms) : 'no clip set'}</span>
+              <button class="btn-mark" onclick="markClip(event,'${c.conversation_id}','end')" title="Set clip end to current playback position">End &#9646;</button>
+              <span class="clip-saved" id="clip-saved-${c.conversation_id}"></span>
+            </div>
             <textarea class="notes" id="notes-${c.conversation_id}" placeholder="Notes (optional)" rows="2">${c.review_notes || ''}</textarea>
           </div>
           <div class="actions">
@@ -133,6 +147,11 @@ audio { width: 100%; height: 30px; }
 .btn-disqualify { background: #fff; color: #dc2626; border-color: #fca5a5; }
 .empty { text-align: center; padding: 80px 0; color: #9ca3af; }
 .empty h2 { font-size: 15px; font-weight: 500; color: #374151; margin-bottom: 4px; }
+.clip-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.btn-mark { background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px; font-family: inherit; color: #374151; padding: 3px 8px; cursor: pointer; white-space: nowrap; }
+.btn-mark:hover { background: #e5e7eb; }
+.clip-range { font-size: 11px; color: #6b7280; font-variant-numeric: tabular-nums; min-width: 80px; text-align: center; }
+.clip-saved { font-size: 11px; color: #16a34a; min-width: 36px; }
 </style>
 </head>
 <body>
@@ -165,6 +184,36 @@ ${cardsHtml}
 
 <script>
 let active = null;
+const clipState = {}; // conv_id → { start_ms, end_ms }
+
+function fmtMs(ms) {
+  if (ms == null) return '–';
+  const s = Math.floor(ms / 1000);
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
+async function markClip(evt, id, side) {
+  evt.stopPropagation();
+  const audio = document.getElementById('audio-' + id);
+  if (!audio) return;
+  const ms = Math.round(audio.currentTime * 1000);
+  if (!clipState[id]) clipState[id] = {};
+  clipState[id][side === 'start' ? 'start_ms' : 'end_ms'] = ms;
+  const { start_ms, end_ms } = clipState[id];
+  const rangeEl = document.getElementById('clip-' + id);
+  if (rangeEl) rangeEl.textContent = (start_ms != null ? fmtMs(start_ms) : '–') + ' → ' + (end_ms != null ? fmtMs(end_ms) : '–');
+  if (start_ms != null && end_ms != null) {
+    try {
+      await fetch('/ep-review/api/clip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conv_id: id, start_ms, end_ms })
+      });
+      const saved = document.getElementById('clip-saved-' + id);
+      if (saved) { saved.textContent = 'saved'; setTimeout(() => { saved.textContent = ''; }, 1500); }
+    } catch (e) { console.error('clip save failed', e); }
+  }
+}
 function allCards() { return Array.from(document.querySelectorAll('.card')); }
 function selectCard(id) {
   if (active) document.getElementById('card-' + active)?.classList.remove('active');
@@ -174,6 +223,11 @@ function selectCard(id) {
 const first = allCards().find(c => c.classList.contains('pending'));
 if (first) selectCard(first.dataset.id);
 else if (allCards()[0]) selectCard(allCards()[0].dataset.id);
+
+// Pre-populate clipState from server-rendered values
+${calls.map(c => c.clip_start_ms != null
+  ? `clipState['${c.conversation_id}'] = { start_ms: ${c.clip_start_ms}, end_ms: ${c.clip_end_ms} };`
+  : '').filter(Boolean).join('\n')}
 
 async function decide(evt, id, status) {
   evt.stopPropagation();
@@ -268,6 +322,21 @@ router.get('/ep-review/audio/:conv_id', async (req, res) => {
     res.end(data);
   } catch (err) {
     res.status(500).send('Error');
+  }
+});
+
+router.post('/ep-review/api/clip', async (req, res) => {
+  const { conv_id, start_ms, end_ms } = req.body;
+  if (!conv_id || start_ms == null || end_ms == null) return res.status(400).json({ ok: false, error: 'conv_id, start_ms, end_ms required' });
+  if (end_ms <= start_ms) return res.status(400).json({ ok: false, error: 'end_ms must be after start_ms' });
+  try {
+    await db.query(
+      `UPDATE elevenlabs_calls SET clip_start_ms=$1, clip_end_ms=$2 WHERE conversation_id=$3`,
+      [Math.round(start_ms), Math.round(end_ms), conv_id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 

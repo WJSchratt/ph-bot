@@ -206,4 +206,30 @@ router.get('/pipeline/opportunities', async (req, res) => {
   }
 });
 
+// Recent pipeline routing events — persisted to DB (survives restarts, unlike in-memory logger).
+// Use this to verify routeOpportunity is firing and whether GHL API calls are succeeding.
+router.get('/pipeline/route-log', async (req, res) => {
+  try {
+    const { contact_id, location_id, limit = 100 } = req.query;
+    const params = [];
+    const filters = [];
+    if (contact_id) { params.push(contact_id); filters.push(`contact_id = $${params.length}`); }
+    if (location_id) { params.push(location_id); filters.push(`location_id = $${params.length}`); }
+    const lim = Math.min(parseInt(limit, 10) || 100, 500);
+    params.push(lim);
+    const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+    const q = await db.query(
+      `SELECT id, contact_id, location_id, outcome, opportunity_id, pipeline_id, stage_id,
+              prior_stage_id, was_created, skipped, error, steps, created_at
+       FROM pipeline_route_log ${where}
+       ORDER BY created_at DESC
+       LIMIT $${params.length}`,
+      params
+    );
+    res.json({ rows: q.rows, count: q.rowCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
