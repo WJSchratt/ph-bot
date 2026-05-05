@@ -449,6 +449,57 @@ textarea.form-input{resize:vertical;min-height:80px;}
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-track{background:transparent;}
 ::-webkit-scrollbar-thumb{background:var(--dim);border-radius:2px;}
+
+/* ===== QC2 MODERN REVIEW LAYOUT ===== */
+@keyframes qc2-shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+.qc2-skeleton{background:linear-gradient(90deg,var(--surface2) 25%,var(--surface3) 50%,var(--surface2) 75%);background-size:400px 100%;animation:qc2-shimmer 1.2s ease-in-out infinite;border-radius:5px;}
+.qc2-header-row{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
+.qc2-header-title{font-size:15px;font-weight:700;color:#fff;letter-spacing:.5px;}
+.qc2-chips{display:flex;gap:8px;flex-wrap:wrap;}
+.qc2-chip{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;font-family:'JetBrains Mono';}
+.qc2-chip.amber{background:rgba(245,158,11,.15);color:var(--amber);border:1px solid rgba(245,158,11,.3);}
+.qc2-chip.green{background:rgba(16,217,138,.15);color:var(--green);border:1px solid rgba(16,217,138,.3);}
+.qc2-chip.red{background:rgba(255,69,96,.15);color:var(--red);border:1px solid rgba(255,69,96,.3);}
+.qc2-wrap{display:flex;gap:14px;height:calc(100vh - var(--header-h) - 88px);min-height:500px;}
+.qc2-left{width:296px;flex-shrink:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;}
+.qc2-right{flex:1;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;}
+.qc2-list-top{padding:11px 13px;border-bottom:1px solid var(--border);background:var(--surface2);display:flex;flex-direction:column;gap:7px;flex-shrink:0;}
+.qc2-search{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:6px;font-family:'Rajdhani';font-size:13px;outline:none;}
+.qc2-search:focus{border-color:var(--cyan);}
+.qc2-counter{padding:6px 14px;font-size:11px;color:var(--muted);font-family:'JetBrains Mono';border-bottom:1px solid var(--border);flex-shrink:0;}
+.qc2-list-scroll{flex:1;overflow-y:auto;}
+.qc2-card{padding:12px 15px;border-bottom:1px solid var(--border);cursor:pointer;border-left:3px solid transparent;transition:background .12s,border-color .12s;}
+.qc2-card:hover{background:rgba(0,212,255,.04);}
+.qc2-card.active{background:rgba(0,212,255,.08);border-left-color:var(--cyan);}
+.qc2-card-name{font-weight:600;font-size:14px;color:#fff;margin-bottom:4px;display:flex;align-items:center;justify-content:space-between;gap:6px;}
+.qc2-card-meta{font-size:11px;color:var(--muted);line-height:1.4;}
+.qc2-skel-card{padding:13px 15px;border-bottom:1px solid var(--border);}
+.qc2-detail-top{padding:15px 20px;border-bottom:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;gap:12px;flex-shrink:0;}
+.qc2-detail-name{font-size:17px;font-weight:700;color:#fff;}
+.qc2-detail-meta{font-size:12px;color:var(--muted);margin-top:3px;}
+.qc2-thread{flex:1;overflow-y:auto;padding:20px 22px;display:flex;flex-direction:column;gap:14px;background:var(--bg);min-height:0;}
+.qc2-empty-state{color:var(--muted);text-align:center;padding:60px 20px;font-size:14px;line-height:1.7;}
+.qc2-bbl{max-width:75%;padding:13px 17px;border-radius:14px;font-size:15px;line-height:1.55;word-wrap:break-word;}
+.qc2-bbl.inbound{background:var(--surface2);border:1px solid var(--border2);align-self:flex-start;border-bottom-left-radius:4px;}
+.qc2-bbl.outbound{background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.22);align-self:flex-end;border-bottom-right-radius:4px;cursor:pointer;transition:outline .1s;}
+.qc2-bbl.outbound:hover{outline:1px dashed rgba(255,170,0,.5);outline-offset:3px;}
+.qc2-bbl.outbound.flagged{outline:2px solid var(--amber);outline-offset:3px;}
+.qc2-bbl-lbl{font-size:11px;color:var(--muted);margin-bottom:7px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.qc2-actions{display:flex;gap:12px;padding:14px 20px;border-top:1px solid var(--border);background:var(--surface2);flex-shrink:0;}
+.qc2-btn{flex:1;padding:14px 20px;border-radius:10px;font-family:'Rajdhani';font-size:16px;font-weight:700;cursor:pointer;transition:all .15s;border:2px solid transparent;letter-spacing:.5px;}
+.qc2-btn.approve{background:var(--green);color:#001a0f;border-color:var(--green);}
+.qc2-btn.approve:hover{background:#0ec97d;}
+.qc2-btn.approve:disabled{opacity:.5;cursor:not-allowed;}
+.qc2-btn.reject{background:transparent;color:var(--red);border-color:var(--red);}
+.qc2-btn.reject:hover{background:rgba(255,69,96,.1);}
+.qc2-btn.reject.open{background:var(--red);color:#fff;}
+.qc2-rejection-panel{padding:13px 20px;background:rgba(255,69,96,.04);border-top:2px solid var(--red);flex-shrink:0;}
+.qc2-rejection-label{font-size:11px;color:var(--red);font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;}
+.qc2-rejection-input{width:100%;background:var(--surface);border:1px solid rgba(255,69,96,.4);color:var(--text);padding:9px 11px;border-radius:7px;font-family:'Rajdhani';font-size:14px;resize:none;outline:none;min-height:56px;margin-bottom:9px;box-sizing:border-box;}
+.qc2-rejection-input:focus{border-color:var(--red);}
+.qc2-rejection-btns{display:flex;gap:8px;justify-content:flex-end;}
+.qc2-chat-panel{border-top:1px solid var(--border);background:var(--surface);flex-shrink:0;max-height:210px;display:flex;flex-direction:column;}
+@media (max-width:860px){.qc2-wrap{flex-direction:column;height:auto;}.qc2-left{width:100%;max-height:260px;}}
 </style>
 </head>
 <body>
@@ -681,147 +732,100 @@ textarea.form-input{resize:vertical;min-height:80px;}
 
 <!-- ====== QC PORTAL ====== -->
 <div class="tab-content" id="tab-qc">
-  <div class="sh"><span class="sh-title">Bot Accuracy QC Portal</span><div class="sh-line"></div>
-    <div style="font-size:13px;color:var(--muted);">Review conversations, edit Claude responses. Edits queue up — apply them all in one batched Claude call when you're done.</div>
-  </div>
-
-  <!-- Hero stat cards — bigger, clearer hierarchy. -->
-  <div class="qc-hero-row" id="qc-stats-card">
-    <div class="qc-hero amber"><div class="qc-hero-num" id="qc-stat-pending">0</div><div class="qc-hero-lbl">Pending</div></div>
-    <div class="qc-hero green"><div class="qc-hero-num" id="qc-stat-approved">0</div><div class="qc-hero-lbl">Approved</div></div>
-    <div class="qc-hero red"><div class="qc-hero-num" id="qc-stat-failed">0</div><div class="qc-hero-lbl">Failed</div></div>
-    <div class="qc-hero cyan"><div class="qc-hero-num" id="qc-stat-modified">0</div><div class="qc-hero-lbl">Modified</div></div>
-  </div>
-
-  <!-- Top toolbar — 4 actions, consistent buttons. -->
-  <div class="qc-toolbar">
-    <select class="fsel" id="qc-scenario">
-      <option value="all">All scenarios</option>
-      <option value="greeting">Greeting</option>
-      <option value="qualification">Qualification</option>
-      <option value="scheduling">Scheduling</option>
-      <option value="objection_handling">Objection handling</option>
-    </select>
-    <button class="btn amb" id="qc-gen-btn" onclick="qcGenerateSamples()">Generate Sample Wordtracks</button>
-    <button class="btn pri" onclick="pullRandomConv()">Pull Random Conversation</button>
-    <button class="btn" id="qc-flush-btn" onclick="qcApplyPending()" style="background:var(--amber);color:#000;display:none;font-weight:700;">
-      <span id="qc-flush-count">0</span> edits pending — apply
-    </button>
-    <button class="btn" onclick="qcSyncStandardToDb()" style="background:rgba(16,217,138,.15);border:1px solid var(--green);color:var(--green);font-size:11px;" title="Copy standard.js → DB so the live bot picks up recent file edits within 30s">&#8593; Sync file → live bot</button>
-  </div>
-
-  <!-- Prominent source tabs (All / Claude / Archive / Cluster). -->
-  <div class="qc-tabs-row">
-    <div class="itab active" data-qctab="all" onclick="setQcTab('all', this)">All</div>
-    <div class="itab" data-qctab="claude" onclick="setQcTab('claude', this)">Claude Bot</div>
-    <div class="itab" data-qctab="chiro" onclick="setQcTab('chiro', this)">Chiro Bot</div>
-    <div class="itab" data-qctab="botpress" onclick="setQcTab('botpress', this)">Archive (Botpress)</div>
-    <div class="itab" data-qctab="cluster" onclick="setQcTab('cluster', this)">Filter by Word Track</div>
-    <div class="itab" data-qctab="console" onclick="setQcTab('console', this)">&#9881; Bot Console</div>
-  </div>
-  <div id="qc-cluster-filter-row" style="display:none;margin-bottom:14px;">
-    <select class="fsel" id="qc-cluster-sel" onchange="loadQcByCluster()"><option value="">-- pick a cluster --</option></select>
-  </div>
-  <div id="qc-search-row" style="margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-    <input type="text" id="qc-search-input" placeholder="Search by name or phone..." class="form-input" style="max-width:280px;" oninput="qcSearchDebounced()">
-    <input type="date" id="qc-date-from-input" class="form-input" style="max-width:155px;" title="Show conversations on or after this date" onchange="loadQcAll()">
-    <button class="btn-sm" onclick="clearQcDateFilter()" style="font-size:11px;padding:3px 8px;display:none;" id="qc-date-clear-btn">✕ Clear date</button>
-    <button class="btn-sm" id="qc-sync-ghl-btn" onclick="qcSyncAllLocations(false)" style="font-size:11px;padding:3px 10px;background:rgba(0,212,255,.12);border:1px solid var(--cyan);color:var(--cyan);" title="Pull latest conversations from GHL for all locations">⟳ Sync GHL</button>
-    <button class="btn-sm" id="qc-repull-ghl-btn" onclick="qcSyncAllLocations(true)" style="font-size:11px;padding:3px 10px;" title="Full re-pull all conversations from GHL (slow)">Full Repull</button>
-    <span id="qc-sync-status" style="font-size:11px;color:var(--muted);"></span>
-    <span id="qc-freshness-indicator" style="font-size:11px;cursor:pointer;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.05);" title="" onclick="loadQcSyncStatus()"></span>
-  </div>
-
-  <div class="conv-wrap">
-    <div class="conv-list">
-      <div class="conv-list-header" id="qc-list-header">Pending Review</div>
-      <div id="qc-conv-list" class="conv-list-scroll"></div>
+  <div class="qc2-header-row">
+    <span class="qc2-header-title">QC Review</span>
+    <div class="qc2-chips">
+      <span class="qc2-chip amber" id="qc2-stat-pending">&#8212; Pending</span>
+      <span class="qc2-chip green" id="qc2-stat-approved">&#8212; Approved</span>
+      <span class="qc2-chip red" id="qc2-stat-failed">&#8212; Failed</span>
     </div>
-    <div class="conv-panel">
-      <div class="conv-top">
-        <div style="flex:1;">
-          <strong id="qc-lead-name">Select a conversation</strong>
-          <span class="qc-lead-meta" id="qc-lead-meta" style="display:block;font-size:13px;color:var(--muted);margin-top:4px;"></span>
-        </div>
-        <button class="btn-sm" id="qc-refresh-conv-btn" onclick="qcRefreshConversation()" style="display:none;font-size:11px;padding:3px 10px;background:rgba(0,212,255,.1);border:1px solid var(--cyan);color:var(--cyan);" title="Re-pull this conversation's messages from GHL">⟳ Refresh</button>
-        <span class="pill a" id="qc-status-pill">Pending QC</span>
+    <div style="margin-left:auto;display:flex;gap:7px;align-items:center;flex-wrap:wrap;">
+      <button class="btn-sm" id="qc-flush-btn" onclick="qcApplyPending()" style="background:var(--amber);color:#000;display:none;font-weight:700;"><span id="qc-flush-count">0</span> edits &#8212; apply</button>
+      <button class="btn-sm" onclick="qcSyncStandardToDb()" style="color:var(--green);border-color:rgba(16,217,138,.4);" title="Copy standard.js to DB so the live bot picks up file edits within 30s">&#8593; Sync Prompt</button>
+      <button class="btn-sm" id="qc2-sync-btn" onclick="qc2SyncGHL()" title="Pull latest conversations from GHL">&#10227; Sync GHL</button>
+      <span id="qc2-sync-status" style="font-size:11px;color:var(--muted);"></span>
+      <span id="qc2-freshness" style="font-size:11px;cursor:pointer;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.05);" title="Click to refresh" onclick="qc2LoadSyncStatus()"></span>
+    </div>
+  </div>
+
+  <div class="qc2-wrap">
+    <!-- LEFT PANEL: conversation queue -->
+    <div class="qc2-left">
+      <div class="qc2-list-top">
+        <select class="fsel" id="qc2-filter" onchange="qc2Load()" style="width:100%;">
+          <option value="pending">Pending Review</option>
+          <option value="all">All Conversations</option>
+          <option value="claude">Claude Bot</option>
+          <option value="chiro">Chiro Bot</option>
+        </select>
+        <input type="text" id="qc2-search" class="qc2-search" placeholder="Search name or phone&#8230;" oninput="qc2SearchDebounced()">
       </div>
-      <div class="conv-messages" id="qc-messages">
-        <div style="color:var(--muted);text-align:center;padding:60px 20px;font-size:14px;">Select a conversation from the left panel.</div>
+      <div class="qc2-counter" id="qc2-counter">Loading&#8230;</div>
+      <div id="qc2-list" class="qc2-list-scroll">
+        <div class="qc2-skel-card"><div class="qc2-skeleton" style="height:14px;width:65%;margin-bottom:7px;"></div><div class="qc2-skeleton" style="height:10px;width:46%;"></div></div>
+        <div class="qc2-skel-card"><div class="qc2-skeleton" style="height:14px;width:71%;margin-bottom:7px;"></div><div class="qc2-skeleton" style="height:10px;width:39%;"></div></div>
+        <div class="qc2-skel-card"><div class="qc2-skeleton" style="height:14px;width:58%;margin-bottom:7px;"></div><div class="qc2-skeleton" style="height:10px;width:53%;"></div></div>
+      </div>
+    </div>
+
+    <!-- RIGHT PANEL: thread + review actions -->
+    <div class="qc2-right">
+      <div class="qc2-detail-top">
+        <div style="flex:1;min-width:0;">
+          <div class="qc2-detail-name" id="qc2-detail-name">Select a conversation</div>
+          <div class="qc2-detail-meta" id="qc2-detail-meta"></div>
+        </div>
+        <button class="btn-sm" id="qc2-refresh-btn" style="display:none;" title="Re-pull this conversation from GHL">&#10227; Refresh</button>
+        <span class="pill" id="qc2-status-pill" style="display:none;"></span>
       </div>
 
-      <!-- Click any bot bubble above to open this panel -->
-      <div id="qc-flag-panel" style="display:none;" class="qc-flag-panel">
+      <div id="qc2-thread" class="qc2-thread">
+        <div class="qc2-empty-state">Select a conversation from the left panel to begin reviewing.</div>
+      </div>
+
+      <!-- Flag panel: click any bot bubble to flag it -->
+      <div id="qc2-flag-panel" class="qc-flag-panel" style="display:none;">
         <div style="display:flex;align-items:center;gap:8px;">
-          <span id="qc-flag-badge"></span>
-          <span id="qc-flag-type" style="font-size:11px;font-weight:700;color:var(--amber);"></span>
-          <button class="btn-sm" style="margin-left:auto;" onclick="qcFlagDismiss()">✕ Cancel</button>
+          <span id="qc2-flag-badge"></span>
+          <span id="qc2-flag-type" style="font-size:11px;font-weight:700;color:var(--amber);"></span>
+          <button class="btn-sm" style="margin-left:auto;" onclick="qc2FlagDismiss()">&#10005; Cancel</button>
         </div>
-        <div id="qc-flag-original" class="qc-flag-original"></div>
-        <textarea id="qc-flag-replacement" class="qc-flag-input" placeholder="What it should have said instead... (Ctrl+Enter to save)" onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();qcFlagSubmit();}"></textarea>
+        <div id="qc2-flag-original" class="qc-flag-original"></div>
+        <textarea id="qc2-flag-replacement" class="qc-flag-input" placeholder="What it should have said instead&#8230; (Ctrl+Enter to save)" onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();qc2FlagSubmit();}"></textarea>
         <div style="display:flex;gap:8px;">
-          <button class="btn amb" id="qc-flag-submit-btn" onclick="qcFlagSubmit()">Queue Fix</button>
+          <button class="btn amb" id="qc2-flag-submit-btn" onclick="qc2FlagSubmit()">Queue Fix</button>
         </div>
       </div>
 
-      <div class="qc-acts" style="gap:10px;">
-        <button class="btn grn" style="flex:1;font-size:14px;" onclick="qcApprove()">&#10003; Approved</button>
-        <button class="btn dan" style="flex:1;font-size:14px;" onclick="openNotApprovedModal()">&#10007; Not Approved</button>
-        <span class="qc-score" id="qc-accuracy-display" style="margin-left:auto;font-size:12px;"></span>
-      </div>
-      <div class="qcp-chat">
+      <!-- Ask Claude inline chat -->
+      <div class="qc2-chat-panel">
         <div class="qcp-chat-header">
           <span class="qcp-chat-label">Ask Claude</span>
-          <span class="qcp-chat-ctx" id="qcp-ctx-label">— select a conversation to ask about it</span>
-          <button class="btn-sm" style="margin-left:auto;" onclick="qcpClear()">Clear</button>
+          <span class="qcp-chat-ctx" id="qc2-ask-ctx">&#8212; select a conversation</span>
+          <button class="btn-sm" style="margin-left:auto;" onclick="qc2ClearChat()">Clear</button>
         </div>
-        <div id="qcp-messages" class="qcp-messages"></div>
+        <div id="qc2-chat-msgs" class="qcp-messages"></div>
         <div class="qcp-input-row">
-          <textarea id="qcp-input" rows="2" placeholder="Why did the bot ask this twice? What should it have said instead? Ctrl+Enter to send." onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();qcpSend();}"></textarea>
-          <button class="btn pri" id="qcp-send-btn" onclick="qcpSend()">Ask</button>
+          <textarea id="qc2-chat-input" rows="2" placeholder="Why did the bot ask this twice? What should it have said? Ctrl+Enter to send." onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();qc2ChatSend();}"></textarea>
+          <button class="btn pri" id="qc2-chat-send-btn" onclick="qc2ChatSend()">Ask</button>
         </div>
       </div>
-    </div>
-  </div>
 
-  <!-- Bot Console panel — shown when Console sub-tab is active -->
-  <div id="qc-console-panel" style="display:none;">
-    <div class="bc-wrap">
-      <div class="bc-alerts" id="qbc-alerts-strip">
-        <div style="color:var(--muted);font-size:12px;padding:8px;">Loading alerts…</div>
-      </div>
-      <div class="bc-main">
-        <div class="bc-chat">
-          <div class="dc-chat-top">
-            <strong style="color:#fff;">Ask Claude</strong>
-            <span style="font-size:11px;color:var(--muted);margin-left:8px;">Ask about performance, request word track rewrites, or queue prompt changes</span>
-            <button class="btn-sm" style="margin-left:auto;" onclick="qbcClearChat()">Clear</button>
-          </div>
-          <div class="dc-messages" id="qbc-messages"></div>
-          <div class="dc-input-row">
-            <textarea class="dc-input" id="qbc-input" rows="2" placeholder="e.g. Why is our opener being ignored? Rewrite the tie-down. Ctrl+Enter to send." onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();qbcSend();}"></textarea>
-            <button class="btn pri" id="qbc-send-btn" onclick="qbcSend()">Send</button>
-          </div>
-        </div>
-        <div class="bc-sidebar">
-          <div class="bc-sidebar-title">Pending Changes <span id="qbc-pending-count" style="color:var(--amber);"></span></div>
-          <div id="qbc-pending-list"><div class="bc-no-changes">No queued changes</div></div>
-          <button class="btn amb" id="qbc-apply-btn" style="display:none;margin-top:auto;" onclick="qbcApplyChanges()">Apply All Changes to Bot</button>
+      <!-- Inline rejection panel (slides in above action buttons) -->
+      <div class="qc2-rejection-panel" id="qc2-rejection-panel" style="display:none;">
+        <div class="qc2-rejection-label">What did the bot do wrong? <span style="color:var(--dim);font-weight:400;text-transform:none;">(optional)</span></div>
+        <textarea id="qc2-rejection-text" class="qc2-rejection-input" rows="3" placeholder="e.g. Used &#x27;appreciate you reaching out&#x27; &#183; Asked DOB twice &#183; Price-looped without escalating" onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();qc2SubmitRejection();}"></textarea>
+        <div class="qc2-rejection-btns">
+          <button class="btn" onclick="qc2CancelRejection()">Cancel</button>
+          <button class="btn dan" onclick="qc2SubmitRejection()">Submit &amp; Next</button>
         </div>
       </div>
-    </div>
-  </div>
-</div>
 
-<!-- ====== NOT APPROVED MODAL ====== -->
-<div id="not-approved-modal" class="dc-modal-backdrop" style="display:none;" onclick="if(event.target===this)closeNotApprovedModal()">
-  <div class="dc-modal" style="width:500px;max-width:92vw;">
-    <div style="font-size:17px;font-weight:700;color:#fff;margin-bottom:6px;">Not Approved</div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:12px;">What did the bot do wrong? <span style="color:var(--dim);">(optional — leave blank to just flag it)</span></div>
-    <textarea id="not-approved-text" rows="4" placeholder="e.g. 'Used banned phrase appreciate you reaching out' / 'Asked DOB twice' / 'Gave a price range instead of pushing to book after 3 price asks'..." style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:7px;font-family:'Rajdhani';font-size:13px;outline:none;resize:vertical;margin-bottom:14px;" onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();submitNotApproved();}"></textarea>
-    <div style="display:flex;gap:8px;justify-content:flex-end;">
-      <button class="btn" onclick="closeNotApprovedModal()" style="color:var(--muted);">Cancel</button>
-      <button class="btn dan" onclick="submitNotApproved()">Submit &amp; Next</button>
+      <!-- Review action buttons (pinned at bottom) -->
+      <div class="qc2-actions" id="qc2-actions" style="display:none;">
+        <button class="qc2-btn approve" onclick="qc2Approve()">&#10003; Approved</button>
+        <button class="qc2-btn reject" id="qc2-reject-btn" onclick="qc2OpenRejection()">&#10007; Not Approved</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1794,12 +1798,7 @@ function loadCurrentTab() {
     case 'tab-wordtracks': loadWordtracks(); break;
     case 'tab-pipeline': loadPipeline(); break;
     case 'tab-qc':
-      if (qcTab === 'all') loadQcAll();
-      else if (qcTab === 'claude') loadQC({ mode: 'claude' });
-      else if (qcTab === 'chiro') loadQC({ mode: 'chiro' });
-      else if (qcTab === 'botpress') loadQcBotpress();
-      else if (qcTab === 'cluster') loadQcClusterPicker();
-      else if (qcTab === 'console') loadQcConsole();
+      qc2Load();
       refreshPendingEditsCounter();
       break;
     case 'tab-changes': loadChangesTab(); break;
@@ -3075,6 +3074,501 @@ async function qcAdvanceAfterReview() {
     firstItem.item.classList.add('active');
     loadConversation(firstItem.conv.id, firstItem.conv);
   }
+}
+
+// ========== QC2 — MODERN REVIEW LAYOUT ==========
+
+let qc2SelectedId = null;
+let qc2SelectedConv = null;
+let qc2ConvList = [];
+let qc2FlagMsg = null;
+let qc2FlagEl = null;
+let qc2ChatHistory = [];
+let qc2SearchTimer = null;
+let qc2AutoSynced = false;
+let qc2GhlConvId = null;
+let qc2GhlLocId = null;
+
+async function qc2Load() {
+  const filter = document.getElementById('qc2-filter')?.value || 'pending';
+  const search = (document.getElementById('qc2-search')?.value || '').trim();
+
+  // Stats
+  const stats = await api('/api/qc/stats');
+  if (stats) {
+    document.getElementById('qc2-stat-pending').textContent = fmtNum(stats.pending) + ' Pending';
+    document.getElementById('qc2-stat-approved').textContent = fmtNum(stats.approved) + ' Approved';
+    document.getElementById('qc2-stat-failed').textContent = fmtNum(stats.failed) + ' Failed';
+    const badge = document.getElementById('nav-qc-badge');
+    if (badge) badge.textContent = stats.pending > 0 ? stats.pending : '';
+  }
+
+  // Auto-sync GHL once per session
+  if (!qc2AutoSynced) {
+    qc2AutoSynced = true;
+    qc2SyncGHL();
+  }
+
+  // Show skeletons while fetching if list is empty
+  const listEl = document.getElementById('qc2-list');
+  if (!qc2ConvList.length) {
+    listEl.innerHTML = '<div class="qc2-skel-card"><div class="qc2-skeleton" style="height:14px;width:65%;margin-bottom:7px;"></div><div class="qc2-skeleton" style="height:10px;width:46%;"></div></div>' +
+      '<div class="qc2-skel-card"><div class="qc2-skeleton" style="height:14px;width:71%;margin-bottom:7px;"></div><div class="qc2-skeleton" style="height:10px;width:39%;"></div></div>' +
+      '<div class="qc2-skel-card"><div class="qc2-skeleton" style="height:14px;width:58%;margin-bottom:7px;"></div><div class="qc2-skeleton" style="height:10px;width:53%;"></div></div>';
+  }
+
+  let data;
+  if (filter === 'all') {
+    const params = new URLSearchParams({ page: '1', limit: '100' });
+    if (search) params.set('search', search);
+    data = await api('/api/qc/all-conversations?' + params);
+    if (!data) { listEl.innerHTML = '<div style="color:var(--muted);padding:24px;text-align:center;">Failed to load.</div>'; return; }
+    qc2ConvList = (data.conversations || []).map(function(c) {
+      return {
+        id: c.source === 'claude' ? c.claude_conv_id : null,
+        ghl_id: c.ghl_conversation_id,
+        location_id: c.location_id,
+        name: c.contact_name || '(no name)',
+        source: c.source || 'unknown',
+        product: c.product_type || '',
+        subaccount: c.subaccount_name || c.location_id || '',
+        msgs: c.message_count || 0,
+        outcome: c.terminal_outcome || null,
+        reviewed: !!c.qc_reviewed,
+        last_msg: c.last_message_at
+      };
+    });
+    document.getElementById('qc2-counter').textContent = fmtNum(qc2ConvList.length) + ' conversations';
+  } else {
+    const params = new URLSearchParams({ page: '1', limit: '100' });
+    if (filter === 'claude') params.set('all', 'true');
+    if (filter === 'chiro') { params.set('all', 'true'); params.set('vertical', 'chiro'); }
+    if (search) params.set('search', search);
+    data = await api('/api/qc/pending?' + params);
+    if (!data) { listEl.innerHTML = '<div style="color:var(--muted);padding:24px;text-align:center;">Failed to load.</div>'; return; }
+    qc2ConvList = (data.conversations || []).map(function(c) {
+      return {
+        id: c.id,
+        ghl_id: null,
+        location_id: c.location_id,
+        name: ((c.first_name || '') + ' ' + (c.last_name || '')).trim() || '(no name)',
+        source: 'claude',
+        product: c.product_type || '',
+        subaccount: c.subaccount_name || '',
+        msgs: c.message_count || 0,
+        outcome: c.terminal_outcome || null,
+        reviewed: !!c.qc_reviewed,
+        last_msg: c.last_message_at
+      };
+    });
+    var total = data.total || 0;
+    var reviewedCount = qc2ConvList.filter(function(c) { return c.reviewed; }).length;
+    var pendingCount = qc2ConvList.filter(function(c) { return !c.reviewed; }).length;
+    document.getElementById('qc2-counter').textContent =
+      filter === 'pending' ? fmtNum(pendingCount) + ' pending review' :
+      fmtNum(reviewedCount) + ' of ' + fmtNum(total) + ' reviewed';
+  }
+
+  qc2RenderList();
+  qc2LoadSyncStatus();
+}
+
+function qc2RenderList() {
+  var listEl = document.getElementById('qc2-list');
+  if (!qc2ConvList.length) {
+    listEl.innerHTML = '<div style="color:var(--muted);padding:24px;text-align:center;font-size:13px;line-height:1.7;">No conversations found.<br><a href="#" onclick="qc2SyncGHL();return false;" style="color:var(--cyan);">Sync GHL</a> to pull the latest.</div>';
+    return;
+  }
+  listEl.innerHTML = '';
+  var srcMap = { claude: { cls: 'pill b', lbl: 'Claude' }, botpress: { cls: 'pill a', lbl: 'BotPress' }, ghl_workflow: { cls: 'pill g', lbl: 'GHL' }, user: { cls: 'pill c', lbl: 'Lead' } };
+  qc2ConvList.forEach(function(c) {
+    var card = document.createElement('div');
+    card.className = 'qc2-card' + (c.id === qc2SelectedId && c.source === 'claude' ? ' active' : '') + (c.reviewed ? '' : '');
+    var src = srcMap[c.source] || { cls: 'pill', lbl: c.source || 'GHL' };
+    var outcomeColor = c.outcome === 'appointment_booked' ? 'var(--green)' : c.outcome === 'dnc' ? 'var(--red)' : c.outcome === 'human_handoff' ? 'var(--amber)' : 'var(--muted)';
+    var dateStr = c.last_msg ? new Date(c.last_msg).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+    card.innerHTML =
+      '<div class="qc2-card-name"><span>' + esc(c.name) + ' <span class="' + src.cls + '" style="font-size:10px;">' + src.lbl + '</span></span>' +
+      (dateStr ? '<span style="font-size:11px;color:var(--muted);font-weight:400;">' + esc(dateStr) + '</span>' : '') + '</div>' +
+      '<div class="qc2-card-meta">' + esc(c.subaccount || c.product || '') + ' &middot; ' + fmtNum(c.msgs) + ' msgs' +
+      (c.outcome ? ' <span style="color:' + outcomeColor + '">&middot; ' + esc(c.outcome) + '</span>' : '') +
+      (c.reviewed ? ' <span style="color:var(--green);">&#10003;</span>' : '') + '</div>';
+    card.onclick = function() { qc2Select(c, card); };
+    listEl.appendChild(card);
+  });
+}
+
+async function qc2Select(conv, cardEl) {
+  document.querySelectorAll('#qc2-list .qc2-card').forEach(function(c) { c.classList.remove('active'); });
+  if (cardEl) cardEl.classList.add('active');
+  qc2SelectedId = conv.id;
+  qc2SelectedConv = conv;
+
+  document.getElementById('qc2-detail-name').textContent = conv.name;
+  document.getElementById('qc2-detail-meta').textContent =
+    [conv.product, conv.subaccount, fmtNum(conv.msgs) + ' msgs', conv.outcome].filter(Boolean).join(' · ');
+  document.getElementById('qc2-ask-ctx').textContent = '— ' + conv.name;
+
+  var pill = document.getElementById('qc2-status-pill');
+  pill.style.display = '';
+  if (conv.reviewed) { pill.className = 'pill g'; pill.textContent = 'Reviewed'; }
+  else { pill.className = 'pill a'; pill.textContent = 'Pending QC'; }
+
+  document.getElementById('qc2-actions').style.display = '';
+  document.getElementById('qc2-rejection-panel').style.display = 'none';
+  var rejectBtn = document.getElementById('qc2-reject-btn');
+  if (rejectBtn) rejectBtn.classList.remove('open');
+
+  var threadEl = document.getElementById('qc2-thread');
+  threadEl.innerHTML = '<div class="qc2-empty-state" style="padding:30px 20px;">Loading…</div>';
+  qc2FlagDismiss();
+  qc2GhlConvId = null;
+  qc2GhlLocId = null;
+
+  var thread = [];
+  if (conv.source === 'claude' && conv.id) {
+    var data = await api('/api/qc/conversation-thread-by-local/' + conv.id);
+    if (data) {
+      qc2GhlConvId = data.ghl_conversation_id || null;
+      qc2GhlLocId = conv.location_id || null;
+      thread = data.thread || [];
+    }
+  } else if (conv.ghl_id) {
+    var data2 = await api('/api/qc/conversation-thread/' + encodeURIComponent(conv.ghl_id) + '?location_id=' + encodeURIComponent(conv.location_id || ''));
+    if (data2) {
+      qc2GhlConvId = conv.ghl_id;
+      qc2GhlLocId = conv.location_id || null;
+      thread = data2.thread || [];
+    }
+  }
+
+  var refreshBtn = document.getElementById('qc2-refresh-btn');
+  if (refreshBtn) refreshBtn.style.display = (qc2GhlConvId && qc2GhlLocId) ? '' : 'none';
+
+  qc2RenderThread(thread);
+}
+
+function qc2RenderThread(thread) {
+  var el = document.getElementById('qc2-thread');
+  el.innerHTML = '';
+  if (!thread || !thread.length) {
+    el.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px;">No messages in thread.</div>';
+    return;
+  }
+  var srcMap = {
+    user:         { cls: 'pill c',  label: 'Lead' },
+    claude:       { cls: 'pill b',  label: 'Claude' },
+    botpress:     { cls: 'pill a',  label: 'BotPress' },
+    ghl_workflow: { cls: 'pill g',  label: 'Workflow Drip' },
+    unknown:      { cls: 'pill',    label: 'Manual' }
+  };
+  thread.forEach(function(m) {
+    var isOut = m.direction === 'outbound';
+    var badge = srcMap[m.source || (isOut ? 'unknown' : 'user')] || srcMap.unknown;
+    var ts = m.created_at ? new Date(m.created_at).toLocaleString() : '';
+    var div = document.createElement('div');
+    div.className = 'qc2-bbl ' + (isOut ? 'outbound' : 'inbound');
+    div.innerHTML = '<div class="qc2-bbl-lbl"><span class="' + badge.cls + '">' + esc(badge.label) + '</span>' + esc(ts) +
+      (isOut ? ' <span class="qc2-fhint" style="font-size:9px;color:var(--muted);opacity:0;transition:opacity .12s;">click to flag</span>' : '') + '</div>' + esc(m.content || '');
+    if (isOut) {
+      div.addEventListener('mouseenter', function() { var h = div.querySelector('.qc2-fhint'); if (h) h.style.opacity = '1'; });
+      div.addEventListener('mouseleave', function() { var h = div.querySelector('.qc2-fhint'); if (h) h.style.opacity = '0'; });
+      var snap = { content: m.content, source: m.source, direction: m.direction };
+      div.addEventListener('click', function() { qc2FlagOpen(snap, div); });
+    }
+    el.appendChild(div);
+  });
+  el.scrollTop = 0;
+}
+
+async function qc2Approve() {
+  if (!qc2SelectedId) { toast('Select a conversation first.'); return; }
+  var btn = document.querySelector('.qc2-btn.approve');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  var res = await api('/api/qc/review', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conversation_id: qc2SelectedId, reviewer: 'admin', outcome: 'approved' })
+  });
+  if (btn) { btn.disabled = false; btn.textContent = '✓ Approved'; }
+  if (!res) { toast('Failed to submit.', 'err'); return; }
+  toast('Approved.');
+  await qc2AdvanceToNext();
+}
+
+function qc2OpenRejection() {
+  if (!qc2SelectedId) { toast('Select a conversation first.'); return; }
+  var panel = document.getElementById('qc2-rejection-panel');
+  var btn = document.getElementById('qc2-reject-btn');
+  var isOpen = panel.style.display !== 'none' && panel.style.display !== '';
+  if (!isOpen) {
+    panel.style.display = '';
+    if (btn) btn.classList.add('open');
+    document.getElementById('qc2-rejection-text').value = '';
+    setTimeout(function() { document.getElementById('qc2-rejection-text').focus(); }, 80);
+  } else {
+    qc2CancelRejection();
+  }
+}
+
+function qc2CancelRejection() {
+  document.getElementById('qc2-rejection-panel').style.display = 'none';
+  var btn = document.getElementById('qc2-reject-btn');
+  if (btn) btn.classList.remove('open');
+}
+
+async function qc2SubmitRejection() {
+  var notes = document.getElementById('qc2-rejection-text').value.trim();
+  qc2CancelRejection();
+
+  var reviewRes = await api('/api/qc/review', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conversation_id: qc2SelectedId, reviewer: 'admin', outcome: 'failed', notes: notes || null })
+  });
+  if (!reviewRes) { toast('Failed to submit review.', 'err'); return; }
+
+  if (notes) {
+    await api('/api/pending-changes', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'qc', change_type: 'behavioral_feedback',
+        description: 'Reviewer flagged conversation ' + qc2SelectedId + ': ' + notes + '. Adjust the system prompt so the bot avoids this pattern.',
+        example_conversation_id: qc2SelectedId
+      })
+    });
+  } else {
+    await api('/api/pending-changes', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'qc', change_type: 'correction',
+        description: 'Conversation ' + qc2SelectedId + ' flagged as Not Approved (no description provided). Review the conversation thread and identify what the bot did wrong.',
+        example_conversation_id: qc2SelectedId
+      })
+    });
+  }
+
+  toast('Not Approved queued. Advancing…');
+  refreshPendingEditsCounter();
+  refreshChangesBadge();
+  await qc2AdvanceToNext();
+}
+
+async function qc2AdvanceToNext() {
+  var prevId = qc2SelectedId;
+  qc2SelectedId = null;
+  qc2SelectedConv = null;
+  document.getElementById('qc2-detail-name').textContent = 'Loading next…';
+  document.getElementById('qc2-thread').innerHTML = '<div class="qc2-empty-state">Loading next conversation…</div>';
+  document.getElementById('qc2-actions').style.display = 'none';
+
+  await qc2Load();
+
+  // Auto-select first unreviewed conversation that isn't the one just reviewed
+  var next = null;
+  var filter = document.getElementById('qc2-filter')?.value || 'pending';
+  if (filter === 'pending') {
+    next = qc2ConvList.find(function(c) { return !c.reviewed && c.id !== prevId; });
+  }
+  if (!next) next = qc2ConvList.find(function(c) { return c.id !== prevId; });
+
+  if (next) {
+    var cards = document.querySelectorAll('#qc2-list .qc2-card');
+    var idx = qc2ConvList.indexOf(next);
+    await qc2Select(next, cards[idx] || null);
+  } else {
+    document.getElementById('qc2-detail-name').textContent = 'All caught up!';
+    document.getElementById('qc2-detail-meta').textContent = '';
+    document.getElementById('qc2-thread').innerHTML = '<div class="qc2-empty-state" style="color:var(--green);">✓ All conversations reviewed.<br><br>Great work!</div>';
+    document.getElementById('qc2-actions').style.display = 'none';
+  }
+}
+
+function qc2SearchDebounced() {
+  clearTimeout(qc2SearchTimer);
+  qc2SearchTimer = setTimeout(qc2Load, 280);
+}
+
+async function qc2SyncGHL() {
+  var btn = document.getElementById('qc2-sync-btn');
+  var statusEl = document.getElementById('qc2-sync-status');
+  if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
+  if (statusEl) statusEl.textContent = 'Pulling…';
+
+  var subs = await api('/api/subaccounts');
+  var list = ((subs && subs.subaccounts ? subs.subaccounts : subs) || []).filter(function(s) { return s.ghl_location_id && s.ghl_api_key_preview; });
+  if (!list.length) {
+    if (btn) { btn.disabled = false; btn.textContent = '↺ Sync GHL'; }
+    if (statusEl) statusEl.textContent = '';
+    return;
+  }
+
+  var ok = 0;
+  for (var i = 0; i < list.length; i++) {
+    var sub = list[i];
+    var r = await api('/api/analyzer/pull', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locationId: sub.ghl_location_id })
+    });
+    if (r && !r.error) ok++;
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = '↺ Sync GHL'; }
+  if (statusEl) {
+    statusEl.textContent = 'Synced ' + ok + ' location' + (ok !== 1 ? 's' : '');
+    setTimeout(function() { if (statusEl) statusEl.textContent = ''; }, 8000);
+  }
+  setTimeout(function() { qc2Load(); }, 12000);
+  setTimeout(function() { qc2Load(); }, 60000);
+}
+
+async function qc2LoadSyncStatus() {
+  var el = document.getElementById('qc2-freshness');
+  if (!el) return;
+  try {
+    var r = await api('/api/qc/sync-status');
+    if (!r || !r.last_full_repull_at) { el.textContent = ''; return; }
+    var h = r.hours_ago;
+    var lbl = h < 1 ? 'just now' : h === 1 ? '1h ago' : h < 24 ? h + 'h ago' : Math.floor(h / 24) + 'd ago';
+    el.textContent = '● Last sync: ' + lbl;
+    el.style.color = h < 25 ? 'var(--green)' : h < 48 ? 'var(--amber)' : 'var(--red)';
+    el.title = 'Last GHL sync: ' + new Date(r.last_full_repull_at).toLocaleString() + ' (click to refresh)';
+  } catch (e) {
+    el.textContent = '';
+  }
+}
+
+async function qc2RefreshConv() {
+  if (!qc2GhlConvId || !qc2GhlLocId) { toast('Nothing to refresh.'); return; }
+  var btn = document.getElementById('qc2-refresh-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  var res = await api('/api/qc/refresh-conversation', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ghl_conversation_id: qc2GhlConvId, location_id: qc2GhlLocId })
+  });
+  if (btn) { btn.disabled = false; btn.textContent = '↺ Refresh'; }
+  if (!res || !res.ok) { toast('Refresh failed.', 'err'); return; }
+  toast((res.messages_pulled || 0) + ' messages refreshed.', 'ok');
+  if (qc2SelectedConv) {
+    var card = document.querySelector('#qc2-list .qc2-card.active');
+    await qc2Select(qc2SelectedConv, card);
+  }
+}
+
+// Flag panel
+function qc2FlagOpen(msg, el) {
+  if (qc2FlagEl) qc2FlagEl.classList.remove('flagged');
+  qc2FlagMsg = msg;
+  qc2FlagEl = el;
+  el.classList.add('flagged');
+  var srcMap = { user: { cls: 'pill c', label: 'Lead' }, claude: { cls: 'pill b', label: 'Claude' }, botpress: { cls: 'pill a', label: 'BotPress' }, ghl_workflow: { cls: 'pill g', label: 'Workflow Drip' }, unknown: { cls: 'pill', label: 'Manual' } };
+  var badge = srcMap[msg.source || 'unknown'] || srcMap.unknown;
+  var isWordtrack = msg.source === 'botpress' || msg.source === 'ghl_workflow';
+  document.getElementById('qc2-flag-badge').innerHTML = '<span class="' + badge.cls + '">' + esc(badge.label) + '</span>';
+  document.getElementById('qc2-flag-type').textContent = isWordtrack ? '→ Dev queue (fix in GHL word tracks)' : '→ Queues a prompt fix — apply to push live';
+  document.getElementById('qc2-flag-original').textContent = msg.content || '';
+  document.getElementById('qc2-flag-replacement').value = '';
+  document.getElementById('qc2-flag-submit-btn').textContent = isWordtrack ? 'Add to Dev Queue' : 'Queue Prompt Fix';
+  var panel = document.getElementById('qc2-flag-panel');
+  panel.style.display = '';
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  document.getElementById('qc2-flag-replacement').focus();
+}
+
+function qc2FlagDismiss() {
+  if (qc2FlagEl) qc2FlagEl.classList.remove('flagged');
+  qc2FlagMsg = null;
+  qc2FlagEl = null;
+  var p = document.getElementById('qc2-flag-panel');
+  if (p) p.style.display = 'none';
+}
+
+async function qc2FlagSubmit() {
+  if (!qc2SelectedId || !qc2FlagMsg) { toast('No message flagged.'); return; }
+  var replacement = document.getElementById('qc2-flag-replacement').value.trim();
+  if (!replacement) { toast('Enter what the bot should have said.'); return; }
+  var isWordtrack = qc2FlagMsg.source === 'botpress' || qc2FlagMsg.source === 'ghl_workflow';
+  await api('/api/pending-changes', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      source: 'qc',
+      change_type: isWordtrack ? 'wordtrack_fix' : 'prompt_fix',
+      description: isWordtrack
+        ? 'Replace word track: "' + qc2FlagMsg.content + '" → "' + replacement + '"'
+        : 'Replace bot response: "' + qc2FlagMsg.content + '" → "' + replacement + '"',
+      example_conversation_id: qc2SelectedId
+    })
+  });
+  toast('Fix queued.', 'ok');
+  qc2FlagDismiss();
+  refreshPendingEditsCounter();
+  refreshChangesBadge();
+}
+
+// Ask Claude in QC2 context
+async function qc2ChatSend() {
+  var inp = document.getElementById('qc2-chat-input');
+  var msg = inp.value.trim();
+  if (!msg) return;
+  inp.value = '';
+  var msgsEl = document.getElementById('qc2-chat-msgs');
+  var sendBtn = document.getElementById('qc2-chat-send-btn');
+
+  var userBubble = document.createElement('div');
+  userBubble.className = 'dc-msg user';
+  userBubble.innerHTML = '<span class="dc-msg-role">You</span><div class="dc-msg-body">' + esc(msg) + '</div>';
+  msgsEl.appendChild(userBubble);
+
+  var thinkBubble = document.createElement('div');
+  thinkBubble.className = 'dc-msg assistant';
+  thinkBubble.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--muted);">Thinking…</div>';
+  msgsEl.appendChild(thinkBubble);
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+  sendBtn.disabled = true;
+
+  qc2ChatHistory.push({ role: 'user', content: msg });
+  try {
+    var body = { message: msg, history: qc2ChatHistory.slice(-20) };
+    if (qc2SelectedId) body.conversation_id = qc2SelectedId;
+    var res = await api('/api/qc/console', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    thinkBubble.remove();
+    if (!res) {
+      var eb = document.createElement('div');
+      eb.className = 'dc-msg assistant';
+      eb.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--red);">Request failed.</div>';
+      msgsEl.appendChild(eb);
+    } else {
+      qc2ChatHistory.push({ role: 'assistant', content: res.reply || '' });
+      if (qc2ChatHistory.length > 20) qc2ChatHistory = qc2ChatHistory.slice(-20);
+      var ab = document.createElement('div');
+      ab.className = 'dc-msg assistant';
+      var bdy = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body">' + esc(res.reply || '') + '</div>';
+      if (res.queued_ids && res.queued_ids.length) {
+        bdy += '<div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+          '<span style="font-size:11px;color:var(--amber);">✓ Queued ' + res.queued_ids.length + ' change(s)</span>' +
+          '<button class="btn amb" style="font-size:11px;padding:3px 10px;" onclick="qcpApplyNow()">Apply to Live Bot</button></div>';
+        refreshPendingEditsCounter();
+        refreshChangesBadge();
+      }
+      ab.innerHTML = bdy;
+      msgsEl.appendChild(ab);
+    }
+  } catch (e) {
+    thinkBubble.remove();
+    var eb2 = document.createElement('div');
+    eb2.className = 'dc-msg assistant';
+    eb2.innerHTML = '<span class="dc-msg-role">Claude</span><div class="dc-msg-body" style="color:var(--red);">Error: ' + esc(e.message) + '</div>';
+    msgsEl.appendChild(eb2);
+  }
+  sendBtn.disabled = false;
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+}
+
+function qc2ClearChat() {
+  qc2ChatHistory = [];
+  var el = document.getElementById('qc2-chat-msgs');
+  if (el) el.innerHTML = '';
 }
 
 // ========== CHANGES TAB ==========
