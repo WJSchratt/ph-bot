@@ -1,4 +1,5 @@
 const express = require('express');
+const axios = require('axios');
 const { parseInboundPayload } = require('../utils/parser');
 const store = require('../services/conversationStore');
 const claude = require('../services/claude');
@@ -10,6 +11,78 @@ const logger = require('../services/logger');
 const db = require('../db');
 
 const router = express.Router();
+
+const GHL_BASE = 'https://services.leadconnectorhq.com';
+const GHL_AUTH = (token) => ({ Authorization: `Bearer ${token}`, Version: '2021-04-15' });
+
+// Fetch the full GHL conversation thread before the bot engaged.
+// Used on the first bot turn so Claude has context for what was already said.
+// Tries local ghl_messages table first (fast), falls back to live GHL API.
+async function fetchPriorGhlThread(contactId, locationId, ghlToken) {
+  try {
+    // Step 1: find the GHL conversation ID
+    let ghlConvId = null;
+    const localConvQ = await db.query(
+      `SELECT ghl_conversation_id FROM ghl_conversations
+       WHERE contact_id = $1 AND location_id = $2
+       ORDER BY last_message_at DESC LIMIT 1`,
+      [contactId, locationId]
+    );
+    ghlConvId = localConvQ.rows[0]?.ghl_conversation_id;
+
+    if (!ghlConvId && ghlToken) {
+      const searchRes = await axios.get(`${GHL_BASE}/conversations/search`, {
+        headers: GHL_AUTH(ghlToken),
+        params: { contactId, locationId },
+        timeout: 8000
+      });
+      ghlConvId = searchRes.data?.conversations?.[0]?.id;
+    }
+
+    if (!ghlConvId) return '';
+
+    // Step 2: get messages — local table first, live API fallback
+    let msgs = [];
+    const localMsgsQ = await db.query(
+      `SELECT direction, content, created_at FROM ghl_messages
+       WHERE ghl_conversation_id = $1 AND location_id = $2
+       ORDER BY created_at DESC LIMIT 30`,
+      [ghlConvId, locationId]
+    );
+
+    if (localMsgsQ.rows.length) {
+      msgs = localMsgsQ.rows.reverse();
+    } else if (ghlToken) {
+      const msgRes = await axios.get(`${GHL_BASE}/conversations/${ghlConvId}/messages`, {
+        headers: GHL_AUTH(ghlToken),
+        params: { limit: 30 },
+        timeout: 8000
+      });
+      const raw = msgRes.data?.messages?.messages || msgRes.data?.messages || [];
+      if (Array.isArray(raw)) {
+        msgs = raw
+          .filter((m) => m.body || m.text)
+          .sort((a, b) => new Date(a.dateAdded || a.createdAt || 0) - new Date(b.dateAdded || b.createdAt || 0))
+          .slice(-30)
+          .map((m) => ({
+            direction: (m.direction === 'inbound' || m.type === 1) ? 'inbound' : 'outbound',
+            content: (m.body || m.text || '').trim()
+          }));
+      }
+    }
+
+    if (!msgs.length) return '';
+
+    const lines = msgs
+      .map((m) => `${m.direction === 'inbound' ? 'Lead' : 'Agent'}: ${(m.content || '').trim()}`)
+      .join('\n');
+
+    return `---\nPRIOR CONVERSATION HISTORY (messages exchanged in GHL before you engaged — read this carefully):\n${lines}\n---\nYou are JOINING this conversation mid-stream. Do NOT re-introduce yourself if already done. Do NOT re-ask anything the lead already answered. Respond directly to the last thing they said.`;
+  } catch (err) {
+    logger.log('webhook', 'warn', contactId, 'fetchPriorGhlThread failed (non-fatal)', { error: err.message });
+    return '';
+  }
+}
 
 const TERMINAL_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const SLOTS_CACHE_TTL_MS = 60 * 60 * 1000;
@@ -304,7 +377,18 @@ router.post('/inbound', async (req, res) => {
 
     // If post-booking, prepend the post-booking override so Claude doesn't re-qualify
     const postBookingContext = postBooking ? buildPostBookingContext(conv) : '';
-    const extraContext = [postBookingContext, schedulingContext].filter(Boolean).join('\n\n');
+
+    // On the first bot turn, pull the full GHL conversation thread so Claude
+    // knows what was already said (drip replies, manual GHL messages, etc.)
+    let priorThreadContext = '';
+    if (isFirstReply && parsed.ghl_token) {
+      priorThreadContext = await fetchPriorGhlThread(conv.contact_id, conv.location_id, parsed.ghl_token);
+      if (priorThreadContext) {
+        logger.log('webhook', 'info', contactId, 'Prior GHL thread injected into context');
+      }
+    }
+
+    const extraContext = [postBookingContext, schedulingContext, priorThreadContext].filter(Boolean).join('\n\n');
 
     // Call Claude
     const claudeStarted = Date.now();
