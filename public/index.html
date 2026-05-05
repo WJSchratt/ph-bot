@@ -716,6 +716,7 @@ textarea.form-input{resize:vertical;min-height:80px;}
     <button class="btn-sm" id="qc-sync-ghl-btn" onclick="qcSyncAllLocations(false)" style="font-size:11px;padding:3px 10px;background:rgba(0,212,255,.12);border:1px solid var(--cyan);color:var(--cyan);" title="Pull latest conversations from GHL for all locations">⟳ Sync GHL</button>
     <button class="btn-sm" id="qc-repull-ghl-btn" onclick="qcSyncAllLocations(true)" style="font-size:11px;padding:3px 10px;" title="Full re-pull all conversations from GHL (slow)">Full Repull</button>
     <span id="qc-sync-status" style="font-size:11px;color:var(--muted);"></span>
+    <span id="qc-freshness-indicator" style="font-size:11px;cursor:pointer;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.05);" title="" onclick="loadQcSyncStatus()"></span>
   </div>
 
   <div class="conv-wrap">
@@ -2922,6 +2923,7 @@ async function loadQcAll() {
     qcAllAutoSynced = true;
     qcSyncAllLocations(false); // fire-and-forget, reloads tab at 15s/60s/3min
   }
+  loadQcSyncStatus(); // refresh freshness indicator on every All-tab open
 
   // Load QC stats (header numbers) + full unified conversation list
   const stats = await api('/api/qc/stats');
@@ -3109,12 +3111,41 @@ async function qcSyncAllLocations(fullRepull) {
         setTimeout(function() { loadQcAll(); }, 15000);
         setTimeout(function() { loadQcAll(); }, 60000);
         setTimeout(function() { loadQcAll(); if (statusEl) statusEl.textContent = ''; }, 180000);
+        // After a full repull the backend writes the sync timestamp asynchronously
+        // once all jobs complete. Poll for it after ~3.5 minutes.
+        if (fullRepull) setTimeout(function() { loadQcSyncStatus(); }, 210000);
       }
     }
   } catch (e) {
     if (statusEl) statusEl.textContent = 'Error: ' + e.message;
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = fullRepull ? 'Full Repull' : '⟳ Sync GHL'; }
+  }
+}
+
+// ========== QC FRESHNESS INDICATOR ==========
+
+async function loadQcSyncStatus() {
+  const el = document.getElementById('qc-freshness-indicator');
+  if (!el) return;
+  try {
+    const data = await api('/api/qc/sync-status');
+    if (!data || !data.last_full_repull_at) {
+      el.textContent = '⬤ Sync: unknown';
+      el.style.color = 'var(--red)';
+      el.title = 'No full repull recorded yet — click Full Repull to start one';
+      return;
+    }
+    const h = data.hours_ago;
+    const dt = new Date(data.last_full_repull_at);
+    const label = h < 1 ? 'just now' : h === 1 ? '1h ago' : h < 24 ? h + 'h ago' : Math.floor(h / 24) + 'd ago';
+    el.textContent = '⬤ Last sync: ' + label;
+    el.style.color = h < 25 ? 'var(--green)' : h < 48 ? 'var(--amber)' : 'var(--red)';
+    el.title = 'Last full GHL sync: ' + dt.toLocaleString() + ' (click to refresh)';
+  } catch (e) {
+    el.textContent = '⬤ Sync: error';
+    el.style.color = 'var(--muted)';
+    el.title = e.message;
   }
 }
 

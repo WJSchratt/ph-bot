@@ -1678,4 +1678,21 @@ router.get('/qc/conv-counts', async (req, res) => {
   }
 });
 
+// GET /qc/sync-status — returns when the last successful full GHL repull
+// completed, for the freshness indicator in the QC portal header.
+router.get('/qc/sync-status', async (req, res) => {
+  try {
+    const q = await db.query(
+      `SELECT value FROM app_settings WHERE section = 'ghl_sync' AND key = 'last_full_repull_at'`
+    );
+    const raw = q.rows[0]?.value || null;
+    if (!raw) return res.json({ last_full_repull_at: null, hours_ago: null });
+    const ts = new Date(raw);
+    const hours_ago = Math.floor((Date.now() - ts.getTime()) / 3600000);
+    res.json({ last_full_repull_at: ts.toISOString(), hours_ago });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
