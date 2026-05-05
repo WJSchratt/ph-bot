@@ -114,4 +114,70 @@ router.post('/cluster-word-tracks', requireCronAuth, async (req, res) => {
   }
 });
 
+// POST /cron/ghl-full-repull — manual trigger for the daily 7am-ET full repull.
+// Useful for testing and as a Railway cron fallback if the setInterval fires
+// outside the 1-hour check window. Mirrors the logic in pull-all-locations.
+router.post('/ghl-full-repull', requireCronAuth, async (req, res) => {
+  try {
+    const [convLocs, subLocs] = await Promise.all([
+      db.query(`SELECT DISTINCT location_id FROM conversations WHERE ghl_token IS NOT NULL AND ghl_token <> '' AND is_sandbox = FALSE`),
+      db.query(`SELECT DISTINCT ghl_location_id AS location_id FROM subaccounts WHERE ghl_api_key IS NOT NULL AND ghl_api_key <> ''`)
+    ]);
+    const seen = new Set();
+    const locationIds = [];
+    for (const r of [...convLocs.rows, ...subLocs.rows]) {
+      if (!seen.has(r.location_id)) { seen.add(r.location_id); locationIds.push(r.location_id); }
+    }
+
+    const jobs = require('../services/jobs');
+    const ghlConv = require('../services/ghlConversations');
+    const started = [];
+
+    for (const locationId of locationIds) {
+      const fromSub = await db.query(`SELECT ghl_api_key FROM subaccounts WHERE ghl_location_id = $1 AND ghl_api_key IS NOT NULL AND ghl_api_key <> '' LIMIT 1`, [locationId]);
+      const token = fromSub.rows[0]?.ghl_api_key || (await db.query(`SELECT ghl_token FROM conversations WHERE location_id = $1 AND ghl_token IS NOT NULL AND ghl_token <> '' ORDER BY updated_at DESC LIMIT 1`, [locationId])).rows[0]?.ghl_token;
+      if (!token) continue;
+      const jobId = await jobs.createJob({ type: 'ghl_full_repull', params: { locationId, fullRepull: true }, startedBy: 'cron/ghl-full-repull' });
+      jobs.spawn(jobId, async (reporter) => {
+        reporter.report({ message: `Pulling ${locationId}…` });
+        const result = await ghlConv.pullAndStore(token, locationId, (p) => {
+          reporter.report({ current: p.fetched, message: `pulling: ${p.fetched} fetched` });
+        }, { fullRepull: true });
+        reporter.report({ message: 'done' });
+        return result;
+      });
+      started.push({ locationId, jobId });
+    }
+
+    // Write sync timestamp once all jobs complete
+    if (started.length > 0) {
+      const batchJobIds = started.map((s) => s.jobId);
+      (async () => {
+        try {
+          while (true) {
+            await new Promise((r) => setTimeout(r, 5000));
+            const q = await db.query(
+              `SELECT COUNT(*) FILTER (WHERE status IN ('queued', 'running'))::int AS pending FROM jobs WHERE id = ANY($1)`,
+              [batchJobIds]
+            );
+            if (!q.rows[0]?.pending) break;
+          }
+          await db.query(
+            `INSERT INTO app_settings (section, key, value) VALUES ('ghl_sync', 'last_full_repull_at', $1)
+             ON CONFLICT (section, key) DO UPDATE SET value = EXCLUDED.value`,
+            [new Date().toISOString()]
+          );
+        } catch (e) {
+          console.error('[cron/ghl-full-repull] sync timestamp write failed', e.message);
+        }
+      })();
+    }
+
+    res.json({ ok: true, started, location_count: started.length });
+  } catch (err) {
+    console.error('[cron/ghl-full-repull]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = { router, syncDirtyFields, aggregateAnalytics };

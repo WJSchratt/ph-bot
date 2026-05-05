@@ -625,6 +625,10 @@ async function pullAndStore(ghlToken, locationId, progressCallback, options = {}
 module.exports = {
   pullAllConversations,
   pullMessages,
+  pullMessagesWithRetry,
+  replaceMessagesForConversation,
+  isSmsMessage,
+  updateConversationAggregates,
   classifyConversation,
   isClaudeJsonPayload,
   isBotpressStyleOutbound,

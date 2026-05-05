@@ -883,6 +883,33 @@ router.post('/qc/pull-all-locations', async (req, res) => {
       started.push({ locationId, jobId });
     }
 
+    // When a full repull is triggered, write the sync timestamp once all
+    // spawned jobs complete. Poll the jobs table every 5s in the background;
+    // avoids coupling timestamp accuracy to whichever job finishes last.
+    if (fullRepull && started.length > 0) {
+      const batchJobIds = started.map((s) => s.jobId);
+      (async () => {
+        try {
+          while (true) {
+            await new Promise((r) => setTimeout(r, 5000));
+            const q = await db.query(
+              `SELECT COUNT(*) FILTER (WHERE status IN ('queued', 'running'))::int AS pending FROM jobs WHERE id = ANY($1)`,
+              [batchJobIds]
+            );
+            if (!q.rows[0]?.pending) break;
+          }
+          await db.query(
+            `INSERT INTO app_settings (section, key, value) VALUES ('ghl_sync', 'last_full_repull_at', $1)
+             ON CONFLICT (section, key) DO UPDATE SET value = EXCLUDED.value`,
+            [new Date().toISOString()]
+          );
+          logger.log('qc', 'info', null, 'full_repull sync timestamp updated', { jobs: batchJobIds.length });
+        } catch (e) {
+          logger.log('qc', 'error', null, 'sync timestamp write failed', { error: e.message });
+        }
+      })();
+    }
+
     logger.log('qc', 'info', null, 'pull-all-locations triggered', { count: started.length, fullRepull, by: req.session?.username });
     res.json({ ok: true, started, fullRepull, location_count: started.length });
   } catch (err) {

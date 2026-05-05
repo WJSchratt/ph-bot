@@ -33,6 +33,7 @@ const epReviewRouter = require('./routes/epReview');
 const notificationsRouter = require('./routes/notifications');
 const auditRouter = require('./routes/audit');
 const conversationStore = require('./services/conversationStore');
+const ghlConv = require('./services/ghlConversations');
 const ghl = require('./services/ghl');
 const logger = require('./services/logger');
 const db = require('./db');
@@ -226,6 +227,71 @@ setInterval(async () => {
     logger.log('cleanup', 'error', null, 'GHL cleanup failed', { error: err.message });
   }
 }, GHL_CLEANUP_INTERVAL_MS);
+
+// Daily full GHL repull at 7am America/New_York (handles EST/EDT automatically).
+// Same effect as clicking "Full Repull" in the QC portal. Writes
+// last_full_repull_at to app_settings so the freshness indicator stays green.
+// Runs every hour and fires when the ET clock reads 7:xx — deduped by ET date.
+let lastDailyRepullKey = null;
+let dailyRepullRunning = false;
+setInterval(async () => {
+  try {
+    const now = new Date();
+    const etHour = parseInt(
+      new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }).format(now),
+      10
+    );
+    if (etHour !== 7) return;
+    const etDate = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(now);
+    if (lastDailyRepullKey === etDate) return;
+    if (dailyRepullRunning) return;
+    lastDailyRepullKey = etDate;
+    dailyRepullRunning = true;
+    logger.log('daily_repull', 'info', null, 'Daily full GHL repull starting', { etDate });
+    try {
+      const [convLocs, subLocs] = await Promise.all([
+        db.query(`SELECT DISTINCT location_id FROM conversations WHERE ghl_token IS NOT NULL AND ghl_token <> '' AND is_sandbox = FALSE`),
+        db.query(`SELECT DISTINCT ghl_location_id AS location_id FROM subaccounts WHERE ghl_api_key IS NOT NULL AND ghl_api_key <> ''`)
+      ]);
+      const seen = new Set();
+      const locationIds = [];
+      for (const r of [...convLocs.rows, ...subLocs.rows]) {
+        if (!seen.has(r.location_id)) { seen.add(r.location_id); locationIds.push(r.location_id); }
+      }
+      let totalConvs = 0;
+      let errors = 0;
+      for (const locationId of locationIds) {
+        try {
+          const fromSub = await db.query(
+            `SELECT ghl_api_key FROM subaccounts WHERE ghl_location_id = $1 AND ghl_api_key IS NOT NULL AND ghl_api_key <> '' LIMIT 1`,
+            [locationId]
+          );
+          const token = fromSub.rows[0]?.ghl_api_key ||
+            (await db.query(`SELECT ghl_token FROM conversations WHERE location_id = $1 AND ghl_token IS NOT NULL AND ghl_token <> '' ORDER BY updated_at DESC LIMIT 1`, [locationId])).rows[0]?.ghl_token;
+          if (!token) continue;
+          const result = await ghlConv.pullAndStore(token, locationId, null, { fullRepull: true });
+          totalConvs += result.total_conversations || 0;
+        } catch (err) {
+          errors++;
+          logger.log('daily_repull', 'error', null, 'Location repull failed', { locationId, error: err.message });
+        }
+      }
+      await db.query(
+        `INSERT INTO app_settings (section, key, value) VALUES ('ghl_sync', 'last_full_repull_at', $1)
+         ON CONFLICT (section, key) DO UPDATE SET value = EXCLUDED.value`,
+        [new Date().toISOString()]
+      );
+      logger.log('daily_repull', 'info', null, 'Daily full GHL repull complete', { locations: locationIds.length, totalConvs, errors, etDate });
+    } finally {
+      dailyRepullRunning = false;
+    }
+  } catch (err) {
+    dailyRepullRunning = false;
+    logger.log('daily_repull', 'error', null, 'Daily repull cron error', { error: err.message });
+  }
+}, 60 * 60 * 1000);
 
 setInterval(async () => {
   try {
