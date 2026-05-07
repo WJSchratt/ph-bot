@@ -440,10 +440,14 @@ textarea.form-input{resize:vertical;min-height:80px;}
 .dev-note strong{color:#fff;}
 .confirm-banner{background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.2);border-radius:8px;padding:12px 15px;display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
 .confirm-banner p{font-size:13px;color:var(--cyan);}
-.toast{position:fixed;bottom:20px;right:20px;background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:12px 18px;font-size:13px;z-index:999;display:none;box-shadow:0 8px 30px rgba(0,0,0,.5);max-width:380px;white-space:pre-line;}
+.toast{position:fixed;bottom:0;left:0;right:0;background:var(--surface2);border-top:2px solid var(--border2);padding:5px 20px;font-size:12px;z-index:9990;display:none;text-align:center;letter-spacing:.2px;}
 .toast.show{display:block;}
 .toast.err{border-color:var(--red);color:#ff8ea0;}
 .toast.ok{border-color:var(--green);color:#7bf0c0;}
+.ph-confirm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;}
+.ph-confirm-box{background:var(--surface);border:1px solid var(--border2);border-radius:10px;padding:24px 28px;max-width:440px;width:90%;}
+.ph-confirm-msg{font-size:13px;line-height:1.7;color:var(--text);margin-bottom:18px;white-space:pre-line;}
+.ph-confirm-btns{display:flex;gap:10px;justify-content:flex-end;}
 .loading-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--cyan);border-radius:50%;animation:spin .6s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg);}}
 ::-webkit-scrollbar{width:4px;height:4px;}
@@ -560,17 +564,16 @@ textarea.form-input{resize:vertical;min-height:80px;}
   <div class="nav-section">AI Management</div>
   <div class="nav-item" data-tab="tab-qc" onclick="goTab('tab-qc')"><span class="nav-icon">&#9678;</span> QC Portal <span class="nav-badge nb-amber" id="nav-qc-badge"></span></div>
   <div class="nav-item" data-tab="tab-changes" onclick="goTab('tab-changes')"><span class="nav-icon">&#9658;</span> Changes <span class="nav-badge nb-amber" id="nav-changes-badge" style="display:none;"></span></div>
-  <div class="nav-item" data-tab="tab-review" onclick="goTab('tab-review')"><span class="nav-icon">&#8635;</span> AI Review Queue <span class="nav-badge nb-red" id="nav-review-badge"></span></div>
-  <div class="nav-item" data-tab="tab-chiro-bot" onclick="goTab('tab-chiro-bot')"><span class="nav-icon">&#9876;</span> Chiro Bot <span class="nav-badge nb-cyan">NEW</span></div>
+  <div class="nav-item" data-tab="tab-chiro-bot" onclick="goTab('tab-chiro-bot')"><span class="nav-icon">&#9876;</span> Chiro Bot</div>
   <div class="nav-section">Tools</div>
   <div class="nav-item" data-tab="tab-sandbox" onclick="goTab('tab-sandbox')"><span class="nav-icon">&#9879;</span> Sandbox</div>
-  <div class="nav-item" data-tab="tab-analyzer" onclick="goTab('tab-analyzer')"><span class="nav-icon">&#9881;</span> Analyzer <span class="nav-badge nb-cyan">NEW</span></div>
-  <div class="nav-item" data-tab="tab-elevenlabs" onclick="goTab('tab-elevenlabs')"><span class="nav-icon">&#9835;</span> 11 Labs Data <span class="nav-badge nb-cyan">NEW</span></div>
-  <div class="nav-item" data-tab="tab-ep" onclick="goTab('tab-ep')"><span class="nav-icon">&#9742;</span> EP <span class="nav-badge nb-amber">NEW</span></div>
+  <div class="nav-item" data-tab="tab-analyzer" onclick="goTab('tab-analyzer')"><span class="nav-icon">&#9881;</span> Analyzer</div>
+  <div class="nav-item" data-tab="tab-elevenlabs" onclick="goTab('tab-elevenlabs')"><span class="nav-icon">&#9835;</span> 11 Labs Data</div>
+  <div class="nav-item" data-tab="tab-ep" onclick="goTab('tab-ep')"><span class="nav-icon">&#9742;</span> EP</div>
   <div class="nav-section">System</div>
   <div class="nav-item" data-tab="tab-notifications" onclick="goTab('tab-notifications')"><span class="nav-icon">&#9679;</span> Notifications <span class="nav-badge nb-red" id="nav-notif-badge" style="display:none;"></span></div>
   <div class="nav-item" data-tab="tab-settings" onclick="goTab('tab-settings')"><span class="nav-icon">&#9881;</span> Settings</div>
-  <div class="nav-item" data-tab="tab-devnotes" onclick="goTab('tab-devnotes')"><span class="nav-icon">&#128203;</span> Dev Notes <span class="nav-badge nb-cyan">NEW</span></div>
+  <div class="nav-item" data-tab="tab-devnotes" onclick="goTab('tab-devnotes')"><span class="nav-icon">&#128203;</span> Dev Notes</div>
   <div class="nav-item" data-tab="tab-logs" onclick="goTab('tab-logs')"><span class="nav-icon">&#9783;</span> Logs</div>
   <div class="nav-item" data-tab="tab-devconsole" onclick="goTab('tab-devconsole')"><span class="nav-icon">&#9881;</span> Dev Console <span class="nav-badge nb-red">AI</span></div>
 </nav>
@@ -872,17 +875,6 @@ textarea.form-input{resize:vertical;min-height:80px;}
   </div>
 </div>
 
-<!-- ====== AI REVIEW ====== -->
-<div class="tab-content" id="tab-review">
-  <div class="sh"><span class="sh-title">AI Review Queue</span><div class="sh-line"></div>
-    <button class="btn amb" id="rv-populate-btn" onclick="reviewAutoPopulate()">Generate Responses for Review</button>
-  </div>
-  <div class="confirm-banner" id="review-banner">
-    <p id="review-banner-text">Loading review items...</p>
-  </div>
-  <div id="review-list"></div>
-</div>
-
 <!-- ====== CHIRO BOT ====== -->
 <div class="tab-content" id="tab-chiro-bot">
   <div class="sh"><span class="sh-title">Chiro Bot Management</span><div class="sh-line"></div></div>
@@ -1025,6 +1017,43 @@ textarea.form-input{resize:vertical;min-height:80px;}
         <button class="btn pri" onclick="sbSend()">Send</button>
       </div>
       <div id="sb-metadata" style="display:none;margin-top:8px;padding:9px;background:var(--surface2);border-radius:6px;font-size:10px;font-family:'JetBrains Mono';color:var(--muted);"></div>
+    </div>
+  </div>
+
+  <!-- ====== ASK CLAUDE CONSOLE ====== -->
+  <div style="margin-top:22px;border-top:1px solid var(--border);padding-top:18px;">
+    <div class="sh"><span class="sh-title">Ask Claude</span><div class="sh-line"></div>
+      <span style="font-size:12px;color:var(--muted);">Ask why the bot responded a certain way · get a suggested fix · queue it directly to the Changes tab</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1.5fr;gap:14px;">
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div class="form-group">
+          <label class="form-label">Conversation excerpt <span style="color:var(--muted);font-weight:400;">(optional — paste the relevant turns)</span></label>
+          <textarea class="kb-textarea" id="ac-conversation" rows="6" placeholder="Lead: how much does it cost?&#10;Bot: yeah for sure - so it's all based on your age...&#10;Lead: just give me a number&#10;Bot: ..."></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Your question</label>
+          <textarea class="kb-textarea" id="ac-question" rows="3" placeholder="Why did the bot keep dodging the price question? What rule is causing this?" onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();acSend();}"></textarea>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <select class="form-input" id="ac-mode" style="width:auto;flex-shrink:0;">
+            <option value="explain">Explain the behavior</option>
+            <option value="suggest">Suggest a fix</option>
+            <option value="preview">Preview a rule change</option>
+          </select>
+          <button class="btn pri" id="ac-send-btn" onclick="acSend()">Ask Claude</button>
+          <button class="btn-sm" onclick="acClear()">Clear</button>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div id="ac-response" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;flex:1;min-height:200px;font-size:13px;line-height:1.7;color:var(--text);white-space:pre-wrap;overflow-y:auto;"><span style="color:var(--muted);">Paste a conversation snippet and ask why the bot said what it did — or ask it to suggest a fix. Claude will explain the specific rule driving the behavior.</span></div>
+        <div id="ac-suggestion-panel" style="display:none;background:var(--surface2);border:1px solid rgba(59,130,246,.35);border-radius:8px;padding:14px;">
+          <div style="font-size:10px;color:var(--blue);text-transform:uppercase;letter-spacing:1.2px;font-weight:700;margin-bottom:8px;">Suggested Rule Change</div>
+          <div id="ac-suggested-rule" style="font-family:'JetBrains Mono';font-size:11px;color:var(--text);white-space:pre-wrap;line-height:1.6;margin-bottom:12px;"></div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:8px;" id="ac-suggested-location"></div>
+          <button class="btn pri" style="font-size:12px;" onclick="acQueueChange()">&#43; Queue This Change</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1577,6 +1606,70 @@ function toast(msg, variant) {
   t._timer = setTimeout(() => t.classList.remove('show'), variant === 'err' ? 6000 : 3500);
 }
 
+// ========== CONFIRM DIALOG (replaces window.confirm) ==========
+function phConfirm(msg) {
+  return new Promise(resolve => {
+    const o = document.createElement('div');
+    o.className = 'ph-confirm-overlay';
+    o.innerHTML = '<div class="ph-confirm-box"><div class="ph-confirm-msg">' + msg.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>') + '</div><div class="ph-confirm-btns"><button class="btn" id="phc-no">Cancel</button><button class="btn pri" id="phc-yes">Confirm</button></div></div>';
+    document.body.appendChild(o);
+    o.querySelector('#phc-yes').onclick = () => { o.remove(); resolve(true); };
+    o.querySelector('#phc-no').onclick  = () => { o.remove(); resolve(false); };
+  });
+}
+
+// ========== ASK CLAUDE CONSOLE ==========
+async function acSend() {
+  const question = (document.getElementById('ac-question').value || '').trim();
+  if (!question) return;
+  const conversation = (document.getElementById('ac-conversation').value || '').trim();
+  const mode = document.getElementById('ac-mode').value;
+  const btn = document.getElementById('ac-send-btn');
+  const responseEl = document.getElementById('ac-response');
+  const suggPanel = document.getElementById('ac-suggestion-panel');
+  btn.disabled = true; btn.textContent = 'Thinking…';
+  responseEl.textContent = '…';
+  suggPanel.style.display = 'none';
+  const res = await api('/api/qc/ask-claude', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, conversation, mode })
+  });
+  btn.disabled = false; btn.textContent = 'Ask Claude';
+  if (!res) { responseEl.textContent = 'Request failed — check Railway logs.'; return; }
+  responseEl.textContent = res.explanation || '(no explanation)';
+  if (res.suggested_rule) {
+    document.getElementById('ac-suggested-rule').textContent = res.suggested_rule;
+    const locEl = document.getElementById('ac-suggested-location');
+    locEl.textContent = res.suggested_rule_location ? 'Location: ' + res.suggested_rule_location : '';
+    suggPanel.style.display = '';
+    window._acPendingSuggestion = { rule: res.suggested_rule, location: res.suggested_rule_location };
+  }
+}
+function acClear() {
+  document.getElementById('ac-question').value = '';
+  document.getElementById('ac-conversation').value = '';
+  document.getElementById('ac-response').innerHTML = '<span style="color:var(--muted);">Paste a conversation snippet and ask why the bot said what it did — or ask it to suggest a fix.</span>';
+  document.getElementById('ac-suggestion-panel').style.display = 'none';
+  window._acPendingSuggestion = null;
+}
+async function acQueueChange() {
+  if (!window._acPendingSuggestion) return;
+  const note = (document.getElementById('ac-question').value || '').trim();
+  const res = await api('/api/qc/queue-prompt-change', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rule_text: window._acPendingSuggestion.rule, source: 'ask_claude', note })
+  });
+  if (res && res.ok) {
+    toast('Change queued — go to Changes tab to review and push live.', 'ok');
+    document.getElementById('ac-suggestion-panel').style.display = 'none';
+    window._acPendingSuggestion = null;
+  } else {
+    toast('Failed to queue change.', 'err');
+  }
+}
+
 // ========== LONG-OP PROGRESS (Bug 7) ==========
 // Poll a job row by id. Drive a button's label + disabled state from the
 // job's status. On completion call onDone(job) with the final row; on
@@ -1802,7 +1895,6 @@ function loadCurrentTab() {
       refreshPendingEditsCounter();
       break;
     case 'tab-changes': loadChangesTab(); break;
-    case 'tab-review': loadReviewQueue(); break;
     case 'tab-logs': loadLogs(); startLogRefresh(); break;
     case 'tab-settings': loadSettingsData(); break;
     case 'tab-notifications': loadNotifications(); break;
@@ -1818,7 +1910,7 @@ function loadCurrentTab() {
 
 // ========== DASHBOARD ==========
 async function dashboardPullAll(fullRepull) {
-  if (fullRepull && !confirm('Full repull across ALL sub-accounts re-fetches every conversation\'s complete message history. Can take several minutes. Continue?')) return;
+  if (fullRepull && !await phConfirm('Full repull across ALL sub-accounts re-fetches every conversation\'s complete message history. Can take several minutes. Continue?')) return;
   const subs = await api('/api/subaccounts');
   // /api/subaccounts returns ghl_api_key_preview (truthy when a key is set);
   // the actual key is never sent to the client. Server uses stored key during pull.
@@ -2919,7 +3011,7 @@ async function refreshPendingEditsCounter() {
 async function qcApplyPending() {
   const r = await api('/api/qc/pending-edits-count');
   if (!r || !r.pending) { toast('No pending edits.'); return; }
-  if (!confirm('Apply ' + r.pending + ' pending edit(s) in a single Claude call? This rewrites the live system prompt.')) return;
+  if (!await phConfirm('Apply ' + r.pending + ' pending edit(s) in a single Claude call? This rewrites the live system prompt.')) return;
   const btn = document.getElementById('qc-flush-btn');
   const origLabel = btn ? btn.innerHTML : null;
   if (btn) { btn.disabled = true; btn.textContent = 'Merging edits…'; }
@@ -2935,7 +3027,7 @@ async function qcApplyPending() {
 }
 
 async function qcSyncStandardToDb() {
-  if (!confirm('Overwrite the live bot prompt with the current standard.js file contents?\n\nThis fixes "I edited the file but production ignored it" — replaces the DB override with whatever is in standard.js right now.')) return;
+  if (!await phConfirm('Overwrite the live bot prompt with the current standard.js file contents?\n\nThis fixes "I edited the file but production ignored it" — replaces the DB override with whatever is in standard.js right now.')) return;
   const res = await api('/api/qc/sync-standard-to-db', { method: 'POST' });
   if (!res) { toast('Sync failed.', 'err'); return; }
   toast('standard.js synced to live bot. Active in ~30 seconds.', 'ok');
@@ -3757,7 +3849,7 @@ async function chSend() {
 
 async function chDiscardSelected() {
   if (!chSelectedId) { toast('Select a change first.'); return; }
-  if (!confirm('Discard this pending change? This cannot be undone.')) return;
+  if (!await phConfirm('Discard this pending change? This cannot be undone.')) return;
   const res = await api('/api/pending-changes/' + chSelectedId + '/resolve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -3779,7 +3871,7 @@ async function changesPushLive() {
   const countRes = await api('/api/qc/pending-edits-count');
   if (!countRes || !countRes.pending) { toast('No pending changes to push.'); return; }
 
-  if (!confirm(`Push ${countRes.pending} change(s) to the live bot?\n\nClaude will merge all queued changes into the system prompt. The bot will use the new prompt within 30 seconds.\nGitHub will also be updated — Railway will auto-deploy.`)) return;
+  if (!await phConfirm(`Push ${countRes.pending} change(s) to the live bot?\n\nClaude will merge all queued changes into the system prompt. The bot will use the new prompt within 30 seconds.\nGitHub will also be updated — Railway will auto-deploy.`)) return;
 
   const pushBtn = document.getElementById('ch-push-btn');
   const statusEl = document.getElementById('ch-push-status');
@@ -4204,7 +4296,7 @@ function qcpClear() {
 async function qcpApplyNow() {
   const r = await api('/api/qc/pending-edits-count');
   if (!r || !r.pending) { toast('No pending changes to apply.'); return; }
-  if (!confirm('Apply ' + r.pending + ' pending change(s) to the live bot prompt?')) return;
+  if (!await phConfirm('Apply ' + r.pending + ' pending change(s) to the live bot prompt?')) return;
   const res = await api('/api/qc/apply-pending', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -4337,7 +4429,7 @@ function qbcClearChat() {
 async function qbcApplyChanges() {
   const r = await api('/api/qc/pending-edits-count');
   if (!r || !r.pending) { toast('No pending changes.'); return; }
-  if (!confirm('Apply ' + r.pending + ' pending change(s)? This rewrites the live system prompt.')) return;
+  if (!await phConfirm('Apply ' + r.pending + ' pending change(s)? This rewrites the live system prompt.')) return;
   const btn = document.getElementById('qbc-apply-btn');
   const orig = btn.textContent;
   btn.disabled = true; btn.textContent = 'Applying…';
@@ -4585,7 +4677,7 @@ function bcClearChat() {
 async function bcApplyChanges() {
   const r = await api('/api/qc/pending-edits-count');
   if (!r || !r.pending) { toast('No pending changes.'); return; }
-  if (!confirm('Apply ' + r.pending + ' pending change(s)? This rewrites the live system prompt.')) return;
+  if (!await phConfirm('Apply ' + r.pending + ' pending change(s)? This rewrites the live system prompt.')) return;
   const btn = document.getElementById('bc-apply-btn');
   const orig = btn.textContent;
   btn.disabled = true; btn.textContent = 'Applying…';
@@ -4922,7 +5014,7 @@ async function createSubaccount() {
 }
 
 async function deleteSubaccount(id) {
-  if (!confirm('Delete this subaccount?')) return;
+  if (!await phConfirm('Delete this subaccount?')) return;
   const res = await api('/api/subaccounts/' + id, { method: 'DELETE' });
   if (res) {
     toast('Subaccount deleted.');
@@ -5263,7 +5355,7 @@ async function resetUserPassword(id) {
 }
 
 async function deleteUser(id, username) {
-  if (!confirm('Delete user ' + username + '?')) return;
+  if (!await phConfirm('Delete user ' + username + '?')) return;
   const res = await fetch('/api/auth/users/' + id, { method: 'DELETE' });
   toast(res.ok ? 'User deleted.' : 'Failed to delete user.');
   renderUsers();
@@ -5311,7 +5403,7 @@ async function createSubKb() {
 }
 
 async function deleteSubKb(id, locId) {
-  if (!confirm('Delete KB entry?')) return;
+  if (!await phConfirm('Delete KB entry?')) return;
   const res = await fetch('/api/kb/' + encodeURIComponent(locId) + '/' + id, { method: 'DELETE' });
   toast(res.ok ? 'Deleted.' : 'Failed.');
   loadSubKb();
@@ -5414,7 +5506,7 @@ function hideAnalyzerProgress() {
 
 async function analyzerPull(fullRepull) {
   if (!analyzerLocationId) { toast('Select a subaccount first.'); return; }
-  if (fullRepull && !confirm('Full repull: this re-fetches every conversation\'s complete message history from GHL for this sub-account. It can take several minutes for large locations. Continue?')) return;
+  if (fullRepull && !await phConfirm('Full repull: this re-fetches every conversation\'s complete message history from GHL for this sub-account. It can take several minutes for large locations. Continue?')) return;
   const token = document.getElementById('an-token-override').value.trim();
   const btnId = fullRepull ? 'an-repull-btn' : 'an-pull-btn';
   const btn = document.getElementById(btnId);
@@ -5652,7 +5744,7 @@ async function analyzerGeneratePrompt() {
 async function analyzerApplyPrompt() {
   const newPrompt = document.getElementById('an-new-prompt').value.trim();
   if (!newPrompt) { toast('No generated prompt to apply.'); return; }
-  if (!confirm('Apply this prompt? The current version will be archived in history.')) return;
+  if (!await phConfirm('Apply this prompt? The current version will be archived in history.')) return;
   const res = await api('/api/analyzer/prompt', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -5894,7 +5986,7 @@ function escAttr(s) {
 async function dcApplyChanges(btn, changesJson, commitInputId) {
   const msg = document.getElementById(commitInputId).value.trim();
   if (!msg) { toast('Enter a commit message.'); return; }
-  if (!confirm('This will commit and push to production. Are you sure?\n\n"' + msg + '"')) return;
+  if (!await phConfirm('This will commit and push to production. Are you sure?\n\n"' + msg + '"')) return;
   let changes;
   try { changes = JSON.parse(changesJson); } catch { toast('Could not parse changes'); return; }
   btn.disabled = true;
@@ -5925,7 +6017,7 @@ async function dcApplyChanges(btn, changesJson, commitInputId) {
 }
 
 async function dcRollback() {
-  if (!confirm('Revert the last commit and push to production?\n\nThis creates a new "Revert" commit.')) return;
+  if (!await phConfirm('Revert the last commit and push to production?\n\nThis creates a new "Revert" commit.')) return;
   const res = await fetch('/api/dev/rollback', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' }

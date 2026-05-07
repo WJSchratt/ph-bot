@@ -1829,4 +1829,85 @@ router.post('/qc/sync-standard-to-db', async (req, res) => {
   }
 });
 
+// ============================================================
+// Ask Claude console — explain bot behavior, suggest prompt fixes,
+// preview rule changes. Called from the Sandbox "Ask Claude" panel.
+// ============================================================
+router.post('/qc/ask-claude', async (req, res) => {
+  try {
+    const { question, conversation, mode = 'explain' } = req.body;
+    if (!question) return res.status(400).json({ error: 'question required' });
+
+    const Anthropic = require('@anthropic-ai/sdk');
+    const anthropic = new Anthropic();
+    const analyzerModule = require('./analyzer');
+    const standardPrompt = require('../prompts/standard');
+    const currentPrompt = await analyzerModule.getCurrentPrompt() || standardPrompt;
+
+    const modeInstructions = {
+      explain: 'Explain exactly WHY the bot responded the way it did, citing the specific rule or section of the system prompt. Be specific and direct — no filler.',
+      suggest: 'Suggest a specific new rule or modification to the system prompt that fixes this behavior. Write the actual prompt text to add or change.',
+      preview: 'Show how the bot SHOULD respond with an improved rule. Draft both the rule change and the ideal bot response for the given conversation.'
+    };
+
+    const systemPrompt = `You are an expert at debugging and improving AI SMS qualification bot prompts. You help operators understand why the bot behaved a certain way and how to fix it.
+
+THE BOT'S CURRENT SYSTEM PROMPT:
+---
+${currentPrompt}
+---
+
+Task: ${modeInstructions[mode] || modeInstructions.explain}
+
+Respond ONLY with a JSON object — no markdown, no backticks:
+{
+  "explanation": "clear plain-English explanation",
+  "suggested_rule": "exact prompt text to add or modify, or null",
+  "suggested_rule_location": "where in the prompt this belongs, e.g. 'after BANNED WORDS section', or null",
+  "confidence": "high|medium|low"
+}`;
+
+    const userContent = conversation
+      ? `CONVERSATION:\n${conversation}\n\nQUESTION: ${question}`
+      : question;
+
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userContent }]
+    });
+
+    const text = response.content[0]?.text || '';
+    let parsed = { explanation: text, suggested_rule: null };
+    try {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) parsed = JSON.parse(match[0]);
+    } catch {}
+
+    logger.log('qc', 'info', null, 'ask-claude console query', { mode, has_conversation: !!conversation });
+    res.json({ ok: true, ...parsed });
+  } catch (err) {
+    logger.log('qc', 'error', null, 'ask-claude error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Queue a suggested rule change from the Ask Claude console.
+router.post('/qc/queue-prompt-change', async (req, res) => {
+  try {
+    const { rule_text, source = 'ask_claude', note } = req.body;
+    if (!rule_text) return res.status(400).json({ error: 'rule_text required' });
+    const description = note ? `${rule_text}\n\n[Context: ${note}]` : rule_text;
+    await db.query(
+      `INSERT INTO pending_prompt_changes (source, change_type, description, proposed_by)
+       VALUES ($1, 'prompt_fix', $2, 'ask_claude_console')`,
+      [source, description]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
