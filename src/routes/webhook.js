@@ -274,6 +274,39 @@ router.post('/inbound', async (req, res) => {
       }
     }
 
+    // Auto-register this location in subaccounts whenever a new token arrives
+    // or an existing token rotates. Keeps ghl_api_key current so background
+    // repulls and weekly summaries include every active client automatically,
+    // even when the manual onboarding SQL step is skipped.
+    if (parsed.ghl_token && parsed.location_id) {
+      const _saName = parsed.raw?.location?.name || null;
+      db.query(
+        `INSERT INTO subaccounts (name, ghl_location_id, ghl_api_key, status, agent_name, bot_name, vertical)
+         VALUES ($1, $2, $3, 'active', $4, $5, $6)
+         ON CONFLICT (ghl_location_id) DO UPDATE
+           SET ghl_api_key  = EXCLUDED.ghl_api_key,
+               name         = COALESCE(subaccounts.name, EXCLUDED.name),
+               agent_name   = COALESCE(subaccounts.agent_name, EXCLUDED.agent_name),
+               bot_name     = COALESCE(subaccounts.bot_name, EXCLUDED.bot_name),
+               vertical     = COALESCE(subaccounts.vertical, EXCLUDED.vertical),
+               updated_at   = NOW()
+         WHERE subaccounts.ghl_api_key IS DISTINCT FROM EXCLUDED.ghl_api_key
+            OR subaccounts.ghl_api_key IS NULL
+         RETURNING (xmax = 0) AS was_inserted`,
+        [_saName, parsed.location_id, parsed.ghl_token,
+         parsed.agent_name || null, parsed.bot_name || null,
+         parsed.bot_vertical || 'insurance']
+      ).then((r) => {
+        if (!r.rowCount) return; // same token already on file — no-op
+        const event = r.rows[0]?.was_inserted ? 'new_location' : 'token_updated';
+        logger.log('subaccount_sync', 'info', contactId, `Subaccount ${event}`, {
+          location_id: parsed.location_id, event
+        });
+      }).catch((err) => {
+        logger.log('subaccount_sync', 'warn', contactId, 'Subaccount upsert failed', { error: err.message });
+      });
+    }
+
     const conv = await store.upsertConversation(parsed);
 
     // Terminal cooldown handling — gate on the outcome itself, not is_active.
