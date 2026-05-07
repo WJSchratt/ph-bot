@@ -1951,6 +1951,7 @@ async function dashboardPullAll(fullRepull) {
   if (status) status.textContent = 'Done. ' + ok + ' ok, ' + failed + ' failed.';
   toast('Pull complete: ' + ok + ' ok, ' + failed + ' failed', failed ? 'err' : 'ok');
   loadDashboard();
+  loadQcSyncStatus();
   // Refresh QC All tab so new conversations appear immediately without manual navigation.
   if (qcTab === 'all') loadQcAll();
 }
@@ -3508,12 +3509,17 @@ async function qc2SyncGHL() {
   }
 
   if (btn) { btn.disabled = false; btn.textContent = '↺ Sync GHL'; }
+  if (ok > 0) {
+    toast('Pull started for ' + ok + ' location' + (ok !== 1 ? 's' : '') + '.', 'ok');
+  }
   if (statusEl) {
-    statusEl.textContent = 'Synced ' + ok + ' location' + (ok !== 1 ? 's' : '');
-    setTimeout(function() { if (statusEl) statusEl.textContent = ''; }, 8000);
+    statusEl.textContent = ok > 0 ? 'Pulling ' + ok + ' location' + (ok !== 1 ? 's' : '') + '…' : 'No locations found.';
+    setTimeout(function() { if (statusEl) statusEl.textContent = ''; }, 20000);
   }
   setTimeout(function() { qc2Load(); }, 12000);
   setTimeout(function() { qc2Load(); }, 60000);
+  // Refresh freshness indicator once pull jobs likely complete.
+  setTimeout(function() { qc2LoadSyncStatus(); }, 20000);
 }
 
 async function qc2LoadSyncStatus() {
@@ -3521,12 +3527,13 @@ async function qc2LoadSyncStatus() {
   if (!el) return;
   try {
     var r = await api('/api/qc/sync-status');
-    if (!r || !r.last_full_repull_at) { el.textContent = ''; return; }
-    var h = r.hours_ago;
+    var ts = r && (r.last_any_sync_at || r.last_full_repull_at);
+    if (!ts) { el.textContent = ''; return; }
+    var h = r.hours_ago !== null ? r.hours_ago : Math.floor((Date.now() - new Date(ts).getTime()) / 3600000);
     var lbl = h < 1 ? 'just now' : h === 1 ? '1h ago' : h < 24 ? h + 'h ago' : Math.floor(h / 24) + 'd ago';
     el.textContent = '● Last sync: ' + lbl;
     el.style.color = h < 25 ? 'var(--green)' : h < 48 ? 'var(--amber)' : 'var(--red)';
-    el.title = 'Last GHL sync: ' + new Date(r.last_full_repull_at).toLocaleString() + ' (click to refresh)';
+    el.title = 'Last GHL sync: ' + new Date(ts).toLocaleString() + ' (click to refresh)';
   } catch (e) {
     el.textContent = '';
   }
@@ -4170,8 +4177,8 @@ async function qcSyncAllLocations(fullRepull) {
         setTimeout(function() { loadQcAll(); }, 15000);
         setTimeout(function() { loadQcAll(); }, 60000);
         setTimeout(function() { loadQcAll(); if (statusEl) statusEl.textContent = ''; }, 180000);
-        // After a full repull the backend writes the sync timestamp asynchronously
-        // once all jobs complete. Poll for it after ~3.5 minutes.
+        // Refresh freshness indicator after jobs likely complete (~20s for incremental, ~3.5m for full).
+        setTimeout(function() { loadQcSyncStatus(); }, 25000);
         if (fullRepull) setTimeout(function() { loadQcSyncStatus(); }, 210000);
       }
     }
@@ -4189,18 +4196,18 @@ async function loadQcSyncStatus() {
   if (!el) return;
   try {
     const data = await api('/api/qc/sync-status');
-    if (!data || !data.last_full_repull_at) {
+    const ts = data && (data.last_any_sync_at || data.last_full_repull_at);
+    if (!ts) {
       el.textContent = '⬤ Sync: unknown';
       el.style.color = 'var(--red)';
-      el.title = 'No full repull recorded yet — click Full Repull to start one';
+      el.title = 'No sync recorded yet — click Sync GHL or Full Repull to start one';
       return;
     }
-    const h = data.hours_ago;
-    const dt = new Date(data.last_full_repull_at);
+    const h = data.hours_ago !== null ? data.hours_ago : Math.floor((Date.now() - new Date(ts).getTime()) / 3600000);
     const label = h < 1 ? 'just now' : h === 1 ? '1h ago' : h < 24 ? h + 'h ago' : Math.floor(h / 24) + 'd ago';
     el.textContent = '⬤ Last sync: ' + label;
     el.style.color = h < 25 ? 'var(--green)' : h < 48 ? 'var(--amber)' : 'var(--red)';
-    el.title = 'Last full GHL sync: ' + dt.toLocaleString() + ' (click to refresh)';
+    el.title = 'Last GHL sync: ' + new Date(ts).toLocaleString() + ' (click to refresh)';
   } catch (e) {
     el.textContent = '⬤ Sync: error';
     el.style.color = 'var(--muted)';

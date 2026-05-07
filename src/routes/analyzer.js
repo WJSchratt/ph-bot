@@ -656,6 +656,12 @@ router.post('/pull', async (req, res) => {
           full_repull: fullRepull, incremental: result.incremental, counts
         };
         reporter.report({ current: counts.total, total: counts.total, message: 'done' });
+        // Track last successful pull time (any pull, full or incremental).
+        await db.query(
+          `INSERT INTO app_settings (section, key, value) VALUES ('ghl_sync', 'last_sync_at', $1)
+           ON CONFLICT (section, key) DO UPDATE SET value = EXCLUDED.value`,
+          [new Date().toISOString()]
+        ).catch(() => {});
         return { locationId, ...result, counts };
       } catch (err) {
         pullProgress[locationId] = {

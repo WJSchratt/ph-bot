@@ -207,9 +207,13 @@ router.get('/dashboard', async (req, res) => {
     const dncCount = (ghlKpi.dnc || 0) + Math.max(0, (botKpi.dnc || 0) - (ghlKpi.dnc || 0));
     const handoffs = botKpi.handoffs || 0;
 
-    const sentTo = ghlOut.convs_with_outbound || 0;
+    // Response rate: conversations that actually had an inbound reply divided by
+    // all GHL conversations we know about. Using ghlKpi.total as denominator is
+    // more accurate than ghl_messages denominator, which skews high because the
+    // analyzer preferentially pulls active/responsive conversations.
+    const totalGhlConvs = ghlKpi.total || 0;
     const replied = ghlOut.convs_with_inbound || 0;
-    const responseRate = sentTo ? replied / sentTo : 0;
+    const responseRate = totalGhlConvs ? replied / totalGhlConvs : 0;
     const bookingRate = totalConversations ? appointmentsBooked / totalConversations : 0;
     const optOutRate = totalConversations ? dncCount / totalConversations : 0;
     const dncRate = optOutRate;

@@ -1713,18 +1713,25 @@ router.get('/qc/conv-counts', async (req, res) => {
   }
 });
 
-// GET /qc/sync-status — returns when the last successful full GHL repull
-// completed, for the freshness indicator in the QC portal header.
+// GET /qc/sync-status — returns last sync timestamps for the freshness indicator.
 router.get('/qc/sync-status', async (req, res) => {
   try {
     const q = await db.query(
-      `SELECT value FROM app_settings WHERE section = 'ghl_sync' AND key = 'last_full_repull_at'`
+      `SELECT key, value FROM app_settings WHERE section = 'ghl_sync' AND key IN ('last_full_repull_at', 'last_sync_at')`
     );
-    const raw = q.rows[0]?.value || null;
-    if (!raw) return res.json({ last_full_repull_at: null, hours_ago: null });
-    const ts = new Date(raw);
-    const hours_ago = Math.floor((Date.now() - ts.getTime()) / 3600000);
-    res.json({ last_full_repull_at: ts.toISOString(), hours_ago });
+    const byKey = Object.fromEntries(q.rows.map(r => [r.key, r.value]));
+    const fullRaw = byKey['last_full_repull_at'] || null;
+    const syncRaw = byKey['last_sync_at'] || null;
+    // Use whichever is more recent as the headline "last sync" time.
+    const candidates = [fullRaw, syncRaw].filter(Boolean).map(v => new Date(v));
+    const latest = candidates.length ? new Date(Math.max(...candidates.map(d => d.getTime()))) : null;
+    const hours_ago = latest ? Math.floor((Date.now() - latest.getTime()) / 3600000) : null;
+    res.json({
+      last_full_repull_at: fullRaw ? new Date(fullRaw).toISOString() : null,
+      last_sync_at: syncRaw ? new Date(syncRaw).toISOString() : null,
+      last_any_sync_at: latest ? latest.toISOString() : null,
+      hours_ago
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
