@@ -25,12 +25,18 @@ function isEpCall(agentId, agentName) {
 
 function deriveCallResult(evaluation) {
   if (!evaluation || typeof evaluation !== 'object') return 'unknown';
-  const vm = evaluation.VOICEMAIL_HIT?.result;
-  const db = evaluation.DISPATCHER_BLOWN?.result;
-  const lp = evaluation.LIVE_PICKUP?.result;
-  if (vm === 'success') return 'voicemail';
-  if (db === 'success') return 'dispatcher_blown';
-  if (lp === 'success') return 'live_pickup';
+  const lp  = evaluation.LIVE_PICKUP?.result;
+  const db  = evaluation.DISPATCHER_BLOWN?.result;
+  const bah = evaluation.BUSINESS_AFTER_HOURS_DENIED?.result;
+  const bca = evaluation.BUSINESS_CONFIRMED_AFTER_HOURS?.result;
+  const vgc = evaluation.VOICEMAIL_GREETING_CAPTURED?.result;
+  const vm  = evaluation.VOICEMAIL_HIT?.result;
+  if (lp  === 'success') return 'live_pickup';
+  if (db  === 'success') return 'dispatcher_blown';
+  if (bah === 'success') return 'denied_after_hours';
+  if (bca === 'success') return 'confirmed_after_hours';
+  if (vgc === 'success') return 'voicemail_greeting';
+  if (vm  === 'success') return 'voicemail';
   return 'unknown';
 }
 

@@ -38,6 +38,17 @@ async function fetchGhlThreadAsHistory(contactId, locationId, ghlToken, currentM
         timeout: 8000
       });
       ghlConvId = searchRes.data?.conversations?.[0]?.id;
+      // Write back so the next request skips the live search.
+      if (ghlConvId) {
+        db.query(
+          `INSERT INTO ghl_conversations (ghl_conversation_id, contact_id, location_id, pulled_at, expires_at)
+           VALUES ($1, $2, $3, NOW(), NOW() + INTERVAL '90 days')
+           ON CONFLICT (ghl_conversation_id, location_id) DO UPDATE SET
+             contact_id = COALESCE(EXCLUDED.contact_id, ghl_conversations.contact_id),
+             pulled_at = NOW()`,
+          [ghlConvId, contactId, locationId]
+        ).catch(() => {});
+      }
     }
 
     if (!ghlConvId) return null;
@@ -322,16 +333,18 @@ router.post('/inbound', async (req, res) => {
     // internally, so this is safe to fire on every "first" inbound.
     const isFirstReply = Array.isArray(conv.messages) && conv.messages.length === 0;
     if (isFirstReply && parsed.ghl_token && parsed.location_id) {
-      try {
-        const contactName = [conv.first_name || parsed.first_name, conv.last_name || parsed.last_name]
-          .filter(Boolean).join(' ').trim() || null;
-        const engRes = await ghlPipeline.routeOpportunity(
-          parsed.ghl_token,
-          parsed.location_id,
-          conv.contact_id,
-          'engaging_with_ai',
-          { logCtx: contactId, contactName, vertical: conv.vertical || 'insurance' }
-        );
+      // Fire-and-forget: pipeline config discovery can take several seconds on
+      // a cold cache (first request after a deploy), and a CRM bookkeeping step
+      // should not eat into the 30s GHL webhook window.
+      const _engContactName = [conv.first_name || parsed.first_name, conv.last_name || parsed.last_name]
+        .filter(Boolean).join(' ').trim() || null;
+      ghlPipeline.routeOpportunity(
+        parsed.ghl_token,
+        parsed.location_id,
+        conv.contact_id,
+        'engaging_with_ai',
+        { logCtx: contactId, contactName: _engContactName, vertical: conv.vertical || 'insurance' }
+      ).then((engRes) => {
         logger.log('pipeline_route', 'info', contactId, 'first-reply engaging_with_ai', {
           opportunityId: engRes.opportunityId,
           created: engRes.created,
@@ -339,9 +352,9 @@ router.post('/inbound', async (req, res) => {
           prior_stage: engRes.prior?.pipelineStageId || null,
           error: engRes.error || null
         });
-      } catch (engErr) {
+      }).catch((engErr) => {
         logger.log('pipeline_route', 'error', contactId, 'first-reply engaging_with_ai threw', { error: engErr.message });
-      }
+      });
     }
 
     // Log inbound
@@ -439,176 +452,187 @@ router.post('/inbound', async (req, res) => {
       await store.saveLastOutboundMessageType(conv.id, claudeResult.message_type);
     }
 
-    // === Post-booking cancellation (can arrive with terminal_outcome=null) ===
-    if (postBooking && claudeResult.message_type === 'cancel_appointment') {
-      logger.log('post_booking', 'info', contactId, 'Post-booking interaction', { action: 'cancel' });
-      if (conv.appointment_id && parsed.ghl_token) {
-        try {
-          await calendar.cancelAppointment(parsed.ghl_token, conv.appointment_id, contactId);
-        } catch (cancelErr) {
-          logger.log('calendar', 'error', contactId, 'Cancel threw', { error: cancelErr.message, stack: cancelErr.stack });
-        }
-      }
-      await store.clearAppointmentId(conv.id);
-      await store.clearTerminalOutcome(conv.id);
-      await syncContactFieldsNow(conv, parsed.ghl_token, contactId);
-    }
-
-    // === Terminal outcome handling ===
-    if (claudeResult.terminal_outcome) {
-      const newOutcome = claudeResult.terminal_outcome;
-      const isReschedule = newOutcome === 'appointment_booked' && postBooking && !!conv.appointment_id;
-
-      await store.setTerminalOutcome(conv.id, newOutcome);
-      const mergedConv = { ...conv, ...claudeResult.collected_data, terminal_outcome: newOutcome };
-
-      // Book real appointment (or reschedule: cancel old first, then book new)
-      if (newOutcome === 'appointment_booked' && parsed.ghl_token) {
-        try {
-          if (isReschedule) {
-            logger.log('post_booking', 'info', contactId, 'Post-booking interaction', { action: 'reschedule', old_appointment_id: conv.appointment_id });
-            try {
-              await calendar.cancelAppointment(parsed.ghl_token, conv.appointment_id, contactId);
-            } catch (cancelErr) {
-              logger.log('calendar', 'error', contactId, 'Reschedule cancel-old threw', { error: cancelErr.message });
-            }
-            await store.clearAppointmentId(conv.id);
-          }
-
-          const appointmentText = claudeResult.collected_data?.appointment_time || conv.collected_appointment_time;
-          let info = slotInfo;
-          if (!info) {
-            info = await ensureSlotsForScheduling(conv, parsed, contactId);
-          }
-          if (!info || !info.calendarId) {
-            logger.log('calendar', 'warn', contactId, 'Skipping booking — no calendar info', { appointment_text: appointmentText });
-          } else {
-            let slot = calendar.findSlotMatchingTime(info.slots || [], appointmentText, info.timezone);
-            if (!slot) {
-              logger.log('calendar', 'warn', contactId, 'No slot matched — re-fetching', { appointment_text: appointmentText });
-              const now = new Date();
-              const endDate = new Date(now.getTime() + SLOT_LOOKAHEAD_DAYS * 86400000);
-              const freshSlots = await calendar.getFreeSlots(parsed.ghl_token, info.calendarId, now.getTime(), endDate.getTime(), info.timezone, contactId);
-              slot = calendar.findSlotMatchingTime(freshSlots, appointmentText, info.timezone);
-              info.slots = freshSlots;
-            }
-            if (!slot) {
-              logger.log('calendar', 'error', contactId, 'Could not match appointment to any slot', { appointment_text: appointmentText });
-            } else {
-              const endTime = slot.endTime || calendar.inferEndTime(slot, 30);
-              const titleTemplate = info.eventTitle || 'Appointment';
-              const contactName = `${conv.first_name || ''} ${conv.last_name || ''}`.trim() || 'Contact';
-              const agentDisplayName = conv.agent_name || 'Agent';
-              const title = titleTemplate
-                .replace(/\{\{\s*contact\.name\s*\}\}/gi, contactName)
-                .replace(/\{\{\s*appointment\.user\.name\s*\}\}/gi, agentDisplayName);
-              const bookRes = await calendar.bookAppointment(parsed.ghl_token, {
-                calendarId: info.calendarId,
-                locationId: parsed.location_id,
-                contactId: conv.contact_id,
-                startTime: slot.startTime,
-                endTime,
-                title,
-                assignedUserId: info.assignedUserId
-              }, contactId);
-              if (bookRes.ok && bookRes.appointment?.id) {
-                await store.saveAppointmentId(conv.id, bookRes.appointment.id);
-              }
-            }
-          }
-        } catch (bookErr) {
-          logger.log('calendar', 'error', contactId, 'Appointment booking threw', { error: bookErr.message, stack: bookErr.stack });
-        }
-      }
-
-      // Handle DNC immediately (deactivates conversation via setTerminalOutcome already)
-      if (newOutcome === 'dnc' && parsed.ghl_token) {
-        await ghl.setContactDnd(parsed.ghl_token, conv.contact_id);
-      }
-
-      // Tag-based pipeline routing (kept for workflow triggers that still watch tags).
-      // DNC already tags via setContactDnd above.
-      if (newOutcome !== 'dnc' && parsed.ghl_token) {
-        try {
-          const tagRes = await ghl.tagContactForOutcome(parsed.ghl_token, conv.contact_id, newOutcome);
-          if (tagRes && !tagRes.skipped) {
-            logger.log('ghl_tag', tagRes.ok ? 'info' : 'warn', contactId, 'Tagged contact for outcome', { outcome: newOutcome, tags: tagRes.tags, ok: tagRes.ok });
-          }
-        } catch (tagErr) {
-          logger.log('ghl_tag', 'error', contactId, 'Tag contact threw', { outcome: newOutcome, error: tagErr.message });
-        }
-      }
-
-      // Direct opportunity stage move. Translates the bot's internal outcome
-      // into the feature routing label, then moves the contact's opportunity
-      // into the Sales Pipeline at the right stage. Cross-pipeline moves are
-      // supported by GHL — the PUT sets both pipelineId and pipelineStageId.
-      if (parsed.ghl_token && parsed.location_id) {
-        const routeOutcome = ghlPipeline.TERMINAL_TO_ROUTE_OUTCOME[newOutcome];
-        if (routeOutcome) {
-          try {
-            const contactName = [conv.first_name || parsed.first_name, conv.last_name || parsed.last_name]
-              .filter(Boolean).join(' ').trim() || null;
-            const routeRes = await ghlPipeline.routeOpportunity(
-              parsed.ghl_token,
-              parsed.location_id,
-              conv.contact_id,
-              routeOutcome,
-              { logCtx: contactId, contactName, vertical: conv.vertical || 'insurance' }
-            );
-            logger.log('pipeline_route', 'info', contactId, 'routeOpportunity result', {
-              terminal_outcome: newOutcome,
-              route_outcome: routeOutcome,
-              opportunityId: routeRes.opportunityId,
-              prior: routeRes.prior,
-              target: routeRes.target,
-              handoff_reason: routeRes.handoffReason,
-              skipped: routeRes.skipped || null,
-              error: routeRes.error || null
-            });
-          } catch (routeErr) {
-            logger.log('pipeline_route', 'error', contactId, 'routeOpportunity threw', {
-              terminal_outcome: newOutcome, error: routeErr.message
-            });
-          }
-        }
-      }
-
-      // Skip firing PCR again on a reschedule, and skip entirely for non-insurance verticals
-      if (!isReschedule && (conv.vertical || 'insurance') === 'insurance') {
-        await firePostCallRouter(mergedConv, newOutcome);
-        logger.log('webhook_fire', 'info', contactId, 'Post-call router fired', { outcome: newOutcome, url: process.env.GHL_POST_CALL_ROUTER_URL });
-      }
-
-      // Immediate custom-field sync to GHL (covers booked, reschedule, handoff, dnc, fex/mp_immediate, etc.)
-      await syncContactFieldsNow(conv, parsed.ghl_token, contactId);
-    }
-
-    // Post-booking conversational / question turn (no terminal outcome, not a cancel)
-    if (postBooking && !claudeResult.terminal_outcome && claudeResult.message_type !== 'cancel_appointment') {
-      const mt = claudeResult.message_type || 'post_booking_chat';
-      if (mt === 'post_booking_question' || mt === 'post_booking_chat' || mt === 'reschedule') {
-        logger.log('post_booking', 'info', contactId, 'Post-booking interaction', { action: mt });
-      }
-    }
-
-    // Keep ghl_conversations.last_message_at current so the All Conversations
-    // tab sorts correctly without waiting for a manual GHL pull.
-    db.query(
-      `UPDATE ghl_conversations SET last_message_at = NOW() WHERE contact_id = $1 AND location_id = $2`,
-      [parsed.contact_id, parsed.location_id]
-    ).catch(() => {});
-
-    return res.status(200).json({
+    // Respond to GHL immediately — all remaining work (terminal outcome routing,
+    // appointment booking, field sync, post-call router) runs detached below.
+    // This keeps us well under GHL's ~30s webhook timeout even on sub-accounts
+    // with cold pipeline caches or uncached GHL conversation IDs.
+    res.status(200).json({
       ok: true,
       outcome: claudeResult.terminal_outcome,
       message_type: claudeResult.message_type,
       elapsed_ms: Date.now() - startedAt
     });
+
+    // --- Detached post-response work (GHL API calls, DB updates) ---
+    // Captured variables: conv, claudeResult, parsed, postBooking, slotInfo, contactId
+    (async () => {
+      try {
+        // === Post-booking cancellation (can arrive with terminal_outcome=null) ===
+        if (postBooking && claudeResult.message_type === 'cancel_appointment') {
+          logger.log('post_booking', 'info', contactId, 'Post-booking interaction', { action: 'cancel' });
+          if (conv.appointment_id && parsed.ghl_token) {
+            try {
+              await calendar.cancelAppointment(parsed.ghl_token, conv.appointment_id, contactId);
+            } catch (cancelErr) {
+              logger.log('calendar', 'error', contactId, 'Cancel threw', { error: cancelErr.message, stack: cancelErr.stack });
+            }
+          }
+          await store.clearAppointmentId(conv.id);
+          await store.clearTerminalOutcome(conv.id);
+          await syncContactFieldsNow(conv, parsed.ghl_token, contactId);
+        }
+
+        // === Terminal outcome handling ===
+        if (claudeResult.terminal_outcome) {
+          const newOutcome = claudeResult.terminal_outcome;
+          const isReschedule = newOutcome === 'appointment_booked' && postBooking && !!conv.appointment_id;
+
+          await store.setTerminalOutcome(conv.id, newOutcome);
+          const mergedConv = { ...conv, ...claudeResult.collected_data, terminal_outcome: newOutcome };
+
+          // Book real appointment (or reschedule: cancel old first, then book new)
+          if (newOutcome === 'appointment_booked' && parsed.ghl_token) {
+            try {
+              if (isReschedule) {
+                logger.log('post_booking', 'info', contactId, 'Post-booking interaction', { action: 'reschedule', old_appointment_id: conv.appointment_id });
+                try {
+                  await calendar.cancelAppointment(parsed.ghl_token, conv.appointment_id, contactId);
+                } catch (cancelErr) {
+                  logger.log('calendar', 'error', contactId, 'Reschedule cancel-old threw', { error: cancelErr.message });
+                }
+                await store.clearAppointmentId(conv.id);
+              }
+
+              const appointmentText = claudeResult.collected_data?.appointment_time || conv.collected_appointment_time;
+              let info = slotInfo;
+              if (!info) {
+                info = await ensureSlotsForScheduling(conv, parsed, contactId);
+              }
+              if (!info || !info.calendarId) {
+                logger.log('calendar', 'warn', contactId, 'Skipping booking — no calendar info', { appointment_text: appointmentText });
+              } else {
+                let slot = calendar.findSlotMatchingTime(info.slots || [], appointmentText, info.timezone);
+                if (!slot) {
+                  logger.log('calendar', 'warn', contactId, 'No slot matched — re-fetching', { appointment_text: appointmentText });
+                  const now = new Date();
+                  const endDate = new Date(now.getTime() + SLOT_LOOKAHEAD_DAYS * 86400000);
+                  const freshSlots = await calendar.getFreeSlots(parsed.ghl_token, info.calendarId, now.getTime(), endDate.getTime(), info.timezone, contactId);
+                  slot = calendar.findSlotMatchingTime(freshSlots, appointmentText, info.timezone);
+                  info.slots = freshSlots;
+                }
+                if (!slot) {
+                  logger.log('calendar', 'error', contactId, 'Could not match appointment to any slot', { appointment_text: appointmentText });
+                } else {
+                  const endTime = slot.endTime || calendar.inferEndTime(slot, 30);
+                  const titleTemplate = info.eventTitle || 'Appointment';
+                  const contactName = `${conv.first_name || ''} ${conv.last_name || ''}`.trim() || 'Contact';
+                  const agentDisplayName = conv.agent_name || 'Agent';
+                  const title = titleTemplate
+                    .replace(/\{\{\s*contact\.name\s*\}\}/gi, contactName)
+                    .replace(/\{\{\s*appointment\.user\.name\s*\}\}/gi, agentDisplayName);
+                  const bookRes = await calendar.bookAppointment(parsed.ghl_token, {
+                    calendarId: info.calendarId,
+                    locationId: parsed.location_id,
+                    contactId: conv.contact_id,
+                    startTime: slot.startTime,
+                    endTime,
+                    title,
+                    assignedUserId: info.assignedUserId
+                  }, contactId);
+                  if (bookRes.ok && bookRes.appointment?.id) {
+                    await store.saveAppointmentId(conv.id, bookRes.appointment.id);
+                  }
+                }
+              }
+            } catch (bookErr) {
+              logger.log('calendar', 'error', contactId, 'Appointment booking threw', { error: bookErr.message, stack: bookErr.stack });
+            }
+          }
+
+          // Handle DNC immediately (deactivates conversation via setTerminalOutcome already)
+          if (newOutcome === 'dnc' && parsed.ghl_token) {
+            await ghl.setContactDnd(parsed.ghl_token, conv.contact_id);
+          }
+
+          // Tag-based pipeline routing (kept for workflow triggers that still watch tags).
+          // DNC already tags via setContactDnd above.
+          if (newOutcome !== 'dnc' && parsed.ghl_token) {
+            try {
+              const tagRes = await ghl.tagContactForOutcome(parsed.ghl_token, conv.contact_id, newOutcome);
+              if (tagRes && !tagRes.skipped) {
+                logger.log('ghl_tag', tagRes.ok ? 'info' : 'warn', contactId, 'Tagged contact for outcome', { outcome: newOutcome, tags: tagRes.tags, ok: tagRes.ok });
+              }
+            } catch (tagErr) {
+              logger.log('ghl_tag', 'error', contactId, 'Tag contact threw', { outcome: newOutcome, error: tagErr.message });
+            }
+          }
+
+          // Direct opportunity stage move.
+          if (parsed.ghl_token && parsed.location_id) {
+            const routeOutcome = ghlPipeline.TERMINAL_TO_ROUTE_OUTCOME[newOutcome];
+            if (routeOutcome) {
+              try {
+                const contactName = [conv.first_name || parsed.first_name, conv.last_name || parsed.last_name]
+                  .filter(Boolean).join(' ').trim() || null;
+                const routeRes = await ghlPipeline.routeOpportunity(
+                  parsed.ghl_token,
+                  parsed.location_id,
+                  conv.contact_id,
+                  routeOutcome,
+                  { logCtx: contactId, contactName, vertical: conv.vertical || 'insurance' }
+                );
+                logger.log('pipeline_route', 'info', contactId, 'routeOpportunity result', {
+                  terminal_outcome: newOutcome,
+                  route_outcome: routeOutcome,
+                  opportunityId: routeRes.opportunityId,
+                  prior: routeRes.prior,
+                  target: routeRes.target,
+                  handoff_reason: routeRes.handoffReason,
+                  skipped: routeRes.skipped || null,
+                  error: routeRes.error || null
+                });
+              } catch (routeErr) {
+                logger.log('pipeline_route', 'error', contactId, 'routeOpportunity threw', {
+                  terminal_outcome: newOutcome, error: routeErr.message
+                });
+              }
+            }
+          }
+
+          // Skip firing PCR again on a reschedule, and skip entirely for non-insurance verticals
+          if (!isReschedule && (conv.vertical || 'insurance') === 'insurance') {
+            await firePostCallRouter(mergedConv, newOutcome);
+            logger.log('webhook_fire', 'info', contactId, 'Post-call router fired', { outcome: newOutcome, url: process.env.GHL_POST_CALL_ROUTER_URL });
+          }
+
+          // Immediate custom-field sync to GHL
+          await syncContactFieldsNow(conv, parsed.ghl_token, contactId);
+        }
+
+        // Post-booking conversational / question turn (no terminal outcome, not a cancel)
+        if (postBooking && !claudeResult.terminal_outcome && claudeResult.message_type !== 'cancel_appointment') {
+          const mt = claudeResult.message_type || 'post_booking_chat';
+          if (mt === 'post_booking_question' || mt === 'post_booking_chat' || mt === 'reschedule') {
+            logger.log('post_booking', 'info', contactId, 'Post-booking interaction', { action: mt });
+          }
+        }
+
+        // Keep ghl_conversations.last_message_at current so the All Conversations
+        // tab sorts correctly without waiting for a manual GHL pull.
+        db.query(
+          `UPDATE ghl_conversations SET last_message_at = NOW() WHERE contact_id = $1 AND location_id = $2`,
+          [parsed.contact_id, parsed.location_id]
+        ).catch(() => {});
+      } catch (bgErr) {
+        logger.log('error', 'error', contactId, 'Post-response GHL work failed', { error: bgErr.message, stack: bgErr.stack });
+      }
+    })();
   } catch (err) {
     logger.log('error', 'error', contactId, err.message, { stack: err.stack });
     console.error('[webhook/inbound] error', err);
-    return res.status(500).json({ error: 'internal error', detail: err.message });
+    if (!res.headersSent) {
+      return res.status(500).json({ error: 'internal error', detail: err.message });
+    }
   }
 });
 
