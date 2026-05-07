@@ -13,8 +13,8 @@ const GH_REPO = 'ph-bot';
 const GH_FILE = 'src/prompts/standard.js';
 
 async function commitPromptToGitHub(promptText) {
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) return { ok: false, error: 'GITHUB_TOKEN not set in environment' };
+  const token = process.env.GITHUB_DEPLOY_TOKEN || process.env.GITHUB_TOKEN;
+  if (!token) return { ok: false, error: 'GITHUB_DEPLOY_TOKEN (or GITHUB_TOKEN) not set in environment' };
   const headers = { Authorization: `Bearer ${token}`, 'User-Agent': 'ph-bot', Accept: 'application/vnd.github+json' };
   const apiBase = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_FILE}`;
 
