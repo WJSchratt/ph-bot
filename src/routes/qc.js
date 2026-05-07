@@ -237,7 +237,7 @@ const ghlConv = require('../services/ghlConversations');
 
 async function buildUnifiedThread(ghlConversationId, locationId) {
   const msgsQ = await db.query(
-    `SELECT id, direction, content, message_type, created_at, cluster_id, ghl_message_id
+    `SELECT id, direction, content, message_type, created_at, cluster_id, ghl_message_id, delivery_status
        FROM ghl_messages
       WHERE ghl_conversation_id = $1 AND location_id = $2
       ORDER BY created_at ASC`,
@@ -336,6 +336,7 @@ async function buildUnifiedThread(ghlConversationId, locationId) {
       message_type: r.message_type,
       created_at: r.created_at,
       cluster_id: r.cluster_id,
+      delivery_status: r.delivery_status || null,
       source,
       editable: source === 'claude'
     });

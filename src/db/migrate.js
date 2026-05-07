@@ -571,6 +571,20 @@ async function applyMigrations() {
         ON messages(contact_id, direction, created_at DESC);
     `);
     console.log('[migrate] idx_messages_contact_dir_created ensured');
+
+    // Delivery status from GHL (delivered, sent, failed, undelivered, pending, read).
+    // Populated when the analyzer pulls messages — GHL includes this on each message
+    // object. Lets analytics filter out failed/undelivered messages from effective
+    // outbound counts and lets the QC conversation view badge failed messages.
+    await pool.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ghl_messages' AND column_name='delivery_status') THEN
+          ALTER TABLE ghl_messages ADD COLUMN delivery_status VARCHAR(50);
+        END IF;
+      END $$;
+      CREATE INDEX IF NOT EXISTS idx_ghl_messages_delivery_status ON ghl_messages(delivery_status) WHERE delivery_status IS NOT NULL;
+    `);
+    console.log('[migrate] ghl_messages.delivery_status ensured');
 }
 
 // CLI entry point — when run as `node src/db/migrate.js` or `npm run migrate`.

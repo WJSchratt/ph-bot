@@ -54,8 +54,22 @@ router.get('/analytics', async (req, res) => {
       params
     );
 
+    // Failed/undelivered count from ghl_messages (populated after analyzer pulls).
+    // Uses separate params since it queries a different table with delivery_status.
+    const ghlMsgFilters = [`direction = 'outbound'`, `delivery_status IN ('failed', 'undelivered')`];
+    const ghlMsgParams = [];
+    if (location_id) { ghlMsgParams.push(location_id); ghlMsgFilters.push(`location_id = $${ghlMsgParams.length}`); }
+    if (start_date) { ghlMsgParams.push(start_date); ghlMsgFilters.push(`created_at >= $${ghlMsgParams.length}`); }
+    if (end_date) { ghlMsgParams.push(end_date); ghlMsgFilters.push(`created_at <= $${ghlMsgParams.length}`); }
+    const failedRes = await db.query(
+      `SELECT COUNT(*)::int AS failed_count FROM ghl_messages WHERE ${ghlMsgFilters.join(' AND ')}`,
+      ghlMsgParams
+    );
+    const failedDeliveries = failedRes.rows[0].failed_count || 0;
+
     const s = summary.rows[0];
     const totalConv = s.total_conversations || 0;
+    const totalOutbound = msgAgg.rows[0].outbound || 0;
     const appointmentRate = totalConv ? (s.appointments_booked / totalConv) : 0;
     const optOutRate = totalConv ? (s.dnc_count / totalConv) : 0;
 
@@ -86,7 +100,9 @@ router.get('/analytics', async (req, res) => {
         appointment_rate: appointmentRate,
         opt_out_rate: optOutRate,
         total_inbound_messages: msgAgg.rows[0].inbound,
-        total_outbound_messages: msgAgg.rows[0].outbound,
+        total_outbound_messages: totalOutbound,
+        failed_deliveries: failedDeliveries,
+        effective_outbound_messages: totalOutbound - failedDeliveries,
         avg_messages_per_conversation: perConv.rows[0].avg_messages_per_conversation || 0,
         avg_response_time_seconds: msgAgg.rows[0].avg_response_time_seconds || 0
       },

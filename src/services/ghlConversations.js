@@ -331,7 +331,7 @@ async function replaceMessagesForConversation(ghlConversationId, locationId, mes
   const params = [];
   let p = 1;
   for (const m of messages) {
-    values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+    values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
     params.push(
       ghlConversationId,
       locationId,
@@ -339,11 +339,12 @@ async function replaceMessagesForConversation(ghlConversationId, locationId, mes
       messageText(m) || null,
       m.messageType || m.type || null,
       tsOrNull(m.dateAdded || m.created),
-      m.id || null
+      m.id || null,
+      m.status || null
     );
   }
   await db.query(
-    `INSERT INTO ghl_messages (ghl_conversation_id, location_id, direction, content, message_type, created_at, ghl_message_id) VALUES ${values.join(', ')}`,
+    `INSERT INTO ghl_messages (ghl_conversation_id, location_id, direction, content, message_type, created_at, ghl_message_id, delivery_status) VALUES ${values.join(', ')}`,
     params
   );
 }

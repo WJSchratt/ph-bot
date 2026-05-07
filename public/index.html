@@ -2841,8 +2841,10 @@ function renderQcThread(thread) {
     const badge = qcSourceBadge(m.source || (isOutbound ? 'unknown' : 'user'));
     const ts = m.created_at ? new Date(m.created_at).toLocaleString() : '';
     const editHint = isOutbound ? ' <span class="flag-hint">click to replace</span>' : '';
+    const failBadge = (m.delivery_status === 'failed' || m.delivery_status === 'undelivered')
+      ? ' <span style="color:var(--red);font-size:9px;font-weight:700;letter-spacing:.5px;">FAILED</span>' : '';
     d.innerHTML =
-      '<div class="bubble-lbl"><span class="' + badge.cls + '" style="margin-right:6px;">' + esc(badge.label) + '</span>' + esc(ts) + editHint + '</div>' +
+      '<div class="bubble-lbl"><span class="' + badge.cls + '" style="margin-right:6px;">' + esc(badge.label) + '</span>' + esc(ts) + editHint + failBadge + '</div>' +
       esc(m.content || '');
     if (isOutbound) {
       const msgSnap = { content: m.content, source: m.source, direction: m.direction };
@@ -3268,8 +3270,10 @@ function qc2RenderThread(thread) {
     var ts = m.created_at ? new Date(m.created_at).toLocaleString() : '';
     var div = document.createElement('div');
     div.className = 'qc2-bbl ' + (isOut ? 'outbound' : 'inbound');
+    var failBadge = (m.delivery_status === 'failed' || m.delivery_status === 'undelivered')
+      ? ' <span style="color:var(--red);font-size:9px;font-weight:700;letter-spacing:.5px;">FAILED</span>' : '';
     div.innerHTML = '<div class="qc2-bbl-lbl"><span class="' + badge.cls + '">' + esc(badge.label) + '</span>' + esc(ts) +
-      (isOut ? ' <span class="qc2-fhint" style="font-size:9px;color:var(--muted);opacity:0;transition:opacity .12s;">click to flag</span>' : '') + '</div>' + esc(m.content || '');
+      (isOut ? ' <span class="qc2-fhint" style="font-size:9px;color:var(--muted);opacity:0;transition:opacity .12s;">click to flag</span>' : '') + failBadge + '</div>' + esc(m.content || '');
     if (isOut) {
       div.addEventListener('mouseenter', function() { var h = div.querySelector('.qc2-fhint'); if (h) h.style.opacity = '1'; });
       div.addEventListener('mouseleave', function() { var h = div.querySelector('.qc2-fhint'); if (h) h.style.opacity = '0'; });
