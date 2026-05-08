@@ -102,7 +102,7 @@ function isSchedulingPhase(conv) {
 }
 
 function isPostBooking(conv) {
-  return !!conv && conv.is_active && conv.terminal_outcome === 'appointment_booked';
+  return !!conv && conv.is_active && (conv.terminal_outcome === 'appointment_booked' || conv.terminal_outcome === 'advanced_market_booked');
 }
 
 function buildPostBookingContext(conv) {
@@ -308,6 +308,18 @@ router.post('/inbound', async (req, res) => {
     }
 
     const conv = await store.upsertConversation(parsed);
+
+    // Fetch advanced market calendar ID for this subaccount (used if bot pivots to advanced markets).
+    let advancedMarketCalendarId = null;
+    if (parsed.location_id) {
+      try {
+        const amQ = await db.query(
+          `SELECT advanced_market_calendar_id FROM subaccounts WHERE ghl_location_id = $1 LIMIT 1`,
+          [parsed.location_id]
+        );
+        advancedMarketCalendarId = amQ.rows[0]?.advanced_market_calendar_id || null;
+      } catch {}
+    }
 
     // Terminal cooldown handling — gate on the outcome itself, not is_active.
     // This is defensive: if a stale row has is_active=false but a non-deactivating
@@ -524,7 +536,7 @@ router.post('/inbound', async (req, res) => {
           const mergedConv = { ...conv, ...claudeResult.collected_data, terminal_outcome: newOutcome };
 
           // Book real appointment (or reschedule: cancel old first, then book new)
-          if (newOutcome === 'appointment_booked' && parsed.ghl_token) {
+          if ((newOutcome === 'appointment_booked' || newOutcome === 'advanced_market_booked') && parsed.ghl_token) {
             try {
               if (isReschedule) {
                 logger.log('post_booking', 'info', contactId, 'Post-booking interaction', { action: 'reschedule', old_appointment_id: conv.appointment_id });
@@ -540,6 +552,12 @@ router.post('/inbound', async (req, res) => {
               let info = slotInfo;
               if (!info) {
                 info = await ensureSlotsForScheduling(conv, parsed, contactId);
+              }
+              // For advanced market bookings, override the calendar ID with the subaccount's
+              // configured advanced market calendar so it routes to the right specialist.
+              if (newOutcome === 'advanced_market_booked' && advancedMarketCalendarId && info) {
+                info = { ...info, calendarId: advancedMarketCalendarId };
+                await store.saveCalendarInfo(conv.id, { calendarId: advancedMarketCalendarId, assignedUserId: info.assignedUserId, eventTitle: info.eventTitle });
               }
               if (!info || !info.calendarId) {
                 logger.log('calendar', 'warn', contactId, 'Skipping booking — no calendar info', { appointment_text: appointmentText });

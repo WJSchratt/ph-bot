@@ -669,7 +669,6 @@ textarea.form-input{resize:vertical;min-height:80px;}
 .wt-card:hover { border-color: var(--border2); }
 .wt-card-hdr { display: flex; align-items: flex-start; gap: 16px; cursor: pointer; }
 .wt-card-title { font-size: 18px; font-weight: 700; color: #fff; line-height: 1.3; margin: 0; flex: 1; }
-.wt-card-title .wt-unmapped { font-size: 11px; font-weight: 600; color: var(--amber); background: rgba(255,181,71,0.1); padding: 2px 8px; border-radius: 4px; margin-right: 8px; vertical-align: middle; }
 .wt-card-hero { text-align: right; }
 .wt-hero-num { font-size: 26px; font-weight: 700; color: var(--cyan); line-height: 1; }
 .wt-hero-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
@@ -702,6 +701,12 @@ textarea.form-input{resize:vertical;min-height:80px;}
 .wt-pager button { background: var(--panel); border: 1px solid var(--border); color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 14px; cursor: pointer; transition: background 120ms; }
 .wt-pager button:hover:not(:disabled) { background: var(--surface2); border-color: var(--border2); }
 .wt-pager button:disabled { opacity: 0.35; cursor: not-allowed; }
+.wt-msg-seq { margin-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+.wt-msg-row { display: flex; align-items: flex-start; gap: 12px; }
+.wt-msg-pos { width: 22px; height: 22px; border-radius: 50%; background: var(--cyan); color: #000; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 6px; }
+.wt-msg-bubble { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.wt-msg-bubble-text { font-size: 13px; color: #fff; line-height: 1.55; white-space: pre-wrap; }
+.wt-msg-bubble-stats { font-size: 11px; color: var(--cyan); margin-top: 7px; }
 @media (max-width: 760px) {
   .wt-card { padding: 16px; }
   .wt-card-hdr { flex-direction: column; }
@@ -2276,6 +2281,7 @@ let wtState = {
   expandedPaths: new Set(), // keyed "name::path"
   pathCache: new Map(),     // name::path → positions[]
   pathLoading: new Set(),
+  workflowMsgCache: new Map(), // group.name → positions[] from /api/wordtracks/workflow/:id
   page: 1,
   search: ''
 };
@@ -2316,6 +2322,7 @@ async function loadWordtracks() {
   const data = await api('/api/wordtracks/workflows?' + params);
   if (!data) return;
   wtState.workflows = data.workflows || [];
+  wtState.workflowMsgCache = new Map();
   wtState.grouped = groupWorkflowsForCards(wtState.workflows);
   renderWtCards();
 }
@@ -2331,7 +2338,9 @@ async function loadWordtracks() {
 function groupWorkflowsForCards(workflows) {
   const byName = new Map();
   for (const w of workflows) {
-    const name = w.ghl_workflow_name || '[unmapped] ' + humanizeLabel(w.label || 'unlabeled');
+    const name = w.ghl_workflow_name ||
+      (w.label && w.label !== 'unlabeled' ? humanizeLabel(w.label) :
+        ((w.example_opener || '').trim().slice(0, 65) || 'Workflow #' + w.id));
     const path = w.ghl_workflow_path || null;
     if (!byName.has(name)) byName.set(name, { name, mapped: !!w.ghl_workflow_name, paths: new Map() });
     const g = byName.get(name);
@@ -2347,7 +2356,9 @@ function groupWorkflowsForCards(workflows) {
       agg: aggregateWorkflowRows(p.clusters)
     })).sort((a, b) => b.agg.sends - a.agg.sends);
     const agg = aggregateWorkflowRows(g.paths.size === 1 ? [...g.paths.values()][0].clusters : [].concat(...paths.map(p => p.clusters)));
-    groups.push({ name: g.name, mapped: g.mapped, paths, agg });
+    const allClusters = [].concat(...paths.map(p => p.clusters));
+    const primaryClusterId = allClusters.sort((a, b) => (b.sends || 0) - (a.sends || 0))[0]?.id || null;
+    groups.push({ name: g.name, mapped: g.mapped, paths, agg, primaryClusterId });
   }
   return groups.sort((a, b) => b.agg.unique_conversations - a.agg.unique_conversations);
 }
@@ -2477,13 +2488,19 @@ function renderWorkflowCard(group) {
   const agg = group.agg;
   const badges = subaccountBadges(agg.subaccount_locations);
   const activity = lastActivityLine(agg.last_send_at, agg.last_reply_at) || '';
-  const unmappedTag = group.mapped ? '' : '<span class="wt-unmapped">UNMAPPED</span>';
-  const pathsHtml = open ? group.paths.map(p => renderPathCard(group, p)).join('') : '';
+  let bodyHtml = '';
+  if (open) {
+    const cachedPositions = wtState.workflowMsgCache.get(key);
+    const msgSeqHtml = cachedPositions
+      ? renderWorkflowMsgSequence(cachedPositions)
+      : '<div style="color:var(--muted);font-size:13px;padding:8px 0;">Loading messages…</div>';
+    bodyHtml = '<div class="wt-card-body open"><div class="wt-card-body-inner">' + renderWorkflowExpandedBody(group) + msgSeqHtml + '</div></div>';
+  }
   return '<div class="wt-card">' +
     '<div class="wt-card-hdr" onclick="toggleWtGroup(' + JSON.stringify(key).replace(/"/g, '&quot;') + ')">' +
       '<span class="wt-caret' + (open ? ' open' : '') + '">&rsaquo;</span>' +
       '<div style="flex:1;">' +
-        '<div class="wt-card-title">' + unmappedTag + esc(group.name) + '</div>' +
+        '<div class="wt-card-title">' + esc(group.name) + '</div>' +
         '<div class="wt-card-meta">' +
           '<div class="wt-meta-item"><strong>' + fmtNum(agg.unique_conversations) + '</strong> contacts</div>' +
           '<div class="wt-meta-item"><strong>' + fmtNum(agg.sends) + '</strong> sends</div>' +
@@ -2497,7 +2514,7 @@ function renderWorkflowCard(group) {
         '<div class="wt-hero-lbl">Reply Rate</div>' +
       '</div>' +
     '</div>' +
-    (open ? '<div class="wt-card-body open"><div class="wt-card-body-inner">' + renderWorkflowExpandedBody(group) + pathsHtml + '</div></div>' : '') +
+    bodyHtml +
   '</div>';
 }
 
@@ -2519,6 +2536,27 @@ function renderWorkflowExpandedBody(group) {
 function detailItem(label, value, color) {
   const c = color === 'cyan' ? 'var(--cyan)' : color === 'green' ? 'var(--green)' : color === 'red' ? 'var(--red)' : color === 'amber' ? 'var(--amber)' : '#fff';
   return '<div class="wt-detail-item"><div class="wt-detail-lbl">' + esc(label) + '</div><div class="wt-detail-val" style="color:' + c + ';">' + value + '</div></div>';
+}
+
+function renderWorkflowMsgSequence(positions) {
+  if (!positions || !positions.length) return '<div style="color:var(--muted);font-size:13px;padding:8px 0;">No message sequence data yet.</div>';
+  const rows = positions.map(pos => {
+    const best = [...pos.clusters].sort((a, b) => (b.sends || 0) - (a.sends || 0))[0];
+    if (!best) return '';
+    const text = best.example_text || best.label || '(no example)';
+    const statsStr = [
+      fmtPct(best.reply_rate) + ' reply rate',
+      fmtNum(best.sends) + ' sends'
+    ].join(' · ');
+    return '<div class="wt-msg-row">' +
+      '<div class="wt-msg-pos">' + pos.position + '</div>' +
+      '<div class="wt-msg-bubble">' +
+        '<div class="wt-msg-bubble-text">' + esc(text) + '</div>' +
+        '<div class="wt-msg-bubble-stats">' + statsStr + '</div>' +
+      '</div>' +
+    '</div>';
+  }).filter(Boolean);
+  return rows.length ? '<div class="wt-msg-seq">' + rows.join('') + '</div>' : '<div style="color:var(--muted);font-size:13px;padding:8px 0;">No message sequence data yet.</div>';
 }
 
 function renderPathCard(group, path) {
@@ -2604,10 +2642,26 @@ function renderWtBigPager(page, totalPages) {
     '</div>';
 }
 
-function toggleWtGroup(name) {
-  if (wtState.expandedGroups.has(name)) wtState.expandedGroups.delete(name);
-  else wtState.expandedGroups.add(name);
+async function toggleWtGroup(name) {
+  if (wtState.expandedGroups.has(name)) {
+    wtState.expandedGroups.delete(name);
+    renderWtCards();
+    return;
+  }
+  wtState.expandedGroups.add(name);
   renderWtCards();
+  if (!wtState.workflowMsgCache.has(name)) {
+    const group = wtState.grouped.find(g => g.name === name);
+    if (group && group.primaryClusterId) {
+      const windowDays = parseInt(document.getElementById('wt-window')?.value, 10) || 7;
+      const params = new URLSearchParams({ days: getDays(), window_days: windowDays });
+      const data = await api('/api/wordtracks/workflow/' + group.primaryClusterId + '?' + params);
+      if (data && Array.isArray(data.positions)) {
+        wtState.workflowMsgCache.set(name, data.positions);
+        renderWtCards();
+      }
+    }
+  }
 }
 
 async function toggleWtPath(name, path) {
@@ -4986,10 +5040,13 @@ async function renderSubaccounts() {
     el.innerHTML += '<div class="sub-cfg-row">' +
       '<div class="sub-cfg-header"><div><div class="sub-cfg-name">' + esc(a.name) + '</div><div class="sub-cfg-id mono">' + esc(a.ghl_location_id || '') + '</div></div>' +
       '<div style="display:flex;gap:6px;align-items:center;"><span class="pill ' + (a.status === 'active' ? 'g' : 'a') + '">' + (a.status || 'active') + '</span>' +
+      '<button class="btn-sm" onclick="saveAdvancedMarketCalendar(' + a.id + ', this)">Save</button>' +
       '<button class="btn-sm dan" onclick="deleteSubaccount(' + a.id + ')">Delete</button></div></div>' +
       '<div class="sub-cfg-fields">' +
         '<div class="form-group"><label class="form-label" style="font-size:9px;">GHL Location ID</label><input class="api-key-input" value="' + esc(a.ghl_location_id || '') + '" disabled></div>' +
         '<div class="form-group"><label class="form-label" style="font-size:9px;">API Key Preview</label><input class="api-key-input" value="' + esc(a.ghl_api_key_preview || '****') + '" disabled></div>' +
+        '<div class="form-group"><label class="form-label" style="font-size:9px;">Advanced Market Calendar ID</label>' +
+          '<input class="api-key-input adv-cal-input" data-id="' + a.id + '" value="' + esc(a.advanced_market_calendar_id || '') + '" placeholder="GHL calendar ID for advanced market bookings" style="font-family:monospace;"></div>' +
       '</div></div>';
   });
 }
@@ -5029,6 +5086,22 @@ async function deleteSubaccount(id) {
     loadSubaccounts();
   } else {
     toast('Failed to delete subaccount.');
+  }
+}
+
+async function saveAdvancedMarketCalendar(id, btn) {
+  const input = document.querySelector('.adv-cal-input[data-id="' + id + '"]');
+  if (!input) return;
+  const val = input.value.trim() || null;
+  const res = await api('/api/subaccounts/' + id, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ advanced_market_calendar_id: val })
+  });
+  if (res) {
+    toast('Advanced market calendar saved.');
+  } else {
+    toast('Save failed.');
   }
 }
 

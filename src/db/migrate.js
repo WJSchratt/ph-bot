@@ -572,6 +572,16 @@ async function applyMigrations() {
     `);
     console.log('[migrate] idx_messages_contact_dir_created ensured');
 
+    // Advanced market calendar ID — per-subaccount calendar to route advanced market bookings.
+    await pool.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='subaccounts' AND column_name='advanced_market_calendar_id') THEN
+          ALTER TABLE subaccounts ADD COLUMN advanced_market_calendar_id TEXT;
+        END IF;
+      END $$;
+    `);
+    console.log('[migrate] subaccounts.advanced_market_calendar_id ensured');
+
     // Delivery status from GHL (delivered, sent, failed, undelivered, pending, read).
     // Populated when the analyzer pulls messages — GHL includes this on each message
     // object. Lets analytics filter out failed/undelivered messages from effective

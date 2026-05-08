@@ -25,6 +25,7 @@ function extractJson(text) {
 // else, collapse to one bubble.
 const KEEP_TWO_BUBBLES_WHEN_OUTCOME = new Set([
   'appointment_booked',
+  'advanced_market_booked',
   'fex_immediate',
   'mp_immediate'
 ]);

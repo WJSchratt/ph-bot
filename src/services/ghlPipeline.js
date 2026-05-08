@@ -276,15 +276,16 @@ async function resolveLocationPipelineConfig(locationId, ghlToken, vertical) {
 
 // Map internal terminal_outcome values the bot produces → feature outcome labels.
 const TERMINAL_TO_ROUTE_OUTCOME = {
-  appointment_booked: 'booked',
-  human_handoff:      'requested_human',
-  fex_immediate:      'requested_human',
-  mp_immediate:       'requested_human',
-  dnc:                'dnc',
-  opted_out:          'opted_out',
-  opt_out:            'opted_out',
-  stop_requested:     'opted_out',
-  disqualified:       'disqualified'
+  appointment_booked:        'booked',
+  advanced_market_booked:    'booked',
+  human_handoff:             'requested_human',
+  fex_immediate:             'requested_human',
+  mp_immediate:              'requested_human',
+  dnc:                       'dnc',
+  opted_out:                 'opted_out',
+  opt_out:                   'opted_out',
+  stop_requested:            'opted_out',
+  disqualified:              'disqualified'
 };
 
 function v2Headers(token) {

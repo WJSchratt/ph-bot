@@ -6,7 +6,7 @@ const router = express.Router();
 router.get('/subaccounts', async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT id, name, ghl_location_id, status, created_at, updated_at,
+      `SELECT id, name, ghl_location_id, status, advanced_market_calendar_id, created_at, updated_at,
               CASE WHEN ghl_api_key IS NOT NULL AND ghl_api_key != ''
                    THEN LEFT(ghl_api_key, 8) || '...'
                    ELSE NULL END AS ghl_api_key_preview
@@ -23,7 +23,7 @@ router.get('/subaccounts', async (req, res) => {
 router.get('/subaccounts/:id', async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT id, name, ghl_location_id, status, created_at, updated_at,
+      `SELECT id, name, ghl_location_id, status, advanced_market_calendar_id, created_at, updated_at,
               CASE WHEN ghl_api_key IS NOT NULL AND ghl_api_key != ''
                    THEN LEFT(ghl_api_key, 8) || '...'
                    ELSE NULL END AS ghl_api_key_preview
@@ -62,17 +62,21 @@ router.post('/subaccounts', async (req, res) => {
 // Update subaccount
 router.put('/subaccounts/:id', async (req, res) => {
   try {
-    const { name, ghl_location_id, ghl_api_key, status } = req.body;
+    const { name, ghl_location_id, ghl_api_key, status, advanced_market_calendar_id } = req.body;
+    const amCalId = 'advanced_market_calendar_id' in req.body
+      ? (advanced_market_calendar_id || null)
+      : undefined;
     const result = await db.query(
       `UPDATE subaccounts SET
          name = COALESCE($1, name),
          ghl_location_id = COALESCE($2, ghl_location_id),
          ghl_api_key = COALESCE($3, ghl_api_key),
          status = COALESCE($4, status),
+         advanced_market_calendar_id = CASE WHEN $5::boolean THEN $6::text ELSE advanced_market_calendar_id END,
          updated_at = NOW()
-       WHERE id = $5
-       RETURNING id, name, ghl_location_id, status, updated_at`,
-      [name || null, ghl_location_id || null, ghl_api_key || null, status || null, req.params.id]
+       WHERE id = $7
+       RETURNING id, name, ghl_location_id, status, advanced_market_calendar_id, updated_at`,
+      [name || null, ghl_location_id || null, ghl_api_key || null, status || null, amCalId !== undefined, amCalId !== undefined ? amCalId : null, req.params.id]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'not found' });
     res.json({ ok: true, subaccount: result.rows[0] });
