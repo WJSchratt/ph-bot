@@ -284,6 +284,16 @@ setInterval(async () => {
         [new Date().toISOString()]
       );
       logger.log('daily_repull', 'info', null, 'Daily full GHL repull complete', { locations: locationIds.length, totalConvs, errors, etDate });
+
+      // Repull wipes cluster_id on every ghl_messages row (DELETE + INSERT).
+      // Run the full clustering pipeline immediately after so WordTracks reply
+      // rates stay accurate. Fire-and-forget — repull already responded/logged.
+      const wtClusters = require('./services/wordTrackClusters');
+      wtClusters.runFullPipeline().then((result) => {
+        logger.log('daily_repull', 'info', null, 'Post-repull recluster complete', result);
+      }).catch((err) => {
+        logger.log('daily_repull', 'error', null, 'Post-repull recluster failed', { error: err.message });
+      });
     } finally {
       dailyRepullRunning = false;
     }
