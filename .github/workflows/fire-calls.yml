@@ -1,0 +1,20 @@
+name: EP Fire Calls
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 10 PM CT (03:00 UTC) nightly
+  workflow_dispatch:        # manual trigger for testing
+
+jobs:
+  fire:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install psycopg2-binary requests
+
+      - run: python cron/fire_calls.py
