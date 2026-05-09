@@ -153,9 +153,6 @@ app.use('/', (req, res, next) => {
 // JARVIS — Walt's private AI assistant interface
 app.use('/', jarvisRouter);
 
-// JARVIS — Walt's private AI assistant interface
-app.use('/', jarvisRouter);
-
 // Static dashboard served last; login page is also static.
 app.use('/', express.static(path.join(__dirname, '..', 'public')));
 
