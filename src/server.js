@@ -150,7 +150,7 @@ app.use('/', (req, res, next) => {
   next();
 }, epReviewRouter);
 
-// JARVIS — Walt's private AI assistant interface
+// JARVIS ï¿½ Walt's private AI assistant interface
 app.use('/', jarvisRouter);
 
 // Static dashboard served last; login page is also static.
