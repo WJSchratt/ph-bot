@@ -1,0 +1,16 @@
+{
+  "name": "ph-bot-pc-bridge",
+  "version": "1.0.0",
+  "description": "Local HTTP bridge that runs Claude Code on this PC for the Railway-hosted /jarvis proxy. Uses your Max plan via the claude CLI subprocess (no API key).",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.1"
+  }
+}

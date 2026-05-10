@@ -89,7 +89,16 @@ router.post('/jarvis/pc/start', jarvisAuth, async (req, res) => {
 
 router.post('/jarvis/pc/chat', jarvisAuth, async (req, res) => {
   try {
-    const result = await proxyToPC('/chat', { method: 'POST', body: req.body, timeout: 60000 });
+    const result = await proxyToPC('/chat', { method: 'POST', body: req.body, timeout: 600000 });
+    res.json(result.data);
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/jarvis/pc/reset', jarvisAuth, async (req, res) => {
+  try {
+    const result = await proxyToPC('/reset', { method: 'POST', timeout: 5000 });
     res.json(result.data);
   } catch(e) {
     res.status(500).json({ ok: false, error: e.message });
