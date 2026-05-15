@@ -32,7 +32,6 @@ const onboardingRouter = require('./routes/onboarding');
 const epReviewRouter = require('./routes/epReview');
 const notificationsRouter = require('./routes/notifications');
 const auditRouter = require('./routes/audit');
-const jarvisRouter = require('./routes/jarvis');
 const conversationStore = require('./services/conversationStore');
 const ghlConv = require('./services/ghlConversations');
 const ghl = require('./services/ghl');
@@ -149,9 +148,6 @@ app.use('/', (req, res, next) => {
   req.session = session;
   next();
 }, epReviewRouter);
-
-// JARVIS � Walt's private AI assistant interface
-app.use('/', jarvisRouter);
 
 // Static dashboard served last; login page is also static.
 app.use('/', express.static(path.join(__dirname, '..', 'public')));
