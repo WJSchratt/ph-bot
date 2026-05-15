@@ -273,7 +273,7 @@ Keep it under 2000 words. Use clear section headers.`;
 
     const resp = await callAnthropic(
       {
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 3000,
         system: 'You are a conversational AI quality analyst. You compare two bot implementations against real conversations and produce actionable findings. Be specific, cite examples, and recommend concrete prompt changes.',
         messages: [{ role: 'user', content: userContent }]
@@ -390,7 +390,7 @@ router.post('/generate-prompt', async (req, res) => {
 
     const resp = await callAnthropic(
       {
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 8000,
         system: `You are a prompt engineer rewriting an SMS bot system prompt. Apply the requested changes precisely while preserving the existing structure, tone rules, and JSON response format. Output ONLY the full revised prompt text with no markdown fences, no commentary, no "here is the updated prompt" preamble.`,
         messages: [
@@ -968,7 +968,7 @@ Produce a focused analysis (<1500 words):
 
     const resp = await callAnthropic(
       {
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 3000,
         system: 'You are a conversational AI quality analyst. Be specific, cite examples, and recommend concrete prompt changes.',
         messages: [{ role: 'user', content: userContent }]
@@ -1011,7 +1011,7 @@ router.post('/generate-prompt-pulled', async (req, res) => {
 
     const resp = await callAnthropic(
       {
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 8000,
         system: `You are a prompt engineer rewriting an SMS bot system prompt. Apply the requested changes precisely while preserving the existing structure, tone rules, and JSON response format. Output ONLY the full revised prompt text with no markdown fences, no commentary, no preamble.`,
         messages: [

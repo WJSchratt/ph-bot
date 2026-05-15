@@ -9,7 +9,7 @@ const router = express.Router();
 const SANDBOX_CONTACT_ID = 'sandbox_user';
 const SANDBOX_LOCATION_ID = 'sandbox_location';
 
-const SIM_MODEL = 'claude-sonnet-4-20250514';
+const SIM_MODEL = 'claude-sonnet-4-6';
 const SIM_MAX_TURNS = 20;
 
 const PERSONAS = {

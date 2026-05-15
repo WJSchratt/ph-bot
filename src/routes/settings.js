@@ -6,7 +6,7 @@ const VALID_SECTIONS = ['claude_config', 'system_prompt', 'knowledge_base', 'bot
 
 const SECTION_DEFAULTS = {
   claude_config: {
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: '1024',
     temperature: '1.0'
   },

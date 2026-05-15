@@ -3,7 +3,7 @@ const db = require('../db');
 const { callAnthropic } = require('./anthropic');
 const logger = require('./logger');
 
-const MODEL = 'claude-sonnet-4-20250514';
+const MODEL = 'claude-sonnet-4-6';
 const LABEL_BATCH_SIZE = 20;            // workflows or word-track clusters labeled per Claude call
 const LABEL_SAMPLES_PER_CLUSTER = 3;    // example variants sent per cluster
 const MIN_WORKFLOW_SIZE = 2;            // openers bucket >= N to form a workflow

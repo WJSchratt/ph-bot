@@ -566,7 +566,7 @@ async function runSimConversation(profile) {
     if (!msgs.length) msgs.push({ role: 'user', content: '(the agent has not replied yet — send your first short message as the lead)' });
     const leadResp = await callAnthropic(
       {
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 300,
         system: personaSystem,
         messages: msgs
@@ -594,7 +594,7 @@ async function runSimConversation(profile) {
   const transcript = thread.map((m, i) => `${i + 1}. ${m.role === 'bot' ? 'BOT' : 'LEAD'}: ${m.text}`).join('\n');
   const scoreResp = await callAnthropic(
     {
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 400,
       system: `You are grading a SMS qualification bot conversation. Respond ONLY with JSON: { "score": 0-100, "grade": "Good|OK|Wrong", "reason": "one sentence" }. Good ≥80, OK 50-79, Wrong <50.`,
       messages: [{ role: 'user', content: `Persona: ${profile.persona}\nOutcome: ${terminal || 'incomplete'}\n\nTranscript:\n${transcript}` }]
@@ -1159,7 +1159,7 @@ router.post('/qc/apply-pending', async (req, res) => {
 
     const resp = await callAnthropic(
       {
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 10000,
         system,
         messages: [{ role: 'user', content: userContent }]
@@ -1627,7 +1627,7 @@ Always return valid JSON.`;
 
     const resp = await callAnthropic(
       {
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1500,
         system: systemPrompt,
         messages
@@ -1879,7 +1879,7 @@ Respond ONLY with a JSON object — no markdown, no backticks:
       : question;
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       system: systemPrompt,
       messages: [{ role: 'user', content: userContent }]

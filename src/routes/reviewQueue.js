@@ -197,7 +197,7 @@ router.post('/review-queue/:id/generate-alternatives', async (req, res) => {
     const system = `You are improving a problematic SMS bot message. The current message triggered a negative or drop-off reply. Produce 3 alternative replacements that might have worked better — short, lowercase, conversational (match the bot's tone). Output ONLY valid JSON: { "alternatives": [{"text": "...", "reason": "why this is better"}, ...] }`;
     const resp = await callAnthropic(
       {
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1200,
         system,
         messages: [{ role: 'user', content: `Prior context:\n${context || '(none)'}\n\nCurrent (problematic) bot message:\n"${item.current_text}"\n\nWhy it was flagged: ${item.ai_reason || 'unknown'}\n\nMessage type: ${item.message_type || 'general'}` }]

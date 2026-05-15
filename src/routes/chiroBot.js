@@ -239,7 +239,7 @@ Always return valid JSON.`;
     ];
 
     const resp = await callAnthropic(
-      { model: 'claude-sonnet-4-20250514', max_tokens: 1500, system: systemPrompt, messages },
+      { model: 'claude-sonnet-4-6', max_tokens: 1500, system: systemPrompt, messages },
       { category: 'chiro_console', location_id: null, meta: { history_len: history.length } }
     );
 
@@ -293,7 +293,7 @@ router.post('/chiro/console/apply', async (req, res) => {
 
     const resp = await callAnthropic(
       {
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 8000,
         system: `You are a prompt engineer merging corrections into an SMS chiropractic scheduling bot system prompt. Apply every change precisely. Preserve structure, tone rules, and JSON response format. Output ONLY the full revised prompt text — no fences, no preamble.`,
         messages: [{

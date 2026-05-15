@@ -2,7 +2,7 @@ const { buildSystemPrompt } = require('../prompts');
 const logger = require('./logger');
 const { callAnthropic } = require('./anthropic');
 
-const MODEL = 'claude-sonnet-4-20250514';
+const MODEL = 'claude-sonnet-4-6';
 
 function extractJson(text) {
   if (!text) return null;

@@ -10,7 +10,7 @@ const standardPrompt = require('../prompts/standard');
 const { callAnthropic } = require('../services/anthropic');
 
 const router = express.Router();
-const MODEL = 'claude-sonnet-4-20250514';
+const MODEL = 'claude-sonnet-4-6';
 
 // --- SQL + HTTP tool execution for Dev Console chat ----------------------
 
